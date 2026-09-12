@@ -51,7 +51,8 @@ is not.
 
 Before editing:
 
-1. Read `CLAUDE.md`, this file, the task's references, and all affected files.
+1. Read `CLAUDE.md`, `docs/product/PROJECT_GOALS.md`, this file, the task's
+   references, and all affected files.
 2. Restate the task outcome, dependencies, inputs, outputs, and acceptance checks.
 3. Verify every dependency checkbox and phase entry gate. If one is unmet, stop
    and report the exact missing artifact.
@@ -158,7 +159,7 @@ engines may later consume its validated outputs, but cannot replace it.
 **Purpose:** make architectural and safety choices reviewable before code creates
 compatibility commitments.
 
-**Entry:** repository rules and product boundary are accepted.
+**Entry:** repository rules and the current project-goal baseline are accepted.
 
 **Exit gate:** ADRs are approved; clean install and CI gates pass; the threat model
 contains no unowned critical risk; no chain connection is needed to run unit tests.
