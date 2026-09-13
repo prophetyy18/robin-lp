@@ -1,0 +1,21 @@
+# Intentionally invalid: target_token is not in the active pool.
+
+[[chains]]
+chain_id = 46630
+rpc_url_env = "ROBINHOOD_CHAIN_RPC_URL"
+pool_manager_address = "0x0000000000000000000000000000000000000001"
+state_view_address = "0x0000000000000000000000000000000000000002"
+
+[target_token]
+chain_id = 46630
+contract_address = "0x0000000000000000000000000000000000000999"
+user_approved = true
+
+[[pools]]
+chain_id = 46630
+
+[pools.pool_key]
+currency0 = "0x0000000000000000000000000000000000000100"
+currency1 = "0x0000000000000000000000000000000000000200"
+fee = 3000
+tick_spacing = 60

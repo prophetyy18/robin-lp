@@ -1,0 +1,98 @@
+# GitHub Actions — supply-chain gates (T003).
+#
+# Three checks run on every push and PR, plus a weekly schedule:
+#
+#   1. gitleaks — secrets in the diff and working tree
+#   2. trivy    — filesystem vulnerabilities (filesystem mode)
+#   3. OSV      — third-party Python dependencies against the OSV database
+#
+# All actions are pinned to a full commit SHA. Bumping requires a review.
+
+name: Supply chain
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly Monday 06:00 UTC — picks up newly published advisories.
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # Gitleaks needs full history to scan properly.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e  # v3.0.0
+        env:
+          # Gitleaks uploads findings as artifacts; we do not want them
+          # to leak into PR comments or external webhooks.
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  filesystem-vulns:
+    name: Filesystem vulnerabilities (trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8  # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+          output: trivy-fs.sarif
+        # Note: trivy is pinned by tag-resolved SHA per ADR-007.
+
+  python-deps:
+    name: Python dependency audit (OSV)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Miniconda
+        uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5  # v4.0.1
+        with:
+          auto-update-conda: false
+          activate-environment: robinhood-lp
+
+      - name: Provision environment
+        shell: bash -l {0}
+        run: |
+          conda env create -n robinhood-lp -f environment.yml
+          conda run -n robinhood-lp pip install -e ".[dev]"
+          conda run -n robinhood-lp pip freeze > requirements-installed.txt
+
+      - name: OSV scan
+        uses: google/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67  # v2.5.1
+        with:
+          scan-args: |-
+            --lockfile=requirements-installed.txt
+            --format=sarif
+            --output=osv.sarif

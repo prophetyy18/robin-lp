@@ -1,0 +1,13 @@
+# Intentionally invalid: V1 forbids more than one ChainConfig entry.
+
+[[chains]]
+chain_id = 46630
+rpc_url_env = "ROBINHOOD_CHAIN_RPC_URL"
+pool_manager_address = "0x0000000000000000000000000000000000000001"
+state_view_address = "0x0000000000000000000000000000000000000002"
+
+[[chains]]
+chain_id = 1
+rpc_url_env = "ETH_MAINNET_RPC_URL"
+pool_manager_address = "0x0000000000000000000000000000000000000003"
+state_view_address = "0x0000000000000000000000000000000000000004"

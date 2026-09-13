@@ -1,0 +1,25 @@
+# Intentionally invalid: V1 forbids more than one PoolConfig entry.
+
+[[chains]]
+chain_id = 46630
+rpc_url_env = "ROBINHOOD_CHAIN_RPC_URL"
+pool_manager_address = "0x0000000000000000000000000000000000000001"
+state_view_address = "0x0000000000000000000000000000000000000002"
+
+[[pools]]
+chain_id = 46630
+
+[pools.pool_key]
+currency0 = "0x0000000000000000000000000000000000000100"
+currency1 = "0x0000000000000000000000000000000000000200"
+fee = 3000
+tick_spacing = 60
+
+[[pools]]
+chain_id = 46630
+
+[pools.pool_key]
+currency0 = "0x0000000000000000000000000000000000000300"
+currency1 = "0x0000000000000000000000000000000000000400"
+fee = 500
+tick_spacing = 10

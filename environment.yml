@@ -1,0 +1,21 @@
+# Conda environment used by both local development and CI.
+#
+# CI uses this file to provision the environment via setup-miniconda; local
+# developers create it once with:
+#
+#   conda env create -n robinhood-lp -f environment.yml
+#   conda run -n robinhood-lp pip install -e ".[dev]"
+#
+# Pin versions to match CI behavior. Bumping a dependency here is a deliberate
+# decision and must be reviewed alongside its ADR update.
+
+name: robinhood-lp
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.12
+  - pip
+  # No conda packages are required beyond Python+pip; all Python deps come
+  # from pyproject.toml and are installed via pip into the conda env.

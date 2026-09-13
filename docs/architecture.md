@@ -10,24 +10,36 @@ migration triggers live in the ADR catalogue under `docs/adr/`.
 
 ## 1. Goals and non-goals
 
-Goals (binding):
+V1 scope (binding; see `docs/product/PROJECT_GOALS.md`):
 
-- reproducible research and paper-trading framework for any explicitly
-  configured Uniswap V4 pool on a verified EVM chain;
+- a single Robinhood Chain environment (testnet for safety drills,
+  mainnet for approved real work);
+- a single user-selected target token identified by Robinhood Chain
+  contract address, with explicit user approval recorded;
+- a single active V4 `PoolKey` that pairs the target token.
+
+Goals (binding for the technical framework):
+
+- reproducible research and paper-trading framework for that one V1 pool
+  on Robinhood Chain;
 - byte-equivalent replay, valuation, and backtest results across storage
   chunking, ingestion order, and host platform;
 - hard separation between data, protocol math, features, strategy, risk,
   execution, and presentation concerns;
 - explicit support-level classification per `(chain, PoolKey)` with auditable
-  promotion and demotion;
+  promotion and demotion (the five levels are still defined for forward
+  compatibility, but only Robinhood Chain can be promoted above
+  `rejected` in V1 — see ADR-005);
 - no production signing, broadcast, or deploy path exists in the current
   release.
 
-Non-goals (binding for the current plan):
+Non-goals (binding for V1):
 
+- multi-chain operation or switching to other EVM chains;
+- multi-pool operation or automatic rebalancing across pools;
+- automatic selection or switching of the target token;
 - profitability of any concrete LP strategy;
 - smart-contract deployment or custom hook authoring;
-- multi-pool capital optimization or routing;
 - automated key custody or unattended live trading;
 - dashboards, queues, and distributed workers beyond measured need.
 

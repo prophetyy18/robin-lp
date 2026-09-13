@@ -1,0 +1,24 @@
+# CI suppression registry.
+#
+# Every CI rule that is suppressed MUST appear in this file with the four
+# required fields below. Lint/test/type suppressions that lack an entry here
+# fail the "every suppression has reason, owner, and expiry" check.
+#
+# Format:
+#   [[suppression]]
+#   rule = "<lint rule / test id / dependency advisory id>"
+#   reason = "<one or two sentences>"
+#   owner = "<github handle or role>"
+#   expiry = "<YYYY-MM-DD; review and renew or remove>"
+#   location = "<optional file path or pattern the suppression targets>"
+#
+# Example (do NOT keep; this is purely illustrative):
+#
+#   [[suppression]]
+#   rule = "ruff:E501"
+#   reason = "Long URL in a generated comment; reformatting breaks the link."
+#   owner = "@melodydeck04"
+#   expiry = "2026-12-31"
+#   location = "src/robinhood_lp/rpc/client.py"
+
+suppressions = []

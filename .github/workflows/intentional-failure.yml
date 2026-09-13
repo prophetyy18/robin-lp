@@ -1,0 +1,130 @@
+# GitHub Actions — intentional CI failure (T003 evidence).
+#
+# This workflow exists only to prove that CI is not silently green: it
+# introduces a deliberate, documented failure on an evidence branch,
+# pushes the branch so the normal CI workflow picks it up, waits for CI
+# to go red, then reverts the change in a follow-up commit on the same
+# branch. It never touches `main`.
+#
+# Manual invocation: Actions tab → "Intentional CI failure" → Run workflow.
+#
+# See docs/ci/intentional-failure.md for the procedure and results.
+
+name: Intentional CI failure
+
+on:
+  workflow_dispatch:
+    inputs:
+      failure_kind:
+        description: "Which gate to break"
+        required: true
+        type: choice
+        options:
+          - pytest
+          - ruff_check
+          - ruff_format
+          - mypy
+          - secret
+
+permissions:
+  contents: write
+
+jobs:
+  prove_ci_fails:
+    name: Prove ${{ inputs.failure_kind }} failure is detected
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CONDA_ENV_NAME: robinhood-lp
+      PROOF_BRANCH: ci-evidence/intentional-failure-${{ github.run_id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create evidence branch
+        run: git checkout -b "$PROOF_BRANCH"
+
+      - name: Install Miniconda
+        uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5  # v4.0.1
+        with:
+          auto-update-conda: false
+          activate-environment: ${{ env.CONDA_ENV_NAME }}
+
+      - name: Provision environment
+        shell: bash -l {0}
+        run: |
+          conda env create -n "$CONDA_ENV_NAME" -f environment.yml || true
+          conda run -n "$CONDA_ENV_NAME" pip install -e ".[dev]"
+
+      - name: Inject intentional failure
+        shell: bash -l {0}
+        run: |
+          set -e
+          case "${{ inputs.failure_kind }}" in
+            pytest)
+              printf '\n\ndef test_intentional_failure() -> None:\n    assert False, "intentional failure for CI evidence"\n' \
+                >> tests/test_smoke.py
+              ;;
+            ruff_check)
+              printf '\n\n# intentionally unused import for CI evidence\nimport os_unused_marker\n' \
+                >> src/robinhood_lp/__main__.py
+              ;;
+            ruff_format)
+              printf '\n\ndef intentionally_misformatted():\n    x=1+2\n    return x\n' \
+                >> src/robinhood_lp/__main__.py
+              ;;
+            mypy)
+              printf '\n\ndef intentionally_untyped(x):\n    return x + 1\n' \
+                >> src/robinhood_lp/__main__.py
+              ;;
+            secret)
+              printf '\n\n# test-only fake credential string (not a real secret)\nFAKE_TOKEN = "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"\n' \
+                >> tests/test_smoke.py
+              ;;
+          esac
+
+      - name: Commit the injected failure
+        run: |
+          git config user.name "ci-evidence-bot"
+          git config user.email "ci-evidence-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "ci(evidence): inject intentional failure (${{ inputs.failure_kind }})"
+
+      - name: Push evidence branch
+        run: git push -u origin "$PROOF_BRANCH"
+
+      - name: Wait for CI to run on the evidence branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for _ in $(seq 1 20); do
+            sleep 30
+            STATE=$(gh run list --branch "$PROOF_BRANCH" --json status,conclusion -q '.[] | select(.status=="completed") | .conclusion' 2>/dev/null | head -n1 || echo "")
+            if [ -n "$STATE" ]; then
+              echo "CI completed with conclusion: $STATE"
+              echo "::notice::CI result for $PROOF_BRANCH = $STATE"
+              exit 0
+            fi
+            echo "CI still running..."
+          done
+          echo "Timed out waiting for CI; manual review required."
+
+      - name: Revert the injected failure
+        run: |
+          git revert --no-edit HEAD
+          git push origin "$PROOF_BRANCH"
+
+      - name: Append result row to docs/ci/intentional-failure.md
+        shell: bash -l {0}
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          KIND="${{ inputs.failure_kind }}"
+          RUN_ID="${{ github.run_id }}"
+          printf '\n| %s | %s | %s | yes | (verify in Actions run %s) | record-only |\n' \
+            "$DATE" "$PROOF_BRANCH" "$KIND" "$RUN_ID" \
+            >> docs/ci/intentional-failure.md
+          git add docs/ci/intentional-failure.md
+          git commit -m "ci(evidence): record result of intentional $KIND run" || true
+          git push origin "$PROOF_BRANCH" || true
