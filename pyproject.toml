@@ -20,18 +20,22 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Topic :: Office/Business :: Financial :: Investment",
 ]
-# Runtime dependencies are intentionally minimal at T010. They are added by
-# later tasks (web3.py in T020, pyarrow in T031, ...).
+# Runtime dependencies are intentionally minimal at T020. They are added by
+# later tasks (pyarrow in T031, ...).
 dependencies = [
   "pydantic>=2.8,<3",
   # keccak256 for canonical PoolId derivation. The pycryptodome backend
   # is small, pure-Python-importable, and matches the Ethereum spec.
   "eth-hash[pycryptodome]>=0.7",
+  # Async HTTP client for the default JSON-RPC transport. Optional at
+  # import time; tests inject a fake transport.
+  "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
+  "pytest-asyncio>=0.23",
   "pytest-cov>=5.0",
   "ruff>=0.6",
   "mypy>=1.10",
@@ -63,6 +67,7 @@ addopts = [
   "--tb=short",
 ]
 xfail_strict = true
+asyncio_mode = "auto"
 filterwarnings = [
   "error",
   # Allow the standard warning that some valid Python syntax triggers on
