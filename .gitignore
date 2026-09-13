@@ -37,4 +37,7 @@ tools/oracle/cache/
 tools/oracle/out/
 tools/oracle/broadcast/
 tools/oracle/script/
-tools/oracle/lib/   # forge install output; not part of the project
+# forge install output; not part of the project. Pattern must
+# match the directory *and* its contents.
+tools/oracle/lib
+tools/oracle/lib/
