@@ -120,8 +120,11 @@ def test_get_sqrt_price_at_tick_is_strictly_monotonic() -> None:
     """Larger ticks must yield larger sqrt prices (positive relationship)."""
     ticks = [-200_000, -100_000, -100, -1, 0, 1, 100, 100_000, 200_000]
     prices = [get_sqrt_price_at_tick(t) for t in ticks]
-    for a, b in zip(prices, prices[1:]):
-        assert a < b, f"monotonicity violated at boundary {a} >= {b}"
+    for i in range(len(prices) - 1):
+        assert prices[i] < prices[i + 1], (
+            f"monotonicity violated at "
+            f"tick {ticks[i]} ({prices[i]}) -> tick {ticks[i + 1]} ({prices[i + 1]})"
+        )
 
 
 def test_get_tick_at_sqrt_price_is_consistent_with_get_sqrt_price_at_tick() -> None:

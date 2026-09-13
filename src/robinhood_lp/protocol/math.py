@@ -188,10 +188,7 @@ def get_sqrt_price_at_tick(tick: int) -> int:
     # which simplifies to:
     #   bit 0 == 0: price = (1<<128) XOR ((1<<128) XOR c[0]) * 0 = (1<<128) XOR 0 = 1<<128
     #   bit 0 == 1: price = (1<<128) XOR ((1<<128) XOR c[0]) * 1 = (1<<128) XOR (1<<128) XOR c[0] = c[0]
-    if abs_tick & 0x1 == 0:
-        price = _Q128
-    else:
-        price = _TICK_CONSTANTS[0]
+    price = _Q128 if (abs_tick & 0x1 == 0) else _TICK_CONSTANTS[0]
 
     # Apply each subsequent bit (1..19) by multiplying with the next
     # constant and shifting right by 128 bits. The result is Q128.128
@@ -246,10 +243,7 @@ def get_tick_at_sqrt_price(sqrt_price_x96: int) -> int:
     r = price
     msb = _most_significant_bit(r)
 
-    if msb >= 128:
-        r = price >> (msb - 127)
-    else:
-        r = price << (127 - msb)
+    r = (price >> (msb - 127)) if msb >= 128 else (price << (127 - msb))
 
     log_2 = (msb - 128) << 64  # signed int256
 
