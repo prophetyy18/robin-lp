@@ -109,11 +109,39 @@ Flag bits (each `1 << N`):
 3. If `hooks != address(0)`: `(uint160(hooks) & ALL_HOOK_MASK) != 0` **or**
    the fee is dynamic.
 
+## PoolId
+
+Source: `src/types/PoolId.sol`
+
+```solidity
+function toId(PoolKey memory poolKey) internal pure returns (PoolId poolId) {
+    assembly ("memory-safe") {
+        // 0xa0 represents the total size of the poolKey struct (5 slots of 32 bytes)
+        poolId := keccak256(poolKey, 0xa0)
+    }
+}
+```
+
+`PoolId` is a 32-byte value (a `bytes32`). The Python implementation
+hashes the ABI-encoded `PoolKey` with keccak256.
+
+`0xa0` (160 bytes) is the size of the ABI-encoded `PoolKey` struct:
+5 fields × 32 bytes per slot. The order of fields is the order
+declared in `PoolKey.sol`: `(Currency, Currency, uint24, int24, IHooks)`.
+
+ABI encoding rules used by the Python port:
+
+- each field is padded/extended to exactly 32 bytes;
+- `Currency` (an `address`) is encoded as `uint256(uint160(address))`
+  → zero-padded 32 bytes;
+- `uint24 fee` is encoded as `uint256` → zero-padded 32 bytes;
+- `int24 tickSpacing` is encoded as `int256` → sign-extended 32 bytes;
+- `address hooks` is encoded as `uint256(uint160(address))` →
+  zero-padded 32 bytes (the zero address is the canonical "no hooks").
+
 ## Open items
 
-- The Python port of `PoolIdLibrary` (keccak256 over the ABI-encoded
-  `PoolKey`) is owned by T010; this file only records the structural facts.
-- Whether `currency0 < currency1` is compared as signed or unsigned: Solidity
-  `address` is a `uint160`; comparison is unsigned. Framework uses
-  `int.from_bytes(addr, "big")` and Python's natural unsigned integer
-  ordering.
+- Whether `currency0 < currency1` is compared as signed or unsigned:
+  Solidity `address` is a `uint160`; comparison is unsigned. Framework
+  uses `int.from_bytes(addr, "big")` and Python's natural unsigned
+  integer ordering.

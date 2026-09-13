@@ -31,3 +31,10 @@ requirements-installed.txt
 .idea/
 .vscode/
 .DS_Store
+
+# Foundry build artifacts (tools/oracle/)
+tools/oracle/cache/
+tools/oracle/out/
+tools/oracle/broadcast/
+tools/oracle/script/
+tools/oracle/lib/   # forge install output; not part of the project

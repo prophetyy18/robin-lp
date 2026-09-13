@@ -20,10 +20,13 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Topic :: Office/Business :: Financial :: Investment",
 ]
-# Runtime dependencies are intentionally minimal at T002. They are added by
+# Runtime dependencies are intentionally minimal at T010. They are added by
 # later tasks (web3.py in T020, pyarrow in T031, ...).
 dependencies = [
   "pydantic>=2.8,<3",
+  # keccak256 for canonical PoolId derivation. The pycryptodome backend
+  # is small, pure-Python-importable, and matches the Ethereum spec.
+  "eth-hash[pycryptodome]>=0.7",
 ]
 
 [project.optional-dependencies]
@@ -90,6 +93,9 @@ fail_under = 0  # Phase 0: trivial surface, no minimum yet (raised in T010+)
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
+# tools/oracle/ holds Foundry/Solidity artifacts; ruff scans
+# Python files only and ignores them via standard exclude.
+extend-exclude = ["tools"]
 
 [tool.ruff.lint]
 # Keep the rule set explicit and narrow during Phase 0. Broaden in later tasks.
@@ -125,3 +131,4 @@ warn_unused_ignores = true
 disallow_any_explicit = false  # third-party libs often need Any at first contact
 no_implicit_optional = true
 check_untyped_defs = true
+exclude = ["tools/"]

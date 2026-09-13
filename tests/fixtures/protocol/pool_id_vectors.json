@@ -1,0 +1,83 @@
+{
+  "_meta": {
+    "description": "Pinned V4 PoolId vectors for T010 conformance testing",
+    "oracle": "Foundry + Solidity 0.8.26 against Uniswap/v4-core main @ a known commit",
+    "oracle_code": "v4-core PoolId.sol::toId via the in-tree PoolIdOracle.sol (PoolIdOracleTest::test_V1_pinned_vectors)",
+    "v4_core_source": "https://github.com/Uniswap/v4-core",
+    "v4_core_path": "lib/v4-core/src/types/PoolId.sol",
+    "python_recomputed": "the Python implementation under src/robinhood_lp/protocol/ must produce identical poolId values for every entry below",
+    "encoding_rule": "5 fields x 32 bytes per slot = 160 bytes (0xa0); (Currency, Currency, uint24, int24, IHooks); zero-pad uint24/uint160, sign-extend int24"
+  },
+  "vectors": [
+    {
+      "name": "v1_static_3000_60",
+      "description": "V1 baseline: no hooks, 0.3% fee, 60 tick spacing",
+      "currency0": "0x0000000000000000000000000000000000000010",
+      "currency1": "0x0000000000000000000000000000000000000020",
+      "fee": 3000,
+      "tick_spacing": 60,
+      "hooks": "0x0000000000000000000000000000000000000000",
+      "expected_pool_id": "0xb7a0fb68b2b106d2ad386d2221acbdb3b027b737f097dfbb8a854fa3cc08fcf2"
+    },
+    {
+      "name": "native_currency0",
+      "description": "Native currency as currency0 (zero address)",
+      "currency0": "0x0000000000000000000000000000000000000000",
+      "currency1": "0x0000000000000000000000000000000000000020",
+      "fee": 3000,
+      "tick_spacing": 60,
+      "hooks": "0x0000000000000000000000000000000000000000",
+      "expected_pool_id": "0x21dec34a52fd2d64a7d928ba95356ca76d34c29d702ff8c64410fb8d366f2419"
+    },
+    {
+      "name": "dynamic_fee_with_hook",
+      "description": "Dynamic-fee sentinel (0x800000) with a non-zero hook address (BEFORE_SWAP flag)",
+      "currency0": "0x0000000000000000000000000000000000000010",
+      "currency1": "0x0000000000000000000000000000000000000020",
+      "fee": 8388608,
+      "tick_spacing": 60,
+      "hooks": "0x0000000000000000000000000000000000000080",
+      "expected_pool_id": "0xbca6260516a4bd58c1d7b457c48e29bbab01df1a4248964dfb746a9016634a16"
+    },
+    {
+      "name": "max_static_fee",
+      "description": "Maximum valid static fee (100%)",
+      "currency0": "0x0000000000000000000000000000000000000010",
+      "currency1": "0x0000000000000000000000000000000000000020",
+      "fee": 1000000,
+      "tick_spacing": 60,
+      "hooks": "0x0000000000000000000000000000000000000000",
+      "expected_pool_id": "0xcb3385fa3e3fddb4f68b3d77642d966f6b2715ae3206b64fd672ad916877d95c"
+    },
+    {
+      "name": "max_tick_spacing",
+      "description": "Maximum valid tick spacing (int16.max)",
+      "currency0": "0x0000000000000000000000000000000000000010",
+      "currency1": "0x0000000000000000000000000000000000000020",
+      "fee": 3000,
+      "tick_spacing": 32767,
+      "hooks": "0x0000000000000000000000000000000000000000",
+      "expected_pool_id": "0x5500ace4cb217d32fbbc808edfa706e05f9fad2e82bd8af1f600ad1c9969dbd0"
+    },
+    {
+      "name": "hook_with_delta_action",
+      "description": "Hook address with both BEFORE_SWAP and BEFORE_SWAP_RETURNS_DELTA flags",
+      "currency0": "0x0000000000000000000000000000000000000010",
+      "currency1": "0x0000000000000000000000000000000000000020",
+      "fee": 3000,
+      "tick_spacing": 60,
+      "hooks": "0x0000000000000000000000000000000000000088",
+      "expected_pool_id": "0xe62e72cae5544e5f10f25a8ee89c16498647c09dc2a97bdbe07baa5bfd271955"
+    },
+    {
+      "name": "reordered_inputs",
+      "description": "Inputs supplied in reverse order; oracle must sort and produce same PoolId as v1_static_3000_60",
+      "currency0": "0x0000000000000000000000000000000000000020",
+      "currency1": "0x0000000000000000000000000000000000000010",
+      "fee": 3000,
+      "tick_spacing": 60,
+      "hooks": "0x0000000000000000000000000000000000000000",
+      "expected_pool_id": "0xb7a0fb68b2b106d2ad386d2221acbdb3b027b737f097dfbb8a854fa3cc08fcf2"
+    }
+  ]
+}
