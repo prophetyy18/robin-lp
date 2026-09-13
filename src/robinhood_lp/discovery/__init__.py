@@ -1,8 +1,8 @@
-"""Discovery layer (T022-T024).
+"""Discovery layer (T022-T024, plus T023 eligibility classifier).
 
 Re-exports the chain-capability probe, the Initialize event decoder,
 the defensive token-metadata reader, the idempotent pool registry,
-and the Initialize scanner.
+the Initialize scanner, and the pool/hook eligibility classifier.
 
 This layer sits in the storage layer per ADR-006 and depends on
 ``robinhood_lp.protocol`` and ``robinhood_lp.rpc``. It must not
@@ -19,6 +19,15 @@ from robinhood_lp.discovery.chain_capability import (
     ExpectedDeployment,
     PerEndpointCapability,
     probe_chain_capability,
+)
+from robinhood_lp.discovery.eligibility import (
+    DELTA_FLAG_BITS,
+    EligibilityDecision,
+    EligibilityReason,
+    EligibilityReasonCode,
+    HookEvidence,
+    analyze_hook,
+    classify_pool,
 )
 from robinhood_lp.discovery.initialize_log import (
     INITIALIZE_TOPIC0,
@@ -43,10 +52,14 @@ __all__ = [
     "ChainCapabilityError",
     "ChainCapabilityReport",
     "ChainIdMismatchError",
+    "DELTA_FLAG_BITS",
     "DecodedInitialize",
     "EXPECTED_DEPLOYMENT_PLACEHOLDER",
-    "EXPECTED_DEPLOYMENT_PLACEHOLDER",  # see note below
+    "EligibilityDecision",
+    "EligibilityReason",
+    "EligibilityReasonCode",
     "ExpectedDeployment",
+    "HookEvidence",
     "INITIALIZE_TOPIC0",
     "InitializeDecodeError",
     "InitializeScanner",
@@ -56,14 +69,16 @@ __all__ = [
     "RegistryConflictError",
     "ScannerStats",
     "TokenMetadataRecord",
+    "analyze_hook",
+    "classify_pool",
     "decode_initialize_log",
     "probe_chain_capability",
     "read_token_metadata",
 ]
 
 
-#: Convenience re-export of the well-known Robinhood Chain mainnet
+#: Convenience alias for the well-known Robinhood Chain mainnet
 #: V4 deployment fields. The bytecode hashes are intentionally
 #: ``None`` here; the T024 capability probe must populate them from a
 #: real endpoint before T022 will accept the deployment as verified.
-EXPECTED_DEPLOYMENT_PLACEHOLDER = ExpectedDeployment  # alias for clarity
+EXPECTED_DEPLOYMENT_PLACEHOLDER = ExpectedDeployment

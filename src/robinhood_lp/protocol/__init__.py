@@ -54,6 +54,7 @@ from robinhood_lp.protocol.math import (
     price_to_sqrt_price_x96,
     sqrt_price_x96_to_price,
 )
+from robinhood_lp.protocol.run_mode import RunMode
 
 __all__ = [
     "Address",
@@ -75,6 +76,7 @@ __all__ = [
     "MIN_TICK_SPACING",
     "PoolId",
     "PoolKey",
+    "RunMode",
     "TickMathError",
     "TokenMetadata",
     "TransactionRef",

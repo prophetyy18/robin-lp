@@ -91,14 +91,12 @@ def _address_to_int(value: str, *, field: str) -> int:
     return int(canonical, 16)
 
 
-class RunMode(StrEnum):
-    """Support-level classification (ADR-005 / TODO.md §3)."""
+# ``RunMode`` lives in ``robinhood_lp.protocol`` so the protocol/domain
+# layer can use it without depending on the config layer. Re-export
+# here so existing config-model imports keep working.
+from robinhood_lp.protocol.run_mode import RunMode  # noqa: E402
 
-    REJECTED = "rejected"
-    INGESTION = "ingestion"
-    BACKTEST = "backtest"
-    PAPER = "paper"
-    LIVE = "live"
+__all__ = ["RunMode"]  # explicit re-export
 
 
 class _StrictModel(BaseModel):
@@ -315,7 +313,7 @@ class TargetTokenConfig(_StrictModel):
     Carries the three-track approval state from
     ``docs/product/ASSET_ADMISSION.md`` §4: technical eligibility, project
     risk, and user decision. The framework's risk gateway (T070) refuses
-    live intents whose triple is not on the accepted path AND whose
+    live intents unless the triple is on the accepted path AND the
     ``live_eligible`` flag is True.
     """
 
@@ -535,7 +533,7 @@ class RootConfig(_StrictModel):
         if self.default_run_mode == RunMode.LIVE:
             raise ValueError(
                 "default_run_mode='live' is forbidden; live mode requires "
-                "an explicit, separately authorized project"
+                "an explicit Phase 9 promotion record; it cannot be a default"
             )
         return self
 
