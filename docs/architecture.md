@@ -181,6 +181,7 @@ superseding decisions are new ADRs that explicitly reference the prior one.
 | ADR-005 | Supported-chain lifecycle (support levels) | proposed |
 | ADR-006 | Dependency direction between layers | proposed |
 | ADR-007 | Continuous integration provider | proposed |
+| ADR-008 | Binding document precedence | proposed |
 
 ## 5. Open decisions (not blocking research)
 
