@@ -266,12 +266,57 @@ class ChainConfig(_StrictModel):
         return _validate_address(v, field="contract address")
 
 
+class TechnicalEligibility(StrEnum):
+    """``docs/product/ASSET_ADMISSION.md`` §4.1.
+
+    The framework's ability to correctly handle the token's on-chain
+    behavior. Independent from project risk and user decision.
+    """
+
+    UNKNOWN = "unknown"
+    BLOCKED = "blocked"
+    CONDITIONAL = "conditional"
+    ELIGIBLE = "eligible"
+
+
+class ProjectRisk(StrEnum):
+    """``docs/product/ASSET_ADMISSION.md`` §4.2.
+
+    Honest classification of project-level risk. Carries no auto-veto
+    power; the user may accept any level subject to ADM-TECH-* hard
+    gates.
+    """
+
+    UNKNOWN = "unknown"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    VERY_HIGH = "very_high"
+
+
+class UserDecision(StrEnum):
+    """``docs/product/ASSET_ADMISSION.md`` §4.3.
+
+    The user's recorded stance on the displayed project risk. Lives
+    forever in the audit trail; revocation always permitted.
+    """
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    APPROVED_WITH_LIMITS = "approved_with_limits"
+    REJECTED = "rejected"
+    REVOKED = "revoked"
+
+
 class TargetTokenConfig(_StrictModel):
     """The single target token V1 operates on (ADR-005 / PROJECT_GOALS §4).
 
     Identified by Robinhood Chain contract address; symbol is display only.
-    The user's approval state is recorded here; deeper approval flow
-    belongs to T070 and ``docs/product/ASSET_ADMISSION.md``.
+    Carries the three-track approval state from
+    ``docs/product/ASSET_ADMISSION.md`` §4: technical eligibility, project
+    risk, and user decision. The framework's risk gateway (T070) refuses
+    live intents whose triple is not on the accepted path AND whose
+    ``live_eligible`` flag is True.
     """
 
     chain_id: PositiveInt = Field(
@@ -296,24 +341,72 @@ class TargetTokenConfig(_StrictModel):
         le=255,
         description="Token decimals; populated on first read from chain.",
     )
-    user_approved: bool = Field(
-        default=False,
+
+    # ---- ASSET_ADMISSION §4 dual-track approval --------------------------
+
+    technical_eligibility: TechnicalEligibility = Field(
+        default=TechnicalEligibility.UNKNOWN,
         description=(
-            "True only after the user has explicitly entered and approved the "
-            "contract address. The framework must not run paper/live modes "
-            "until this is True."
+            "Whether the framework can correctly model this token's "
+            "on-chain behavior. BLOCKED is an absolute veto (ADM-TECH-*)."
         ),
     )
-    approval_notes: str = Field(
+    project_risk: ProjectRisk = Field(
+        default=ProjectRisk.UNKNOWN,
+        description=(
+            "Honest classification of project-level risk. Display-only; "
+            "the user (not the framework) decides whether to accept it."
+        ),
+    )
+    user_decision: UserDecision = Field(
+        default=UserDecision.PENDING,
+        description=(
+            "The user's recorded stance. PENDING blocks paper; REJECTED "
+            "and REVOKED block everything; APPROVED and "
+            "APPROVED_WITH_LIMITS permit paper/live subject to other gates."
+        ),
+    )
+    live_eligible: bool = Field(
+        default=False,
+        description=(
+            "True only after the V1 promotion gates (backtest → testnet → "
+            "paper → security review → human promotion; G-LIVE-GATE-01) "
+            "have all been satisfied. The signer process (G-SIGNER-01, "
+            "Phase 9 T090) refuses intents when this is False."
+        ),
+    )
+
+    decision_notes: str = Field(
         default="",
         max_length=512,
-        description="Free-form note recorded with the approval.",
+        description="Free-form note recorded with the approval decision.",
     )
 
     @field_validator("contract_address")
     @classmethod
     def _check_address(cls, v: str) -> str:
         return _validate_address(v, field="contract_address")
+
+    @model_validator(mode="after")
+    def _check_blocked_cannot_be_live_eligible(self) -> TargetTokenConfig:
+        if self.technical_eligibility == TechnicalEligibility.BLOCKED and self.live_eligible:
+            raise ValueError(
+                "technical_eligibility=BLOCKED is an absolute veto; "
+                "live_eligible cannot be True (ADM-TECH-005/007)"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_rejected_or_revoked_blocks_live(self) -> TargetTokenConfig:
+        if (
+            self.user_decision in (UserDecision.REJECTED, UserDecision.REVOKED)
+            and self.live_eligible
+        ):
+            raise ValueError(
+                f"user_decision={self.user_decision.value} blocks live "
+                f"execution; live_eligible must be False"
+            )
+        return self
 
 
 class PoolConfig(_StrictModel):
@@ -456,7 +549,10 @@ __all__ = [
     "MAX_LP_FEE",
     "PoolConfig",
     "PoolKey",
+    "ProjectRisk",
     "RootConfig",
     "RunMode",
     "TargetTokenConfig",
+    "TechnicalEligibility",
+    "UserDecision",
 ]

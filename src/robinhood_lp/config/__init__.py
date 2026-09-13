@@ -11,9 +11,12 @@ from robinhood_lp.config.models import (
     ChainConfig,
     PoolConfig,
     PoolKey,
+    ProjectRisk,
     RootConfig,
     RunMode,
     TargetTokenConfig,
+    TechnicalEligibility,
+    UserDecision,
 )
 
 __all__ = [
@@ -21,8 +24,11 @@ __all__ = [
     "ConfigError",
     "PoolConfig",
     "PoolKey",
+    "ProjectRisk",
     "RootConfig",
     "RunMode",
     "TargetTokenConfig",
+    "TechnicalEligibility",
+    "UserDecision",
     "load_config",
 ]

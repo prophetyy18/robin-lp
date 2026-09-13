@@ -1,17 +1,23 @@
-"""Regression tests proving V1 contains no signing or broadcast surface.
+"""Regression tests proving V1's main process contains no signing or broadcast surface.
 
-T004 / docs/threat-model.md §3 T-12 require that:
+T004 / docs/threat-model.md §3 T-12 + G-SIGNER-01 require that:
 
-1. No source file under ``src/`` imports a write-capable RPC method or
-   a key/seed loader.
-2. No source file under ``src/`` mentions forbidden identifiers that
-   would indicate live signing or broadcast intent.
+1. No source file under ``src/robinhood_lp/`` imports a write-capable
+   RPC method, a key/seed loader, or a signing primitive.
+2. No source file under ``src/robinhood_lp/`` mentions forbidden
+   identifiers that would indicate live signing or broadcast intent in
+   the main process.
 3. The package's exposed entry points (``robinhood_lp.__main__`` and
    ``robinhood_lp.config``) do not re-export any such symbol.
+4. The V1 signer is **out of tree**: it lives in a separate process
+   introduced by Phase 9 (T090). Until then, this test enforces
+   *absence* of signing in the main process; the signer is not yet
+   shipped, so the threat is mitigated by construction, not by policy.
 
 These tests are intentionally narrow: they fail closed on any *new*
-introduction. They do not enforce semantic correctness — they enforce
-absence of a forbidden capability.
+introduction into the main process. They do not enforce semantic
+correctness — they enforce absence of a forbidden capability from the
+package the user is running.
 """
 
 from __future__ import annotations

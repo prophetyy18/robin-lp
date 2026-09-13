@@ -4,9 +4,13 @@
 > reviewable pull request and a paired CI test that fails if the
 > underlying guarantee is broken.
 >
-> Scope: V1 paper-trading framework for a single Robinhood Chain
-> Uniswap V4 `PoolKey` and a single user-selected target token. Live
-> transaction submission is explicitly out of scope (see Phase 9, T090).
+> Scope: V1 = research → replay → backtest → testnet execution →
+> paper trading → mainnet automated execution, for a single Robinhood
+> Chain `PoolKey` paired with one user-selected target token. Live
+> automated execution is **in** V1 scope and is the V1 acceptance
+> condition (G-LIVE-01); it must be unlocked only via the promotion
+> gates defined in `docs/product/PROJECT_GOALS.md` and the ADM-TECH-*
+> hard gates in `docs/product/ASSET_ADMISSION.md`.
 
 ## 1. Trust boundaries and data flow
 
@@ -46,20 +50,33 @@
 
 Boundary properties:
 
-- The process holds **no signing key, no seed phrase, no API secret for
-  broadcast or transaction submission**. This is enforced by CI
-  (`tests/test_no_signing_paths.py`) and by ADR-007's pinned, minimal
-  dependency set.
+- The main V1 process (config, replay, backtest, paper, web console)
+  holds **no signing key, no seed phrase, no API secret, and no
+  capability to broadcast transactions**. Signing material lives only
+  in a separate, isolated signer process (G-SIGNER-01) that the main
+  process cannot reach; the boundary is enforced by
+  `tests/test_no_signing_paths.py` against the `src/robinhood_lp/`
+  package, and by ADR-007's pinned, minimal dependency set.
 - All chain reads cross the RPC boundary as plain JSON-RPC requests
   that carry no credentials beyond a read-only API key (which is
-  intentionally *not* a write token).
-- The web console, when added (Phase 7+), is **not** in this trust
-  diagram yet because V1 does not yet ship one. When it ships it must
-  appear above the process box with explicit "no private key" rules.
+  intentionally *not* a write token). Live execution crosses a
+  *separate* boundary via the signer process; the signer holds the key
+  material and is reachable only through a deliberately narrow
+  interface (built in Phase 9, T090; not present in the current
+  release).
+- The web console (Phase 7+) is **not** in this trust diagram yet
+  because V1 does not yet ship one. When it ships it must appear
+  above the process box with explicit "no private key" rules and the
+  promotion gates from `PROJECT_GOALS.md` §6 (backtest → testnet →
+  paper → security review → human promotion).
 - Local storage is *untrusted* from the process's point of view: data
   may be tampered with by an attacker with filesystem access. Mitigations
   are append-only layout, SHA-256 manifests, and re-derivation from raw
   partitions (T031).
+- `docs/product/PROJECT_GOALS.md` and `docs/product/ASSET_ADMISSION.md`
+  are **binding** for product scope; this threat model must align with
+  them. Where they appear to disagree, the product documents win and
+  this document is updated.
 
 ## 2. Adversary classes
 
@@ -242,23 +259,38 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
   import inspection.
 - **Evidence:** Phase 4 / 6 task contracts; ADR-006.
 
-### T-12 Live-mode switch is silently available
+### T-12 Live-mode switch bypasses promotion gates
 
-- **Severity:** Critical (prevention)
-- **Scenario:** A future code change accidentally introduces a
-  `sendRawTransaction` or a private-key loader; V1 is promoted to
-  live without authorization.
+- **Severity:** Critical
+- **Scenario:** A future code change accidentally enables live
+  automated execution without satisfying the V1 promotion gates
+  (backtest → testnet → paper → security review → human promotion;
+  G-LIVE-GATE-01), or leaks signing material into the main V1
+  process in violation of G-SIGNER-01.
 - **Controls:**
-  1. `RunMode.LIVE` is rejected by `RootConfig` defaults
-     (`tests/test_config.py::test_root_config_rejects_live_default_run_mode`).
-  2. `tests/test_no_signing_paths.py` enforces that no module imports
-     a write-capable API and no source file mentions forbidden
-     identifiers.
-  3. ADR-005 and `TODO.md` Phase 9 require an explicit, separately
-     authorized project for live mode.
-- **Owner:** T004 (this document) + ongoing
-- **Residual risk:** None in V1. Phase 9 is a separate plan.
-- **Evidence:** `tests/test_no_signing_paths.py`; `RunMode` enum.
+  1. `tests/test_no_signing_paths.py` enforces that no source file in
+     `src/robinhood_lp/` imports a write-capable API or mentions
+     signing-related identifiers. The signer is an out-of-tree
+     process introduced by Phase 9 (T090); the main package cannot
+     reach it directly.
+  2. `RootConfig` rejects `default_run_mode = "live"` and any pool
+     configured at `RunMode.LIVE` (`tests/test_config.py`).
+  3. Every `TargetTokenConfig` carries an explicit dual-track
+     approval state (`technical_eligibility`, `project_risk`,
+     `user_decision`) and a `live_eligible` boolean that the live
+     execution path (T070+) requires to be True before any live
+     intent is accepted.
+  4. Hook or token code-hash changes immediately demote the pool
+     (ADM-HOOK-005, ADM-TECH-007) and stop live intents; the demotion
+     is auditable, not silent.
+- **Owner:** T004 + T070 + product owner
+- **Residual risk:** Until the signer process and T070 risk gateway
+  ship, the main process contains no signing path at all, so the
+  threat is *absent* in the current release rather than mitigated.
+  This is consistent with G-SIGNER-01's hard isolation rule.
+- **Evidence:** `tests/test_no_signing_paths.py`; `tests/test_config.py`;
+  `docs/threat-model.md` §1; ADM-HOOK-005, ADM-TECH-007, G-LIVE-GATE-01,
+  G-SIGNER-01.
 
 ## 4. Severity rubric
 
@@ -288,9 +320,26 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
 
 ## 6. Residual risks and owner follow-ups
 
-- **Hook-upgrade detection** depends on a code-hash comparison T072
-  will add. Until T072 ships, paper mode can run on stale hook evidence.
-  *Owner: T072.*
+- **Hook-upgrade detection** must immediately demote the pool per
+  ADM-HOOK-005. The runtime hook-evidence package (T043) records the
+  code hash and version; any change recorded by T072 forces
+  re-verification and stops new paper/live intents until the human
+  approval workflow re-runs. Until T043 + T072 ship, hook evidence is
+  a single on-chain read at promotion time and a stale-cache risk
+  remains; the framework refuses promotion above `ingestion` for any
+  hook pool without a current T043 evidence pack.
+  *Owner: T043 (evidence) + T072 (runtime detection) + T070 (gate).*
+- **Target-token dual-track approval.** `TargetTokenConfig` carries
+  three independent fields (`technical_eligibility`,
+  `project_risk`, `user_decision`). Until T070 wires these into the
+  risk gateway, the config layer enforces them at parse time but does
+  not run the supporting chain reads; the live execution path will
+  refuse intents whose triple is not
+  `ELIGIBLE/≤VERY_HIGH/APPROVED*` AND whose `live_eligible` flag is
+  False. *Owner: T070.*
+- **Signer isolation** depends on Phase 9 (T090). Until then, the
+  threat model is satisfied by *absence* of signing in the main
+  process (G-SIGNER-01). *Owner: T090.*
 - **Multi-provider verification** is a T020 stretch; until it ships
   T-01 is mitigated only by the chain-capability report and quality
   reports. *Owner: T020.*

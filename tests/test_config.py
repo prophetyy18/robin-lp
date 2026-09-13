@@ -28,9 +28,12 @@ from robinhood_lp.config import (
     ConfigError,
     PoolConfig,
     PoolKey,
+    ProjectRisk,
     RootConfig,
     RunMode,
     TargetTokenConfig,
+    TechnicalEligibility,
+    UserDecision,
     load_config,
 )
 from robinhood_lp.config.secrets import (
@@ -60,7 +63,9 @@ def test_valid_v1_fixture_loads() -> None:
     assert len(cfg.chains) == 1
     assert len(cfg.pools) == 1
     assert cfg.target_token is not None
-    assert cfg.target_token.user_approved is True
+    assert cfg.target_token.user_decision == UserDecision.APPROVED_WITH_LIMITS
+    assert cfg.target_token.technical_eligibility == TechnicalEligibility.ELIGIBLE
+    assert cfg.target_token.live_eligible is False
 
 
 def test_default_run_mode_is_paper() -> None:
@@ -308,13 +313,65 @@ def test_chain_config_rejects_lowercase_env_name() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_target_token_default_user_approved_is_false() -> None:
-    """Unapproved target token is the safe default; paper/live cannot run."""
+def test_target_token_default_approval_state_is_safe() -> None:
+    """Defaults are the safest possible state: UNKNOWN / UNKNOWN / PENDING / not live-eligible."""
     tt = TargetTokenConfig(
         chain_id=46630,
         contract_address="0x0000000000000000000000000000000000000100",
     )
-    assert tt.user_approved is False
+    assert tt.technical_eligibility == TechnicalEligibility.UNKNOWN
+    assert tt.project_risk == ProjectRisk.UNKNOWN
+    assert tt.user_decision == UserDecision.PENDING
+    assert tt.live_eligible is False
+
+
+def test_target_token_blocks_live_when_blocked() -> None:
+    """technical_eligibility=BLOCKED cannot coexist with live_eligible=True (ADM-TECH-005)."""
+    with pytest.raises(ValueError, match="BLOCKED"):
+        TargetTokenConfig(
+            chain_id=46630,
+            contract_address="0x0000000000000000000000000000000000000100",
+            technical_eligibility=TechnicalEligibility.BLOCKED,
+            live_eligible=True,
+        )
+
+
+def test_target_token_blocks_live_when_rejected_or_revoked() -> None:
+    """user_decision in {REJECTED, REVOKED} cannot coexist with live_eligible=True."""
+    for decision in (UserDecision.REJECTED, UserDecision.REVOKED):
+        with pytest.raises(ValueError, match=decision.value):
+            TargetTokenConfig(
+                chain_id=46630,
+                contract_address="0x0000000000000000000000000000000000000100",
+                user_decision=decision,
+                live_eligible=True,
+            )
+
+
+def test_target_token_live_eligible_requires_full_approval_path() -> None:
+    """live_eligible=True is allowed only when eligible, decision is APPROVED*."""
+    tt = TargetTokenConfig(
+        chain_id=46630,
+        contract_address="0x0000000000000000000000000000000000000100",
+        technical_eligibility=TechnicalEligibility.ELIGIBLE,
+        project_risk=ProjectRisk.HIGH,
+        user_decision=UserDecision.APPROVED_WITH_LIMITS,
+        live_eligible=True,
+    )
+    assert tt.live_eligible is True
+    assert tt.user_decision == UserDecision.APPROVED_WITH_LIMITS
+
+
+def test_target_token_rejects_unknown_enum_value() -> None:
+    """Unknown strings are rejected by the strict enum types."""
+    with pytest.raises(ValueError):
+        TargetTokenConfig.model_validate(
+            {
+                "chain_id": 46630,
+                "contract_address": "0x0000000000000000000000000000000000000100",
+                "technical_eligibility": "maybe",
+            }
+        )
 
 
 def test_target_token_rejects_malformed_address() -> None:

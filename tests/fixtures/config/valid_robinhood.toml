@@ -1,5 +1,5 @@
 # V1 valid fixture: single Robinhood Chain, single active PoolKey,
-# single user-approved target token.
+# single target token whose dual-track approval is satisfied for paper.
 #
 # None of these addresses are real deployments; they are 20-byte hex
 # literals used only to exercise the parser. Real deployment addresses
@@ -23,8 +23,14 @@ chain_id = 46630
 contract_address = "0x0000000000000000000000000000000000000100"
 symbol = "TARGET"
 decimals = 18
-user_approved = true
-approval_notes = "user-entered placeholder for T002 acceptance"
+
+# ASSET_ADMISSION §4 dual-track approval: paper-eligible but not yet live.
+technical_eligibility = "eligible"
+project_risk = "medium"
+user_decision = "approved_with_limits"
+live_eligible = false
+
+decision_notes = "user-entered placeholder for T002 acceptance; live promotion requires G-LIVE-GATE-01 evidence"
 
 [[pools]]
 chain_id = 46630

@@ -40,7 +40,9 @@ Non-goals (binding for V1):
 - automatic selection or switching of the target token;
 - profitability of any concrete LP strategy;
 - smart-contract deployment or custom hook authoring;
-- automated key custody or unattended live trading;
+- bypassing the V1 promotion gates (backtest → testnet → paper →
+  security review → human promotion) for live execution;
+- bypassing G-SIGNER-01: signing material in the main V1 process;
 - dashboards, queues, and distributed workers beyond measured need.
 
 ## 2. Layered model

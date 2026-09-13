@@ -9,7 +9,8 @@ state_view_address = "0x0000000000000000000000000000000000000002"
 [target_token]
 chain_id = 46630
 contract_address = "0x0000000000000000000000000000000000000999"
-user_approved = true
+technical_eligibility = "eligible"
+user_decision = "approved_with_limits"
 
 [[pools]]
 chain_id = 46630
