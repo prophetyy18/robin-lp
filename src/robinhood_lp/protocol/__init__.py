@@ -15,6 +15,10 @@ uses integer-typed values suitable for ABI encoding and keccak256.
 from __future__ import annotations
 
 from robinhood_lp.protocol.abi import encode_pool_key, pool_id_to_bytes, pool_id_to_int
+from robinhood_lp.protocol.abi_artifacts import (
+    EVENT_TOPICS,
+    FUNCTION_SELECTORS,
+)
 from robinhood_lp.protocol.events import (
     BlockRef,
     CanonicalStatus,
@@ -58,6 +62,8 @@ __all__ = [
     "CanonicalStatus",
     "ChainId",
     "Currency",
+    "EVENT_TOPICS",
+    "FUNCTION_SELECTORS",
     "EventKey",
     "InvalidSqrtPriceError",
     "InvalidTickError",
