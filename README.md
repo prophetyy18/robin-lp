@@ -6,12 +6,15 @@ Automated liquidity-provision and market-making strategies for
 Initial research target: concentrated-liquidity LP strategies such as
 **FLYBRAIN / USDG**.
 
-> ⚠️ **Default mode: PAPER.** Live execution is off until explicitly
-> enabled. See [Trading Safety](#trading-safety).
+> ⚠️ **Default mode: PAPER.** Mainnet automated execution is the V1
+> acceptance condition (G-LIVE-01) and is reached only through the
+> promotion gates in [`docs/product/PROJECT_GOALS.md`](docs/product/PROJECT_GOALS.md)
+> (backtest → testnet → paper → security review → human promotion).
+> See [Trading Safety](#trading-safety).
 
 ## Goals
 
-The system will support, in order of priority:
+The system supports, in order of priority:
 
 1. Real-time on-chain data collection
 2. LP range selection
@@ -19,10 +22,12 @@ The system will support, in order of priority:
 4. Paper trading
 5. Backtesting
 6. Risk management
-7. Optional live execution (only when explicitly enabled)
+7. Mainnet automated execution (V1 acceptance condition; reached via
+   the documented promotion gates, not by direct opt-in)
 
-Research correctness and reliable data collection come first. Live
-trading is the last step.
+Research correctness and reliable data collection come first; mainnet
+execution is gated by `docs/product/PROJECT_GOALS.md` and
+`docs/product/ASSET_ADMISSION.md`.
 
 ## Requirements
 

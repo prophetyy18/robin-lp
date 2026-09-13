@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "robinhood-lp"
 version = "0.0.0"
-description = "Research and paper-trading framework for Uniswap V4 LP strategies on Robinhood Chain."
+description = "Research, paper-trading, and mainnet execution framework for Uniswap V4 LP strategies on Robinhood Chain."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Proprietary" }

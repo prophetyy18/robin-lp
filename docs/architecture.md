@@ -102,7 +102,7 @@ layers strictly below it.
 | strategy | pure observation→intent functions, deterministic clock/seed | call RPC, storage, signing, or execution; mutate ledger |
 | backtest / research | event-driven engine, baseline strategies, manifests, robustness analysis | use future data, retune on held-out data |
 | risk | centralized approve/reject gateway with reason codes | be bypassed by execution, strategy, or manual override |
-| execution | paper intent→fill→ledger pipeline; live interface reserved | exist with signing/broadcast in current release |
+| execution | paper intent→fill→ledger pipeline; live interface behind a separate signer process (G-SIGNER-01) | hold signing material or broadcast transactions in the main V1 process |
 | presentation / reports | structured reports, charts, dossiers, release evidence | mutate upstream state, leak credentials |
 
 ### 2.2 Module-to-layer mapping
@@ -143,7 +143,7 @@ layers strictly below it.
 | 8 | T081 | `robinhood_lp.ops.controls` | presentation / ops |
 | 8 | T082 | `robinhood_lp.ops.soak` | presentation / ops |
 | 8 | T083 | `robinhood_lp.ops.dossier` | presentation / ops |
-| 9 | T090 | (planning only — no module) | n/a |
+| 9 | T090 | `robinhood_lp.execution.signer` (out-of-tree signer process) | execution (out-of-tree) |
 
 ## 3. Cross-cutting policies
 

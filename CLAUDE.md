@@ -16,10 +16,13 @@ The system will eventually support:
 - paper trading
 - backtesting
 - risk management
-- optional live execution
+- mainnet automated execution (the V1 acceptance condition; reached via
+  the G-LIVE-GATE-01 promotion gates: backtest → testnet → paper →
+  security review → human promotion)
 
-The first priority is research correctness and reliable data collection,
-not live trading.
+The first priority is research correctness and reliable data collection.
+Live execution is the V1 acceptance condition (G-LIVE-01) and is reached
+only through the documented promotion gates, not by direct opt-in.
 
 ## Development Environment
 
@@ -55,12 +58,18 @@ or implementation, read the relevant source before answering.
 
 ## Trading Safety
 
-The default operating mode is PAPER.
+The default operating mode is **PAPER**.
 
-Do not send real blockchain transactions unless the user explicitly asks
-to enable live execution.
+Mainnet automated execution is the V1 acceptance condition (G-LIVE-01)
+and is reached only through the promotion gates recorded in
+`docs/product/PROJECT_GOALS.md` (backtest → testnet → paper → security
+review → human promotion; G-LIVE-GATE-01). Live code paths are *not*
+enabled by direct opt-in and are not automatically deployed after
+implementing code.
 
-Do not automatically deploy or run live trading after implementing code.
+The signing material required for live execution is held in a separate
+signer process (G-SIGNER-01), not in the main V1 process. The signer
+is introduced by Phase 9 (T090) and is out of scope for Phase 0–7.
 
 Never expose, print, commit, or copy:
 
@@ -70,7 +79,9 @@ Never expose, print, commit, or copy:
 - wallet credentials
 - production environment files
 
-Secrets must come from environment variables.
+Secrets must come from environment variables. The signer (when it
+exists) reads its key material from environment variables only and
+never logs or echoes its contents.
 
 ## Architecture Principles
 
