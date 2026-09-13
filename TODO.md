@@ -167,7 +167,7 @@ contains no unowned critical risk; no chain connection is needed to run unit tes
 **Phase prohibitions:** no RPC calls in domain modules, no production addresses in
 defaults, no database/framework selected without an ADR, no trading code.
 
-- [ ] **T000 — Record initial architecture decisions**
+- [x] **T000 — Record initial architecture decisions**
   - Outcome: future tasks share explicit choices for Python/Web3 client, package
     boundaries, configuration, storage/query format, precision, clock, and chain
     support lifecycle.
@@ -181,7 +181,7 @@ defaults, no database/framework selected without an ADR, no trading code.
     select a tool solely because it appears in this plan.
   - References: R1, R3, R7, R11, R17.
 
-- [ ] **T001 — Create the Python 3.12 project skeleton** (depends on T000)
+- [x] **T001 — Create the Python 3.12 project skeleton** (depends on T000)
   - Outcome: deterministic local development entry point.
   - Deliverables: `pyproject.toml`, locked dependencies, `src/robinhood_lp/`,
     `tests/`, test/format/lint/type commands, and one import/CLI smoke test.
@@ -191,7 +191,7 @@ defaults, no database/framework selected without an ADR, no trading code.
     consumer task or expose environment contents in diagnostics.
   - References: R21, R22.
 
-- [ ] **T002 — Add safe typed configuration** (depends on T001)
+- [x] **T002 — Add safe typed configuration** (depends on T001)
   - Outcome: invalid or secret-bearing configuration cannot enter the system.
   - Deliverables: strict models for chain ID, RPC env-var names, endpoint aliases,
     confirmation/finality policy, start block, verified contract references,
@@ -203,7 +203,7 @@ defaults, no database/framework selected without an ADR, no trading code.
     identifiers.
   - References: R1, R2, R9.
 
-- [ ] **T003 — Establish CI and supply-chain gates** (depends on T001)
+- [x] **T003 — Establish CI and supply-chain gates** (depends on T001)
   - Outcome: every change receives the same reproducible checks.
   - Deliverables: pinned CI actions, tests, formatting, lint, type check, lockfile
     integrity, secret scan, dependency review/vulnerability scan, and artifact
@@ -215,7 +215,7 @@ defaults, no database/framework selected without an ADR, no trading code.
     or RPC responses, or make network integration tests silently optional.
   - References: R21, R22.
 
-- [ ] **T004 — Threat model and live-safety invariant** (depends on T000)
+- [x] **T004 — Threat model and live-safety invariant** (depends on T000)
   - Outcome: data poisoning, reorg, hook, RPC, supply-chain, key, and operational
     risks have owners and fail-safe responses.
   - Deliverables: `docs/threat-model.md`, trust boundaries/data-flow diagram, abuse
