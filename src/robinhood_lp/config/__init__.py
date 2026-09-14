@@ -9,11 +9,13 @@ from __future__ import annotations
 from robinhood_lp.config.loader import ConfigError, load_config
 from robinhood_lp.config.models import (
     ChainConfig,
+    LiveApproval,
     PoolConfig,
     PoolKey,
     ProjectRisk,
     RootConfig,
     RunMode,
+    SignerConfig,
     TargetTokenConfig,
     TechnicalEligibility,
     UserDecision,
@@ -22,11 +24,13 @@ from robinhood_lp.config.models import (
 __all__ = [
     "ChainConfig",
     "ConfigError",
+    "LiveApproval",
     "PoolConfig",
     "PoolKey",
     "ProjectRisk",
     "RootConfig",
     "RunMode",
+    "SignerConfig",
     "TargetTokenConfig",
     "TechnicalEligibility",
     "UserDecision",

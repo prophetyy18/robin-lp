@@ -5,6 +5,10 @@ Reads a TOML file from disk, parses it through the strict models defined in
 :class:`RootConfig`.
 
 The loader never logs or echoes the contents of secret-bearing fields.
+All exceptions raised from the loader boundary have already been passed
+through :func:`robinhood_lp.config.secrets.redact_text` so that pydantic
+``ValidationError`` output, which echoes raw user input, cannot leak
+credentials or other secret values into operator logs.
 """
 
 from __future__ import annotations
@@ -16,7 +20,11 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from robinhood_lp.config.models import RootConfig
-from robinhood_lp.config.secrets import contains_credential_url, redact
+from robinhood_lp.config.secrets import (
+    contains_credential_url,
+    redact,
+    redact_text,
+)
 
 if sys.version_info >= (3, 13):
     _tomllib_loads = tomllib.loads
@@ -86,6 +94,9 @@ def load_config(path: str | Path, *, check_env: bool = True) -> RootConfig:
     Raises:
         ConfigError: if the file is missing, malformed, contains a
             credential-shaped URL, or fails strict-model validation.
+            The error message is scrubbed of secret-shaped substrings at
+            the loader boundary so that downstream logging cannot leak
+            credentials embedded in user-supplied input.
     """
     file_path = Path(path)
     if not file_path.is_file():
@@ -95,14 +106,19 @@ def load_config(path: str | Path, *, check_env: bool = True) -> RootConfig:
     try:
         payload = tomllib.loads(raw_bytes.decode("utf-8"))
     except tomllib.TOMLDecodeError as e:
-        raise ConfigError(f"invalid TOML in {file_path}: {e}") from e
+        raise ConfigError(f"invalid TOML in {file_path}: {redact_text(str(e))}") from e
 
     _check_no_credential_urls(payload)
 
     try:
         config = RootConfig.model_validate(payload)
     except Exception as e:
-        raise ConfigError(f"config validation failed for {file_path}: {e}") from e
+        # pydantic's ValidationError echoes the raw user input into both
+        # ``str(e)`` and the per-error ``msg``/``input`` fields. We pass
+        # the whole rendered message through ``redact_text`` so that any
+        # credential URL or secret-shaped substring is masked before it
+        # reaches the operator's logs.
+        raise ConfigError(f"config validation failed for {file_path}: {redact_text(str(e))}") from e
 
     if check_env:
         _check_declared_env_vars(config)

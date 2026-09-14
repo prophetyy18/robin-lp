@@ -16,11 +16,17 @@ Hard rules (from ADR-003, ADR-005, and ``docs/spec/protocol/PROTOCOL_FACTS.md``)
   matching action-flag.
 - secrets are read from environment variables by name and never appear in
   serialized form.
+- live mode cannot be enabled by direct opt-in (G-LIVE-GATE-01); it
+  requires a populated :class:`LiveApproval` block that records the
+  approving actor, timestamp, scope, and evidence reference.
+- the Keystore path used by the (out-of-tree) signer is referenced by env
+  var name; the loader rejects any literal path or password field.
 """
 
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from enum import StrEnum
 from typing import Final
 
@@ -32,6 +38,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from robinhood_lp.config.secrets import contains_credential_url
 
 # ---------------------------------------------------------------------------
 # Protocol constants (pinned — see docs/spec/protocol/PROTOCOL_FACTS.md)
@@ -108,6 +116,91 @@ class _StrictModel(BaseModel):
         str_strip_whitespace=True,
         validate_assignment=True,
     )
+
+
+class LiveApproval(_StrictModel):
+    """Bound evidence that live mode is permitted on a specific scope.
+
+    G-LIVE-GATE-01 (PROJECT_GOALS §8) requires live to be unlocked only by
+    an explicit, scoped, time-stamped human promotion that follows the
+    full backtest -> testnet -> post-testnet paper/shadow -> security
+    review pipeline. A bare boolean flag is not sufficient: the loader
+    refuses to construct a live-capable config without this block.
+    """
+
+    approved_by: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="Operator handle (e.g. Gitea user) that recorded the promotion.",
+    )
+    approved_at: datetime = Field(
+        ...,
+        description=(
+            "UTC instant at which the promotion was recorded. Used for "
+            "audit ordering; freshness is policy-defined elsewhere."
+        ),
+    )
+    approved_scope: str = Field(
+        ...,
+        min_length=1,
+        max_length=256,
+        description=(
+            "Free-form but auditable scope statement, e.g. 'mainnet:FYBRAIN/USDG:capped-50-USDG'."
+        ),
+    )
+    evidence_ref: str = Field(
+        ...,
+        min_length=1,
+        max_length=512,
+        description=(
+            "Pointer to the recorded promotion evidence (commit SHA, "
+            "manifest path, ticket id, etc.). The loader does not fetch it."
+        ),
+    )
+
+
+class SignerConfig(_StrictModel):
+    """Out-of-tree signer reference (G-SIGNER-01).
+
+    Phase 9 (T090) introduces the isolated signer process; it lives
+    outside the main V1 process and is the only component allowed to
+    decrypt the Keystore. The configuration layer therefore records
+    *only* the environment-variable name that holds the Keystore path;
+    the password is never carried in config, environment variables, CLI
+    arguments, logs, or audit records (per CLAUDE.md / AGENTS.md §4).
+
+    Any literal value supplied here is rejected at parse time, so the
+    framework cannot accidentally pick up a Keystore password from
+    ``os.environ`` or a committed file.
+    """
+
+    keystore_path_env: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description=(
+            "Name of the environment variable that holds the absolute path "
+            "to the encrypted Web3 Keystore file. The Keystore password is "
+            "NEVER read from config; it is supplied interactively by the "
+            "operator at signer startup."
+        ),
+    )
+
+    @field_validator("keystore_path_env")
+    @classmethod
+    def _check_env_name(cls, v: str) -> str:
+        # Reject credential-shaped URLs before the format check so the
+        # operator sees a security-flavoured error instead of "invalid
+        # env-var name".
+        if contains_credential_url(v):
+            raise ValueError(
+                "keystore_path_env looks like a credential-bearing URL; "
+                "only an env-var name (e.g. LP_KEYSTORE_PATH) is accepted"
+            )
+        if not re.match(r"^[A-Z][A-Z0-9_]*$", v):
+            raise ValueError(f"keystore_path_env={v!r} must be an UPPER_SNAKE_CASE env-var name")
+        return v
 
 
 class PoolKey(_StrictModel):
@@ -313,8 +406,8 @@ class TargetTokenConfig(_StrictModel):
     Carries the three-track approval state from
     ``docs/spec/product/ASSET_ADMISSION.md`` §4: technical eligibility, project
     risk, and user decision. The framework's risk gateway (T070) refuses
-    live intents unless the triple is on the accepted path AND the
-    ``live_eligible`` flag is True.
+    live intents unless the triple is on the accepted path AND a populated
+    :class:`LiveApproval` block records the G-LIVE-GATE-01 promotion.
     """
 
     chain_id: PositiveInt = Field(
@@ -364,13 +457,17 @@ class TargetTokenConfig(_StrictModel):
             "APPROVED_WITH_LIMITS permit paper/live subject to other gates."
         ),
     )
-    live_eligible: bool = Field(
-        default=False,
+    # G-LIVE-GATE-01 binding. ``live`` is None by default and may only be
+    # populated after the documented promotion gates have produced an
+    # auditable :class:`LiveApproval` record. A bare boolean flip is not
+    # accepted (see ``is_live_eligible`` below for the read-only view).
+    live: LiveApproval | None = Field(
+        default=None,
         description=(
-            "True only after the V1 promotion gates (backtest → testnet → "
-            "paper → security review → human promotion; G-LIVE-GATE-01) "
-            "have all been satisfied. The signer process (G-SIGNER-01, "
-            "Phase 9 T090) refuses intents when this is False."
+            "Bound live-promotion record (G-LIVE-GATE-01). When set, the "
+            "triple (technical_eligibility, user_decision) must also be on "
+            "the accepted path; the framework's risk gateway refuses live "
+            "intents otherwise."
         ),
     )
 
@@ -380,17 +477,22 @@ class TargetTokenConfig(_StrictModel):
         description="Free-form note recorded with the approval decision.",
     )
 
+    @property
+    def is_live_eligible(self) -> bool:
+        """Read-only True/False view derived from ``self.live``."""
+        return self.live is not None
+
     @field_validator("contract_address")
     @classmethod
     def _check_address(cls, v: str) -> str:
         return _validate_address(v, field="contract_address")
 
     @model_validator(mode="after")
-    def _check_blocked_cannot_be_live_eligible(self) -> TargetTokenConfig:
-        if self.technical_eligibility == TechnicalEligibility.BLOCKED and self.live_eligible:
+    def _check_blocked_cannot_be_live(self) -> TargetTokenConfig:
+        if self.technical_eligibility == TechnicalEligibility.BLOCKED and self.live is not None:
             raise ValueError(
                 "technical_eligibility=BLOCKED is an absolute veto; "
-                "live_eligible cannot be True (ADM-TECH-005/007)"
+                "live promotion cannot be attached (ADM-TECH-005/007)"
             )
         return self
 
@@ -398,11 +500,11 @@ class TargetTokenConfig(_StrictModel):
     def _check_rejected_or_revoked_blocks_live(self) -> TargetTokenConfig:
         if (
             self.user_decision in (UserDecision.REJECTED, UserDecision.REVOKED)
-            and self.live_eligible
+            and self.live is not None
         ):
             raise ValueError(
                 f"user_decision={self.user_decision.value} blocks live "
-                f"execution; live_eligible must be False"
+                f"execution; live promotion cannot be attached"
             )
         return self
 
@@ -440,6 +542,24 @@ class PoolConfig(_StrictModel):
         # checks when more pool-level fields are added in T022+.
         return self
 
+    @model_validator(mode="after")
+    def _check_live_support_requires_approval(self) -> PoolConfig:
+        # G-LIVE-GATE-01: a pool cannot declare ``support_level='live'``
+        # without a populated ``live`` block on the matching target token.
+        # Cross-field enforcement lives at the RootConfig layer because the
+        # token is owned there; the pool itself only carries a note about
+        # the missing context.
+        if self.support_level == RunMode.LIVE and not self.notes.strip():
+            # Allow construction here; the RootConfig check will reject
+            # the assembled config if the target token's ``live`` block is
+            # absent. We still refuse a pool that names ``live`` with no
+            # notes so that audit logs surface the operator's intent.
+            raise ValueError(
+                "support_level='live' requires a populated 'notes' "
+                "field recording the operator's intent and scope"
+            )
+        return self
+
 
 class RootConfig(_StrictModel):
     """Top-level configuration object (V1: single chain, single pool, single target token)."""
@@ -462,6 +582,15 @@ class RootConfig(_StrictModel):
         description=(
             "The single target token V1 operates on. When set, the active "
             "pool (if any) must contain this token as currency0 or currency1."
+        ),
+    )
+    signer: SignerConfig | None = Field(
+        default=None,
+        description=(
+            "Out-of-tree signer reference (G-SIGNER-01). When omitted, the "
+            "framework cannot reach live execution. The signer process is "
+            "introduced by Phase 9 (T090) and is not loaded by the main V1 "
+            "process during Phase 0-8."
         ),
     )
     default_run_mode: RunMode = Field(
@@ -537,6 +666,30 @@ class RootConfig(_StrictModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _check_live_support_level_requires_approval(self) -> RootConfig:
+        # G-LIVE-GATE-01: any pool whose ``support_level`` is ``live``
+        # requires the target token to carry a populated ``live`` block.
+        # Without that record, the assembled config is rejected at load
+        # time; the framework never reaches a state where live could be
+        # activated by a bare boolean toggle.
+        if not self.pools:
+            return self
+        for p in self.pools:
+            if p.support_level == RunMode.LIVE:
+                if self.target_token is None or self.target_token.live is None:
+                    raise ValueError(
+                        "support_level='live' requires target_token.live "
+                        "to be populated with a LiveApproval record "
+                        "(G-LIVE-GATE-01)"
+                    )
+                if self.signer is None:
+                    raise ValueError(
+                        "support_level='live' requires the signer block to "
+                        "reference a Keystore env-var name (G-SIGNER-01)"
+                    )
+        return self
+
 
 __all__ = [
     "ALL_HOOK_MASK",
@@ -544,12 +697,14 @@ __all__ = [
     "DELTA_TO_ACTION_FLAG",
     "DYNAMIC_FEE_FLAG",
     "HOOK_FLAG_BITS",
+    "LiveApproval",
     "MAX_LP_FEE",
     "PoolConfig",
     "PoolKey",
     "ProjectRisk",
     "RootConfig",
     "RunMode",
+    "SignerConfig",
     "TargetTokenConfig",
     "TechnicalEligibility",
     "UserDecision",

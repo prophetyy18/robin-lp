@@ -1,0 +1,63 @@
+{
+  "task_id": "T002",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Closed the three V1 gaps in the typed configuration layer (T002 attempt 1). Added LiveApproval + SignerConfig strict models so live mode (G-LIVE-GATE-01) cannot be enabled by a bare boolean and the Keystore path is referenced by env-var name only (G-SIGNER-01). Tightened the loader to redact secret-shaped substrings (credential URLs, Bearer tokens, key=value secrets, 64-hex blobs) out of every ValidationError raised at the boundary. Extended tests/test_config.py with 25 new cases covering V1 fixture fields, unknown/duplicate fields, chain-ID mismatch, serialization cleanliness, LiveApproval/SignerConfig validation, live-pool approval binding, and redaction behavior. Updated .env.example with the LP_KEYSTORE_PATH env-var name.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest 2>&1 | tail -10",
+      "result": "313 passed, 2 skipped in 1.46s (skips are unrelated: tests/test_abi_artifacts.py sha256 manual annotation and tests/test_protocol_ids.py unsorted currencies edge case)."
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_config.py -v 2>&1 | tail -3",
+      "result": "59 passed in 0.19s (test_config.py grew from 34 to 59 tests; 25 new cases cover V1 gaps)."
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest 2>&1 | tail -10 (second run)",
+      "result": "313 passed, 2 skipped in 1.41s (byte-identical apart from wall-clock duration)."
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/ tests/ 2>&1 | tail -3 (run 1)",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/ tests/ 2>&1 | tail -3 (run 2)",
+      "result": "All checks passed! (byte-identical to run 1)"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/ tests/ 2>&1 | tail -3 (run 1)",
+      "result": "39 files already formatted"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/ tests/ 2>&1 | tail -3 (run 2)",
+      "result": "39 files already formatted (byte-identical to run 1)"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/robinhood_lp 2>&1 | tail -3 (run 1)",
+      "result": "Success: no issues found in 23 source files"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/robinhood_lp 2>&1 | tail -3 (run 2)",
+      "result": "Success: no issues found in 23 source files (byte-identical to run 1)"
+    },
+    {
+      "command": "git -C /home/lpdev/lp-worktrees/dev-t002-attempt-001 diff --stat",
+      "result": ".env.example +6/-0, src/robinhood_lp/config/__init__.py +4/-0, src/robinhood_lp/config/loader.py +14/-8, src/robinhood_lp/config/models.py +172/-9, src/robinhood_lp/config/secrets.py +34/-11, tests/fixtures/config/valid_robinhood.toml +3/-2, tests/test_config.py +499/-6, todo/config.yaml (workflow bookkeeping only)."
+    },
+    {
+      "command": "git -C /home/lpdev/lp-worktrees/dev-t002-attempt-001 diff -- tests/test_config.py | grep -E '^\\+[[:space:]]*def test_' | wc -l ; git -C /home/lpdev/lp-worktrees/dev-t002-attempt-001 diff -- tests/test_config.py | grep -E '^-[[:space:]]*def test_' | wc -l",
+      "result": "25 new tests added, 0 deleted in tests/test_config.py."
+    },
+    {
+      "command": "git -C /home/lpdev/lp-worktrees/dev-t002-attempt-001 status",
+      "result": "modified: .env.example, src/robinhood_lp/config/{__init__.py,loader.py,models.py,secrets.py}, tests/fixtures/config/valid_robinhood.toml, tests/test_config.py, todo/config.yaml (workflow controller bookkeeping only)."
+    }
+  ],
+  "residual_risks": [
+    "LiveApproval.approved_at is recorded as a naive UTC datetime by the loader; freshness enforcement (e.g. 90-day maximum age for live promotion) is not implemented here and is owned by the future T090 signer acceptance check.",
+    "V1 single-pool rule already forbids two pools, so the contract's 'duplicate identities' invariant is enforced structurally rather than via a dedicated duplicate-detection check; the dedicated model_validator was intentionally removed to avoid emitting a dead-code rule and the existing single-pool error is what tests assert.",
+    "Loader-level redaction uses regex-based scrubbing of credential URLs, Bearer tokens, key=value secrets, and 64-hex blobs. A user who supplies a credential URL that pydantic truncates to <64 hex chars in its input_value echo will see a truncated substring; the loader does not currently mask truncated hex fragments. This is documented in the test_loader_redacts_credential_url_in_validation_error test and is acceptable because pydantic itself truncates to first/last 8 bytes only and does not leak the full secret.",
+    "SignerConfig.keystore_path_env requires an UPPER_SNAKE_CASE env-var name; an operator who supplies a lowercase name or a credential URL is rejected at parse time but the model does not currently check that the named env var is actually set at startup. The Phase 9 (T090) signer process owns that runtime check.",
+    "Two ABI/runtime pytest collections remain skipped (tests/test_abi_artifacts.py sha256 manual annotation and tests/test_protocol_ids.py unsorted currencies edge case). These are pre-existing skips unrelated to T002.",
+    "PoolConfig.notes is required (non-empty) when support_level=LIVE to surface operator intent in audit logs. This is a soft guard; the cross-field check that live requires both target_token.live and signer is enforced at the RootConfig layer."
+  ]
+}

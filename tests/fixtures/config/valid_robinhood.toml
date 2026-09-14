@@ -28,8 +28,11 @@ decimals = 18
 technical_eligibility = "eligible"
 project_risk = "medium"
 user_decision = "approved_with_limits"
-live_eligible = false
 
+# G-LIVE-GATE-01 binding: live promotion is left unset (None). To enable
+# live, the operator must attach a populated [[live]] block with
+# approved_by / approved_at / approved_scope / evidence_ref recorded in
+# the audit trail.
 decision_notes = "user-entered placeholder for T002 acceptance; live promotion requires G-LIVE-GATE-01 evidence"
 
 [[pools]]
