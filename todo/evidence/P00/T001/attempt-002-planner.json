@@ -1,0 +1,28 @@
+{
+  "task_id": "T001",
+  "phase": "P00",
+  "classification": "CONTRACT_MISMATCH",
+  "plan_base": "a84c40f4f3468ae92018adc5c6f310ed79c590f7",
+  "outcome": "NO_CHANGE_REQUIRED",
+  "summary": "Planner confirms the T001 attempt 1 implementation is correct on every direct deliverable (requirements.lock.txt with 27 packages and 586 SHA-256 hashes, tests/test_lockfile.py with 5 shape/consistency tests, README install sequence update, unchanged pyproject.toml with requires-python='>=3.12'). The acceptance clause 'all quality commands pass twice' cannot be satisfied from inside T001 scope because tests/test_workflow_contracts.py::test_repository_workflow_configuration_is_valid hard-codes 'assert config[\"tasks\"][\"T001\"][\"status\"] == \"READY\"' while the workflow state machine correctly transitions every active task out of READY. The conflict is a CONTRACT_MISMATCH between a static test expectation and the controller's actual state transitions. Planner initially attempted to repair the test but the controller's CONTRACT_MISMATCH scope (tools/workflow/core.py) restricts planner changes to todo/phases/ and todo/config.yaml only; tests/ is forbidden. Planner records NO_CHANGE_REQUIRED and recommends the Owner consider one of the following: (a) escalate the triage classification to SPEC_DEFECT or OWNER_DECISION_REQUIRED to permit changes under docs/spec/ or docs/intent/ or to broaden the planning scope, (b) authorise a separate planning cycle specifically for tests/test_workflow_contracts.py under a different classification, or (c) accept T001 with the documented residual risk that 'all quality commands pass twice' is unsatisfiable until the test is repaired by an authorised change.",
+  "rationale": "The CONFLICT is real and reproducible: the controller at tools/workflow/core.py ALLOWED_TRANSITIONS defines READY -> IN_DEVELOPMENT -> AWAITING_REVIEW as the normal forward path, and prepare_develop calls _set_state(config, task_id, 'IN_DEVELOPMENT') on entry. The test at tests/test_workflow_contracts.py line 30 hard-codes the opposite expectation. The Developer role cannot fix the test (out of T001 deliverable scope, line 30 is not in the T001 task contract Deliverables list which contains only 'one import/CLI smoke test'). The Planner role cannot fix the test either because CONTRACT_MISMATCH scope forbids tests/ per the controller's planning path enforcement. Planner therefore records NO_CHANGE_REQUIRED, preserves the failure-mode evidence, and routes the decision back to the Owner via the Manager. The OWNER may reclassify the issue or accept the residual risk; the Planner will not manufacture a planner-layer edit that the controller will reject at finish-plan time.",
+  "unresolved_questions": [
+    "Does the Owner want to reclassify this triage as OWNER_DECISION_REQUIRED so the Planner can amend docs/intent/ to authorise a tests/ change, or as SPEC_DEFECT so the Planner can amend docs/spec/ to redefine the acceptance clause boundary?",
+    "If neither reclassification is desired, does the Owner accept T001 attempt 1 as APPROVED with the residual risk that 'all quality commands pass twice' cannot be evidenced until an authorised change to tests/test_workflow_contracts.py is made?",
+    "If a tests/ repair is later authorised, should it be split into a separate dedicated planning cycle rather than attached to T001?"
+  ],
+  "scope": "No source code or tests modified. No Spec/Intent files modified. Only the planner-result.json handoff is updated.",
+  "files_changed": [],
+  "verification": {
+    "isolated_test_command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_workflow_contracts.py::test_repository_workflow_configuration_is_valid -v",
+    "isolated_test_result": "NOT_RUN — Planner records NO_CHANGE_REQUIRED. The previously planned repair was reverted because the controller's CONTRACT_MISMATCH scope forbids tests/. Plan Reviewer may run this command to confirm the test still fails on the unmodified worktree (expected) and to confirm no other regressions.",
+    "full_file_command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_workflow_contracts.py -v",
+    "full_file_result": "NOT_RUN — Plan Reviewer should run to confirm baseline state."
+  },
+  "developer_followup": [
+    "Developer attempt 3 (after Plan Reviewer approval of NO_CHANGE_REQUIRED and Owner decision): re-run pytest, ruff check, ruff format --check, mypy src tests twice and confirm both runs are byte-identical.",
+    "Developer attempt 3: capture a real clean-room 'pip install --require-hashes -r requirements.lock.txt' under todo/evidence/P00/T001/ (clear pip cache or use a fresh venv) and record the command, the resolved wheel set, and a hash-verification log.",
+    "If Owner accepts T001 with the residual risk, the lockfile self-consistency tests (tests/test_lockfile.py) and the smoke tests (tests/test_smoke.py) still demonstrate the lockfile and import/CLI behavior. The 'all quality commands pass twice' acceptance clause remains partially evidenced until the test_workflow_contracts.py fix is authorised."
+  ],
+  "no_change_required": true
+}
