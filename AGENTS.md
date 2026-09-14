@@ -37,11 +37,15 @@
 ### 2.1 角色和交接边界
 
 - Planner 只澄清 Intent、Spec 和任务合同，不实现业务代码，也不伪造验收证据。
+- Issue Triager 只读核对异常证据并区分实现缺陷、任务合同偏差、Spec 缺陷、Owner
+  决策和外部阻塞；发现者提出的分类不是最终分类。
 - Developer 每次以全新上下文在独立 worktree 中只实现一个 `READY` 任务。不得修改
   Intent、Spec、任务合同、审查记录、审查 Agent 或批准状态；规格不足时返回
-  `SPEC_BLOCKED`。
+  `TRIAGE_REQUIRED` 和证据，不自行决定分类。
 - Reviewer 每次以全新上下文在 candidate commit 的 detached worktree 中审查。它可以
   运行验证命令，但不得修改、修复、提交或推送任何内容。
+- Plan Reviewer 在 exact planning base/candidate 上独立检查合同或 Spec 修正；允许有证据
+  的 `NO_CHANGE_REQUIRED`，不得为了制造 diff 要求无意义改文档。
 - Manager 可以解释状态、选择合法的下一步和处理歧义，但不能替代独立 Reviewer
   批准任务。
 - Agent 之间只以任务合同、base commit、candidate commit 和结构化报告交接。未提交
@@ -50,6 +54,8 @@
   它不判断产品需求或代码语义。
 - 审查失败后必须启动新的 Developer；修复产生新的 candidate commit 后，再启动新的
   Reviewer。不得复用导致结论偏置的旧上下文。
+- 正常任务只走开发和审查。只有结构化报告明确要求时才进入 triage；不要把普通实现
+  问题升级成规划阻塞。涉及 Intent 的选择必须停下等待 Owner 决定。
 
 ## 3. V1 固定边界
 

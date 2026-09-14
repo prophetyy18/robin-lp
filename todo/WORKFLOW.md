@@ -51,6 +51,13 @@ Run from the repository root with the project Python:
 /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow review T001
 ```
 
+After T001 is approved, the Manager may select one dependency-complete planned
+task and activate it explicitly:
+
+```bash
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow ready T002
+```
+
 ### Claude Code as the Manager
 
 The interactive Claude Code session in the main checkout may orchestrate these
@@ -64,7 +71,10 @@ task ID and instruct it to:
 4. call `review <task>` after a candidate is produced;
 5. call `retry <task>` followed by a fresh `review <task>` after
    `CHANGES_REQUESTED`;
-6. stop on `SPEC_BLOCKED`, `BLOCKED`, or `APPROVED`, report the evidence and
+6. call `triage <task>` only after a structured `TRIAGE_REQUIRED` result;
+7. call `plan <task>` and `review-plan <task>` only when triage routes the issue
+   to planning; ask the owner before passing `--owner-decision`;
+8. stop on `BLOCKED`, `OWNER_DECISION_REQUIRED`, or `APPROVED`, report the evidence and
    commit SHAs, and never start the next numbered task automatically.
 
 The ready-to-copy Manager prompt is in the root `README.md`. A request such as
@@ -92,8 +102,8 @@ unwritable worktree parent, Git lock, denied child command, unavailable network,
 or missing credential causes the command to stop; do not bypass the gate by
 loosening global permissions. Preserve the error, inspect `status` and
 `git worktree list`, then correct the specific host permission or configuration
-before retrying. `SPEC_BLOCKED` requires planning or an owner decision, not a
-filesystem permission override.
+before retrying. A contract, Spec or owner question requires triage and the
+matching planning route, not a filesystem permission override.
 
 If review returns `CHANGES_REQUESTED`, start a new developer process:
 
@@ -101,6 +111,20 @@ If review returns `CHANGES_REQUESTED`, start a new developer process:
 /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow retry T001
 /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow review T001
 ```
+
+Exceptional scope or specification discoveries use:
+
+```bash
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow triage T001
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow plan T001
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow review-plan T001
+```
+
+If triage returns `OWNER_DECISION_REQUIRED`, stop and ask the owner. Only after
+the owner answers may the Manager run `plan T001 --owner-decision "..."`. Triage
+is an exception path, not a mandatory ceremony. The planning role may return
+`NO_CHANGE_REQUIRED`; an independent Plan Reviewer can accept that evidence
+without forcing a meaningless edit.
 
 `develop` and `retry` invoke a new non-interactive Claude Code process. `review`
 creates a detached worktree at the exact candidate SHA and invokes another new
@@ -127,11 +151,34 @@ the exact implementation candidate that the Reviewer inspected.
 
 ## Failure handling
 
-- `SPEC_BLOCKED`: return to a fresh Planner; do not guess or continue implementation.
+- `TRIAGE_REQUIRED`: run the independent triager; the reporting Agent's proposed
+  classification is not authoritative.
+- `PLANNING` / `AWAITING_PLAN_REVIEW`: correct only the triaged contract or Spec
+  issue, then obtain independent plan review.
+- `PLAN_REVIEW_BLOCKED`: retain the exact plan candidate and run `review-plan`
+  again after the external review blocker is resolved; do not replan merely to
+  clear the state.
+- `OWNER_DECISION_REQUIRED`: stop and ask the owner; permissions cannot answer a
+  product question.
 - `BLOCKED`: preserve the branch and evidence for external/user action.
 - `CHANGES_REQUESTED`: preserve the branch; `retry` starts a fresh Developer.
 - inconsistent `PASS`, wrong SHA, malformed JSON, protected-file edits or a dirty
   Reviewer worktree invalidate the run.
+
+Planning path permissions are broad enough to avoid artificial dead ends but
+remain layer-bounded: contract triage may change task contracts and dependency
+fields; Spec triage may additionally change `docs/spec/`; an owner decision may
+additionally change `docs/intent/`. The controller rejects changes to task state,
+attempts, evidence pointers, commit SHAs, model selection and approval data.
+Plan Reviewer—not a brittle filename rule—decides whether changes inside the
+allowed planning layer are relevant and proportionate.
+
+If triage is raised after partial implementation work, the controller preserves
+that work in the task branch as a diagnostic snapshot. Planning review compares
+only the exact planning base and candidate, and a fresh Developer later decides
+whether the preserved implementation remains useful under the corrected
+contract. Both implementation reviews and planning reviews produce JSON evidence
+and a human-readable Markdown report.
 
 Worktree deletion is never attempted for a failed development branch. A detached
 review worktree that contains tracked modifications is retained for diagnosis.

@@ -98,10 +98,22 @@ or `CHANGES_REQUESTED`; downstream code does not retroactively complete an unmet
 
 ### Workflow state machine
 
-`PLANNED → READY → IN_DEVELOPMENT → AWAITING_REVIEW` is the forward path.
-Review produces `APPROVED`, `CHANGES_REQUESTED` or `BLOCKED`. A specification defect produces
-`SPEC_BLOCKED` and returns control to a fresh Planner. Only the deterministic workflow controller
-may write progress state. Developer and Reviewer agents never approve themselves.
+`PLANNED → READY → IN_DEVELOPMENT → AWAITING_REVIEW` is the normal forward path.
+Review produces `APPROVED`, `CHANGES_REQUESTED` or `BLOCKED`. Exceptional evidence may produce
+`TRIAGE_REQUIRED`; a fresh read-only triager routes it to implementation repair, planning, an
+owner decision, or an external blocker. Planning changes pass through `PLANNING →
+AWAITING_PLAN_REVIEW` and return to `CHANGES_REQUESTED` for a fresh Developer. A supported
+`NO_CHANGE_REQUIRED` planning result is valid: task completion depends on acceptance evidence,
+not on manufacturing a file diff. Only the deterministic workflow controller may write progress
+state. No Agent approves its own work.
+
+If plan review is temporarily unavailable, `PLAN_REVIEW_BLOCKED` retains the exact
+plan candidate so a fresh Plan Reviewer can retry without forcing the Planner to
+rewrite an unchanged plan.
+
+After an approved task, the Manager explicitly chooses one dependency-complete
+`PLANNED` task and runs `ready <task>`. The controller never guesses among
+multiple candidates and never activates more than one task.
 
 Every handoff binds the task contract, base commit and candidate commit. Review of uncommitted
 files is invalid. A repaired implementation always receives a new candidate commit and a fresh

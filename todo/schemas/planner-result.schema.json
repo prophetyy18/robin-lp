@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robinhood-lp.local/schemas/planner-result.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "outcome", "summary", "rationale", "unresolved_questions"],
+  "properties": {
+    "task_id": {"type": "string", "pattern": "^T[0-9]{3}$"},
+    "outcome": {
+      "enum": ["PLAN_READY", "NO_CHANGE_REQUIRED", "OWNER_DECISION_REQUIRED", "BLOCKED"]
+    },
+    "summary": {"type": "string"},
+    "rationale": {"type": "string"},
+    "unresolved_questions": {"type": "array", "items": {"type": "string"}}
+  }
+}

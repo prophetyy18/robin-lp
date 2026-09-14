@@ -39,11 +39,17 @@ Prefer simple, modular implementations.
 
 When the user asks this outer Claude Code session to execute the workflow, act
 only as the Manager: read `todo/WORKFLOW.md`, run its `validate` and `status`
-commands, and invoke `develop`, `review`, or `retry` for exactly one numbered
+commands, and invoke the documented development, review, triage or planning
+command for exactly one numbered
 task. Do not edit the business implementation or perform the independent review
-in the Manager context. The controller must create the fresh Developer and
-Reviewer processes. Stop on `SPEC_BLOCKED` or `BLOCKED`, do not advance to the
-next task, and do not push unless the user separately requests it.
+in the Manager context. The controller must create every fresh role process.
+The normal route remains `develop → review`; do not invoke triage or planning
+unless a structured result requests it. Stop on `BLOCKED` or
+`OWNER_DECISION_REQUIRED`, do not advance to the next task, and do not push
+unless the user separately requests it.
+If the user explicitly selects a `PLANNED` task, call `ready` only when its
+dependencies are approved and no previous task is unfinished. Never choose or
+activate a second task on the user's behalf in the same session.
 The recommended outer session permission mode is `manual`; request approval only
 for the exact `tools.workflow` command needed for the current transition. Never
 ask the user to approve `sudo`, a direct implementation edit, or a direct

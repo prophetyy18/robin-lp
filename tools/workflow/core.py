@@ -15,7 +15,7 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 TASK_PATTERN = re.compile(r"^T[0-9]{3}$")
@@ -28,7 +28,11 @@ STATES = {
     "IN_DEVELOPMENT",
     "AWAITING_REVIEW",
     "CHANGES_REQUESTED",
-    "SPEC_BLOCKED",
+    "TRIAGE_REQUIRED",
+    "PLANNING",
+    "AWAITING_PLAN_REVIEW",
+    "PLAN_REVIEW_BLOCKED",
+    "OWNER_DECISION_REQUIRED",
     "BLOCKED",
     "APPROVED",
 }
@@ -36,10 +40,24 @@ STATES = {
 ALLOWED_TRANSITIONS = {
     "PLANNED": {"READY"},
     "READY": {"IN_DEVELOPMENT", "BLOCKED"},
-    "IN_DEVELOPMENT": {"AWAITING_REVIEW", "SPEC_BLOCKED", "BLOCKED"},
-    "AWAITING_REVIEW": {"APPROVED", "CHANGES_REQUESTED", "BLOCKED"},
+    "IN_DEVELOPMENT": {"AWAITING_REVIEW", "TRIAGE_REQUIRED", "BLOCKED"},
+    "AWAITING_REVIEW": {
+        "APPROVED",
+        "CHANGES_REQUESTED",
+        "TRIAGE_REQUIRED",
+        "BLOCKED",
+    },
     "CHANGES_REQUESTED": {"IN_DEVELOPMENT", "BLOCKED"},
-    "SPEC_BLOCKED": {"READY", "BLOCKED"},
+    "TRIAGE_REQUIRED": {
+        "CHANGES_REQUESTED",
+        "PLANNING",
+        "OWNER_DECISION_REQUIRED",
+        "BLOCKED",
+    },
+    "PLANNING": {"AWAITING_PLAN_REVIEW", "OWNER_DECISION_REQUIRED", "BLOCKED"},
+    "AWAITING_PLAN_REVIEW": {"CHANGES_REQUESTED", "PLANNING", "PLAN_REVIEW_BLOCKED"},
+    "PLAN_REVIEW_BLOCKED": {"CHANGES_REQUESTED", "PLANNING", "PLAN_REVIEW_BLOCKED"},
+    "OWNER_DECISION_REQUIRED": {"PLANNING", "BLOCKED"},
     "BLOCKED": {"READY"},
     "APPROVED": set(),
 }
@@ -98,6 +116,34 @@ class AttemptRecord:
             candidate_commit=_optional_string(value, "candidate_commit"),
             branch=_required_string(value, "branch"),
             development_worktree=_required_string(value, "development_worktree"),
+        )
+
+
+@dataclass(frozen=True)
+class PlanRecord:
+    task_id: str
+    attempt: int
+    classification: str
+    base_commit: str
+    candidate_commit: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "task_id": self.task_id,
+            "attempt": self.attempt,
+            "classification": self.classification,
+            "base_commit": self.base_commit,
+            "candidate_commit": self.candidate_commit,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, object]) -> PlanRecord:
+        return cls(
+            task_id=_required_string(value, "task_id"),
+            attempt=_required_int(value, "attempt"),
+            classification=_required_string(value, "classification"),
+            base_commit=_required_string(value, "base_commit"),
+            candidate_commit=_required_string(value, "candidate_commit"),
         )
 
 
@@ -196,6 +242,26 @@ def _protected_paths(root: Path) -> list[Path]:
     return sorted(paths)
 
 
+def _working_tree_changes(root: Path) -> list[str]:
+    tracked = _git(root, "diff", "--name-only").stdout.splitlines()
+    staged = _git(root, "diff", "--cached", "--name-only").stdout.splitlines()
+    untracked = _git(root, "ls-files", "--others", "--exclude-standard").stdout.splitlines()
+    return sorted(set(tracked + staged + untracked))
+
+
+def _without_planner_owned_config_fields(
+    config: Mapping[str, Any], classification: str
+) -> dict[str, Any]:
+    comparable = cast(dict[str, Any], json.loads(json.dumps(config)))
+    for task in comparable["tasks"].values():
+        task.pop("depends_on", None)
+    if classification in {"SPEC_DEFECT", "OWNER_DECISION_REQUIRED"}:
+        comparable.pop("spec_revision", None)
+    if classification == "OWNER_DECISION_REQUIRED":
+        comparable.pop("intent_revision", None)
+    return comparable
+
+
 def _render_review(result: Mapping[str, Any]) -> str:
     lines = [
         f"# {result['task_id']} independent review",
@@ -223,6 +289,27 @@ def _render_review(result: Mapping[str, Any]) -> str:
         ("required_changes", "Required changes"),
         ("residual_risks", "Residual risks"),
     ):
+        lines.extend([f"## {title}", ""])
+        values = result.get(key, []) or ["None."]
+        lines.extend(f"- {item}" for item in values)
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_plan_review(result: Mapping[str, Any]) -> str:
+    lines = [
+        f"# {result['task_id']} planning review",
+        "",
+        f"- Base commit: `{result['base_commit']}`",
+        f"- Candidate commit: `{result['candidate_commit']}`",
+        f"- Verdict: **{result['verdict']}**",
+        "",
+        "## Summary",
+        "",
+        result["summary"] or "No summary supplied.",
+        "",
+    ]
+    for key, title in (("required_changes", "Required changes"), ("unknowns", "Unknowns")):
         lines.extend([f"## {title}", ""])
         values = result.get(key, []) or ["None."]
         lines.extend(f"- {item}" for item in values)
@@ -321,6 +408,15 @@ class WorkflowManager:
                 raise WorkflowError("active_phase does not match active_task")
             if config.get("workflow_state") != tasks[active_task]["status"]:
                 raise WorkflowError("workflow_state does not match active task status")
+        active_states = [
+            task_id
+            for task_id, task in tasks.items()
+            if task["status"] not in {"PLANNED", "APPROVED"}
+        ]
+        if active_states and active_states != (
+            [active_task] if isinstance(active_task, str) else []
+        ):
+            raise WorkflowError("exactly the active task may have an in-progress or READY state")
         self._validate_acyclic(tasks)
 
     def _validate_acyclic(self, tasks: Mapping[str, Any]) -> None:
@@ -347,21 +443,35 @@ class WorkflowManager:
         runtime = self.load_attempt(active) if isinstance(active, str) else None
         if runtime is not None and Path(runtime.development_worktree).is_dir():
             config = self.load_config(Path(runtime.development_worktree))
+        active_plan = self.load_plan(active) if isinstance(active, str) else None
         return {
             "active_phase": config.get("active_phase"),
             "active_task": active,
             "workflow_state": config.get("workflow_state"),
             "task_status": config["tasks"][active]["status"] if active else None,
             "attempt": runtime.to_dict() if runtime else None,
+            "plan": active_plan.to_dict() if active_plan else None,
         }
 
     def validate_repository(self) -> None:
         self.load_config()
-        if not (self.repo / ".claude" / "agents" / "stage-developer.md").is_file():
-            raise WorkflowError("stage-developer agent is missing")
-        if not (self.repo / ".claude" / "agents" / "stage-reviewer.md").is_file():
-            raise WorkflowError("stage-reviewer agent is missing")
-        for name in ("config", "developer-result", "review-result"):
+        for agent in (
+            "stage-developer",
+            "stage-reviewer",
+            "issue-triager",
+            "planner",
+            "plan-reviewer",
+        ):
+            if not (self.repo / ".claude" / "agents" / f"{agent}.md").is_file():
+                raise WorkflowError(f"{agent} agent is missing")
+        for name in (
+            "config",
+            "developer-result",
+            "review-result",
+            "triage-result",
+            "planner-result",
+            "plan-review-result",
+        ):
             _load_json(self.repo / "todo" / "schemas" / f"{name}.schema.json")
 
     def _ensure_clean_main(self) -> None:
@@ -387,8 +497,30 @@ class WorkflowManager:
         if incomplete:
             raise WorkflowError(f"{task_id} has unapproved dependencies: {', '.join(incomplete)}")
 
+    def ready(self, task_id: str) -> str:
+        self._ensure_clean_main()
+        config = self.load_config()
+        task = self._task(config, task_id)
+        if task["status"] != "PLANNED":
+            raise WorkflowError(f"ready requires PLANNED, found {task['status']}")
+        active = config.get("active_task")
+        if isinstance(active, str) and config["tasks"][active]["status"] not in {
+            "APPROVED",
+            "PLANNED",
+        }:
+            raise WorkflowError(f"cannot activate {task_id} while {active} is unfinished")
+        self._check_dependencies(config, task_id)
+        self._set_state(config, task_id, "READY")
+        _write_json(self.config_path, config)
+        _git(self.repo, "add", "todo/config.yaml")
+        _git(self.repo, "commit", "-m", f"chore(workflow): mark {task_id} ready")
+        return _sha(self.repo)
+
     def _attempt_path(self, task_id: str) -> Path:
         return self.runtime_dir / f"{task_id}.json"
+
+    def _plan_path(self, task_id: str) -> Path:
+        return self.runtime_dir / f"{task_id}-plan.json"
 
     def save_attempt(self, attempt: AttemptRecord) -> None:
         _write_json(self._attempt_path(attempt.task_id), attempt.to_dict())
@@ -400,6 +532,15 @@ class WorkflowManager:
         if not path.is_file():
             return None
         return AttemptRecord.from_dict(_load_json(path))
+
+    def save_plan(self, plan: PlanRecord) -> None:
+        _write_json(self._plan_path(plan.task_id), plan.to_dict())
+
+    def load_plan(self, task_id: str) -> PlanRecord | None:
+        path = self._plan_path(task_id)
+        if not path.is_file():
+            return None
+        return PlanRecord.from_dict(_load_json(path))
 
     def _set_state(
         self,
@@ -440,26 +581,34 @@ class WorkflowManager:
         prompt: str,
         schema_path: Path,
         cwd: Path,
-        developer: bool,
+        role: str,
     ) -> dict[str, Any]:
         runtime = self.load_config(cwd)["agent_runtime"]
         model = runtime["model"]
         schema = schema_path.read_text(encoding="utf-8")
-        tools = [
-            "Read",
-            "Grep",
-            "Glob",
-            "Bash(git status *)",
-            "Bash(git diff *)",
-            "Bash(git log *)",
-            "Bash(python *)",
-            "Bash(python3 *)",
-            "Bash(pytest *)",
-            "Bash(ruff *)",
-            "Bash(mypy *)",
-        ]
-        if developer:
+        tools = ["Read", "Grep", "Glob"]
+        if role in {"developer", "reviewer"}:
+            tools.extend(
+                (
+                    "Bash(git status *)",
+                    "Bash(git diff *)",
+                    "Bash(git log *)",
+                    "Bash(python *)",
+                    "Bash(python3 *)",
+                    "Bash(pytest *)",
+                    "Bash(ruff *)",
+                    "Bash(mypy *)",
+                )
+            )
+        elif role in {"triager", "plan-reviewer"}:
+            tools.extend(("Bash(git status *)", "Bash(git diff *)", "Bash(git log *)"))
+        elif role == "planner":
+            tools.extend(("Edit", "Write", "WebSearch", "WebFetch"))
+        else:
+            raise WorkflowError(f"unknown agent role {role}")
+        if role == "developer":
             tools.extend(("Edit", "Write"))
+        editable = role in {"developer", "planner"}
         args = (
             self.claude_command,
             "-p",
@@ -468,7 +617,7 @@ class WorkflowManager:
             "--model",
             model,
             "--permission-mode",
-            "acceptEdits" if developer else "dontAsk",
+            "acceptEdits" if editable else "dontAsk",
             "--permission-prompts",
             "none",
             "--allowedTools",
@@ -489,8 +638,12 @@ class WorkflowManager:
             worktree = Path(attempt.development_worktree)
             config = self.load_config(worktree)
             task = self._task(config, task_id)
-            if task["status"] != "CHANGES_REQUESTED":
-                raise WorkflowError(f"retry requires CHANGES_REQUESTED, found {task['status']}")
+            if task["status"] == "BLOCKED":
+                self._set_state(config, task_id, "READY")
+            elif task["status"] != "CHANGES_REQUESTED":
+                raise WorkflowError(
+                    f"retry requires CHANGES_REQUESTED or resolved BLOCKED, found {task['status']}"
+                )
             attempt = AttemptRecord(
                 task_id=attempt.task_id,
                 phase=attempt.phase,
@@ -542,7 +695,7 @@ class WorkflowManager:
             prompt=prompt,
             schema_path=worktree / "todo" / "schemas" / "developer-result.schema.json",
             cwd=worktree,
-            developer=True,
+            role="developer",
         )
         self._validate_developer_result(result, task_id)
         after = _snapshot(_protected_paths(worktree), worktree)
@@ -562,10 +715,13 @@ class WorkflowManager:
         _write_json(evidence_path, result)
         outcome = result["outcome"]
         if outcome != "CANDIDATE_READY":
-            state = "SPEC_BLOCKED" if outcome == "SPEC_BLOCKED" else "BLOCKED"
+            state = {
+                "TRIAGE_REQUIRED": "TRIAGE_REQUIRED",
+                "BLOCKED": "BLOCKED",
+            }[outcome]
             self._set_state(config, task_id, state, base_commit=attempt.base_commit)
             _write_json(worktree / "todo" / "config.yaml", config)
-            _git(worktree, "add", "todo/config.yaml", str(evidence_path.relative_to(worktree)))
+            _git(worktree, "add", "-A")
             _git(worktree, "commit", "-m", f"chore(workflow): record {task_id} {state.lower()}")
             self.save_attempt(attempt)
             return attempt
@@ -599,7 +755,8 @@ class WorkflowManager:
     def _validate_developer_result(self, result: Mapping[str, Any], task_id: str) -> None:
         if result.get("task_id") != task_id:
             raise WorkflowError("developer result task_id does not match")
-        if result.get("outcome") not in {"CANDIDATE_READY", "SPEC_BLOCKED", "BLOCKED"}:
+        outcome = result.get("outcome")
+        if outcome not in {"CANDIDATE_READY", "TRIAGE_REQUIRED", "BLOCKED"}:
             raise WorkflowError("developer result has invalid outcome")
         if not isinstance(result.get("summary"), str):
             raise WorkflowError("developer result summary must be a string")
@@ -607,6 +764,27 @@ class WorkflowManager:
             raise WorkflowError("developer result commands must be a list")
         if not isinstance(result.get("residual_risks"), list):
             raise WorkflowError("developer result residual_risks must be a list")
+        if outcome == "TRIAGE_REQUIRED":
+            self._validate_triage_request(result.get("triage_request"))
+
+    def _validate_triage_request(self, value: object) -> None:
+        if not isinstance(value, dict):
+            raise WorkflowError("TRIAGE_REQUIRED must include triage_request")
+        if not isinstance(value.get("observed_problem"), str) or not value["observed_problem"]:
+            raise WorkflowError("triage_request must describe the observed problem")
+        if not isinstance(value.get("evidence"), list):
+            raise WorkflowError("triage_request evidence must be a list")
+        classifications = {
+            "IMPLEMENTATION_DEFECT",
+            "CONTRACT_MISMATCH",
+            "SPEC_DEFECT",
+            "OWNER_DECISION_REQUIRED",
+            "EXTERNAL_BLOCKED",
+        }
+        if value.get("proposed_classification") not in classifications:
+            raise WorkflowError("triage_request proposed classification is invalid")
+        if not isinstance(value.get("requested_change"), str):
+            raise WorkflowError("triage_request requested_change must be a string")
 
     def _validate_review_result(self, result: Mapping[str, Any], attempt: AttemptRecord) -> str:
         if result.get("task_id") != attempt.task_id:
@@ -616,7 +794,7 @@ class WorkflowManager:
         if result.get("candidate_commit") != attempt.candidate_commit:
             raise WorkflowError("review candidate_commit does not match")
         verdict = result.get("verdict")
-        if verdict not in {"PASS", "FAIL", "BLOCKED"}:
+        if verdict not in {"PASS", "FAIL", "TRIAGE_REQUIRED", "BLOCKED"}:
             raise WorkflowError("review verdict is invalid")
         checks = result.get("checks")
         if not isinstance(checks, list) or not checks:
@@ -635,6 +813,9 @@ class WorkflowManager:
         required = result.get("required_changes")
         if not all(isinstance(value, list) for value in (violations, unknowns, required)):
             raise WorkflowError("review finding collections must be lists")
+        if verdict == "TRIAGE_REQUIRED":
+            self._validate_triage_request(result.get("triage_request"))
+            return "TRIAGE_REQUIRED"
         mechanically_passes = (
             verdict == "PASS"
             and set(statuses) == {"PASS"}
@@ -684,7 +865,7 @@ class WorkflowManager:
                 prompt=prompt,
                 schema_path=review_worktree / "todo" / "schemas" / "review-result.schema.json",
                 cwd=review_worktree,
-                developer=False,
+                role="reviewer",
             )
             reviewer_changes = _git(review_worktree, "status", "--porcelain").stdout.strip()
             if reviewer_changes:
@@ -728,6 +909,316 @@ class WorkflowManager:
             self.save_attempt(attempt)
             report_path = worktree / relative_md
         return state, report_path
+
+    def _triage_report_path(self, attempt: AttemptRecord) -> Path:
+        return (
+            Path("todo")
+            / "triage"
+            / attempt.phase
+            / attempt.task_id
+            / f"triage-{attempt.attempt:03d}.json"
+        )
+
+    def triage(self, task_id: str) -> tuple[str, Path]:
+        attempt = self.load_attempt(task_id)
+        if attempt is None:
+            raise WorkflowError(f"{task_id} has no retained attempt")
+        worktree = Path(attempt.development_worktree)
+        config = self.load_config(worktree)
+        if self._task(config, task_id)["status"] != "TRIAGE_REQUIRED":
+            raise WorkflowError("triage requires TRIAGE_REQUIRED")
+        if _git(worktree, "status", "--porcelain").stdout:
+            raise WorkflowError("development worktree must be clean before triage")
+        issue_commit = _sha(worktree)
+        triage_worktree = (
+            self.worktree_root / f"triage-{task_id.lower()}-attempt-{attempt.attempt:03d}"
+        )
+        if triage_worktree.exists():
+            raise WorkflowError(f"triage worktree path already exists: {triage_worktree}")
+        _git(self.repo, "worktree", "add", "--detach", str(triage_worktree), issue_commit)
+        try:
+            result = self._launch_agent(
+                agent="issue-triager",
+                prompt=(
+                    f"Classify the exceptional issue for {task_id}. Issue commit: {issue_commit}. "
+                    f"Task contract: {config['tasks'][task_id]['task_file']}. "
+                    "Use the recorded Developer or Reviewer triage_request as the report, "
+                    "verify it against the repository, and return structured triage only."
+                ),
+                schema_path=triage_worktree / "todo" / "schemas" / "triage-result.schema.json",
+                cwd=triage_worktree,
+                role="triager",
+            )
+            if _git(triage_worktree, "status", "--porcelain").stdout.strip():
+                raise WorkflowError("triager left tracked, staged, or untracked changes")
+            classification = self._validate_triage_result(result, task_id, issue_commit)
+        finally:
+            _git(self.repo, "worktree", "remove", str(triage_worktree), check=False)
+
+        state = {
+            "IMPLEMENTATION_DEFECT": "CHANGES_REQUESTED",
+            "CONTRACT_MISMATCH": "PLANNING",
+            "SPEC_DEFECT": "PLANNING",
+            "OWNER_DECISION_REQUIRED": "OWNER_DECISION_REQUIRED",
+            "EXTERNAL_BLOCKED": "BLOCKED",
+        }[classification]
+        report = self._triage_report_path(attempt)
+        _write_json(worktree / report, result)
+        self._set_state(config, task_id, state)
+        _write_json(worktree / "todo" / "config.yaml", config)
+        _git(worktree, "add", "todo/config.yaml", str(report))
+        _git(worktree, "commit", "-m", f"chore(workflow): triage {task_id} as {classification}")
+        self.save_attempt(attempt)
+        return state, worktree / report
+
+    def _validate_triage_result(
+        self, result: Mapping[str, Any], task_id: str, issue_commit: str
+    ) -> str:
+        if result.get("task_id") != task_id or result.get("issue_commit") != issue_commit:
+            raise WorkflowError("triage result identity or issue_commit does not match")
+        classification = result.get("classification")
+        allowed = {
+            "IMPLEMENTATION_DEFECT",
+            "CONTRACT_MISMATCH",
+            "SPEC_DEFECT",
+            "OWNER_DECISION_REQUIRED",
+            "EXTERNAL_BLOCKED",
+        }
+        if not isinstance(classification, str) or classification not in allowed:
+            raise WorkflowError("triage result classification is invalid")
+        if not isinstance(result.get("summary"), str) or not result["summary"]:
+            raise WorkflowError("triage result summary must be non-empty")
+        if not isinstance(result.get("evidence"), list):
+            raise WorkflowError("triage result evidence must be a list")
+        if classification == "OWNER_DECISION_REQUIRED" and not isinstance(
+            result.get("owner_question"), str
+        ):
+            raise WorkflowError("owner decision triage must include owner_question")
+        return classification
+
+    def plan(self, task_id: str, *, owner_decision: str | None = None) -> PlanRecord | None:
+        attempt = self.load_attempt(task_id)
+        if attempt is None:
+            raise WorkflowError(f"{task_id} has no retained attempt")
+        worktree = Path(attempt.development_worktree)
+        config = self.load_config(worktree)
+        task = self._task(config, task_id)
+        if task["status"] not in {"PLANNING", "OWNER_DECISION_REQUIRED"}:
+            raise WorkflowError("plan requires PLANNING or OWNER_DECISION_REQUIRED")
+        if _git(worktree, "status", "--porcelain").stdout:
+            raise WorkflowError("development worktree must be clean before planning")
+        triage_path = self._triage_report_path(attempt)
+        triage_result = _load_json(worktree / triage_path)
+        classification = _required_string(triage_result, "classification")
+        owner_route = task["status"] == "OWNER_DECISION_REQUIRED"
+        if owner_route:
+            if not owner_decision or not owner_decision.strip():
+                raise WorkflowError("planning this issue requires the owner's explicit decision")
+            decision_path = triage_path.with_name(f"owner-decision-{attempt.attempt:03d}.json")
+            _write_json(
+                worktree / decision_path,
+                {"task_id": task_id, "decision": owner_decision.strip()},
+            )
+            self._set_state(config, task_id, "PLANNING")
+            _write_json(worktree / "todo" / "config.yaml", config)
+            _git(worktree, "add", "todo/config.yaml", str(decision_path))
+            _git(worktree, "commit", "-m", f"chore(workflow): record {task_id} owner decision")
+        elif owner_decision is not None:
+            raise WorkflowError("owner_decision is accepted only for OWNER_DECISION_REQUIRED")
+
+        if owner_route:
+            classification = "OWNER_DECISION_REQUIRED"
+
+        plan_base = _sha(worktree)
+        task_file = config["tasks"][task_id]["task_file"]
+        result = self._launch_agent(
+            agent="planner",
+            prompt=(
+                f"Resolve the triaged issue for exactly {task_id}. Classification: {classification}. "
+                f"Triage report: {triage_path}. Task contract: {task_file}. "
+                f"Planning base commit: {plan_base}. "
+                + (
+                    f"The owner's recorded decision is: {owner_decision.strip()}. "
+                    if owner_decision
+                    else ""
+                )
+                + "Change only the paths allowed for this classification. A no-change result is valid "
+                "when supported by evidence. Return the structured planner result."
+            ),
+            schema_path=worktree / "todo" / "schemas" / "planner-result.schema.json",
+            cwd=worktree,
+            role="planner",
+        )
+        outcome = self._validate_planner_result(result, task_id)
+        changed = _working_tree_changes(worktree)
+        forbidden: list[str] = []
+        for path in changed:
+            allowed = path.startswith("todo/phases/") or path == "todo/config.yaml"
+            if classification == "SPEC_DEFECT":
+                allowed = allowed or path.startswith("docs/spec/")
+            if classification == "OWNER_DECISION_REQUIRED":
+                allowed = (
+                    allowed or path.startswith("docs/spec/") or path.startswith("docs/intent/")
+                )
+            if not allowed:
+                forbidden.append(path)
+        if forbidden:
+            raise WorkflowError(
+                "planner changed paths outside triaged scope: " + ", ".join(forbidden)
+            )
+        if "todo/config.yaml" in changed:
+            planned_config = _load_json(worktree / "todo" / "config.yaml")
+            self.validate_config(planned_config, worktree)
+            if _without_planner_owned_config_fields(
+                config, classification
+            ) != _without_planner_owned_config_fields(planned_config, classification):
+                raise WorkflowError(
+                    "planner changed workflow state, evidence, model, SHA, or another "
+                    "controller-owned config field"
+                )
+            config = planned_config
+        if outcome == "NO_CHANGE_REQUIRED" and changed:
+            raise WorkflowError("NO_CHANGE_REQUIRED contradicts planner file changes")
+
+        evidence_path = (
+            Path("todo")
+            / "evidence"
+            / attempt.phase
+            / task_id
+            / f"attempt-{attempt.attempt:03d}-planner.json"
+        )
+        _write_json(worktree / evidence_path, result)
+        if outcome in {"BLOCKED", "OWNER_DECISION_REQUIRED"}:
+            state = "BLOCKED" if outcome == "BLOCKED" else "OWNER_DECISION_REQUIRED"
+            self._set_state(config, task_id, state)
+            _write_json(worktree / "todo" / "config.yaml", config)
+            _git(worktree, "add", "-A")
+            _git(worktree, "commit", "-m", f"chore(workflow): record {task_id} planning {state}")
+            return None
+
+        self._set_state(config, task_id, "AWAITING_PLAN_REVIEW")
+        _write_json(worktree / "todo" / "config.yaml", config)
+        _git(worktree, "diff", "--check")
+        _git(worktree, "add", "-A")
+        _git(worktree, "commit", "-m", f"docs({task_id.lower()}): planning candidate")
+        plan = PlanRecord(
+            task_id=task_id,
+            attempt=attempt.attempt,
+            classification=classification,
+            base_commit=plan_base,
+            candidate_commit=_sha(worktree),
+        )
+        self.save_plan(plan)
+        return plan
+
+    def _validate_planner_result(self, result: Mapping[str, Any], task_id: str) -> str:
+        if result.get("task_id") != task_id:
+            raise WorkflowError("planner result task_id does not match")
+        outcome = result.get("outcome")
+        if not isinstance(outcome, str) or outcome not in {
+            "PLAN_READY",
+            "NO_CHANGE_REQUIRED",
+            "OWNER_DECISION_REQUIRED",
+            "BLOCKED",
+        }:
+            raise WorkflowError("planner result outcome is invalid")
+        if not isinstance(result.get("summary"), str) or not isinstance(
+            result.get("rationale"), str
+        ):
+            raise WorkflowError("planner result summary and rationale must be strings")
+        if not isinstance(result.get("unresolved_questions"), list):
+            raise WorkflowError("planner unresolved_questions must be a list")
+        return outcome
+
+    def review_plan(self, task_id: str) -> tuple[str, Path]:
+        attempt = self.load_attempt(task_id)
+        plan = self.load_plan(task_id)
+        if attempt is None or plan is None:
+            raise WorkflowError(f"{task_id} has no plan candidate")
+        worktree = Path(attempt.development_worktree)
+        config = self.load_config(worktree)
+        if self._task(config, task_id)["status"] not in {
+            "AWAITING_PLAN_REVIEW",
+            "PLAN_REVIEW_BLOCKED",
+        }:
+            raise WorkflowError("review-plan requires AWAITING_PLAN_REVIEW or PLAN_REVIEW_BLOCKED")
+        if _sha(worktree) != plan.candidate_commit:
+            raise WorkflowError("planning worktree HEAD no longer matches plan candidate")
+        if _git(worktree, "status", "--porcelain").stdout:
+            raise WorkflowError("planning worktree must be clean before plan review")
+        review_worktree = (
+            self.worktree_root / f"plan-review-{task_id.lower()}-attempt-{attempt.attempt:03d}"
+        )
+        if review_worktree.exists():
+            raise WorkflowError(f"plan review worktree path already exists: {review_worktree}")
+        _git(self.repo, "worktree", "add", "--detach", str(review_worktree), plan.candidate_commit)
+        try:
+            result = self._launch_agent(
+                agent="plan-reviewer",
+                prompt=(
+                    f"Review the planning correction for {task_id}. "
+                    f"Classification: {plan.classification}. Base commit: {plan.base_commit}. "
+                    f"Candidate commit: {plan.candidate_commit}. Return structured plan review only."
+                ),
+                schema_path=review_worktree / "todo" / "schemas" / "plan-review-result.schema.json",
+                cwd=review_worktree,
+                role="plan-reviewer",
+            )
+            if _git(review_worktree, "status", "--porcelain").stdout.strip():
+                raise WorkflowError("plan reviewer left tracked, staged, or untracked changes")
+            state = self._validate_plan_review_result(result, plan)
+        finally:
+            _git(self.repo, "worktree", "remove", str(review_worktree), check=False)
+
+        json_report = (
+            Path("todo")
+            / "reviews"
+            / attempt.phase
+            / task_id
+            / f"plan-review-{attempt.attempt:03d}.json"
+        )
+        markdown_report = json_report.with_suffix(".md")
+        _write_json(worktree / json_report, result)
+        (worktree / markdown_report).write_text(_render_plan_review(result), encoding="utf-8")
+        self._set_state(config, task_id, state)
+        _write_json(worktree / "todo" / "config.yaml", config)
+        _git(worktree, "add", "todo/config.yaml", str(json_report), str(markdown_report))
+        _git(worktree, "commit", "-m", f"chore(workflow): record {task_id} plan review")
+        if state == "PLAN_REVIEW_BLOCKED":
+            self.save_plan(
+                PlanRecord(
+                    task_id=plan.task_id,
+                    attempt=plan.attempt,
+                    classification=plan.classification,
+                    base_commit=plan.base_commit,
+                    candidate_commit=_sha(worktree),
+                )
+            )
+        else:
+            self._plan_path(task_id).unlink(missing_ok=True)
+        return state, worktree / markdown_report
+
+    def _validate_plan_review_result(self, result: Mapping[str, Any], plan: PlanRecord) -> str:
+        if (
+            result.get("task_id") != plan.task_id
+            or result.get("base_commit") != plan.base_commit
+            or result.get("candidate_commit") != plan.candidate_commit
+        ):
+            raise WorkflowError("plan review identity or commits do not match")
+        verdict = result.get("verdict")
+        required = result.get("required_changes")
+        unknowns = result.get("unknowns")
+        if verdict not in {"PASS", "FAIL", "BLOCKED"}:
+            raise WorkflowError("plan review verdict is invalid")
+        if not isinstance(required, list) or not isinstance(unknowns, list):
+            raise WorkflowError("plan review findings must be lists")
+        if verdict == "PASS":
+            if required or unknowns:
+                raise WorkflowError("plan review PASS contradicts unresolved findings")
+            return "CHANGES_REQUESTED"
+        if verdict == "BLOCKED" or unknowns:
+            return "PLAN_REVIEW_BLOCKED"
+        return "PLANNING"
 
     def check_changed_paths(self, base: str, root: Path | None = None) -> list[str]:
         worktree = (root or self.repo).resolve()

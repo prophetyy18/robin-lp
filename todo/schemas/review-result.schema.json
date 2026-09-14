@@ -17,7 +17,7 @@
     "task_id": {"type": "string", "pattern": "^T[0-9]{3}$"},
     "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "candidate_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-    "verdict": {"enum": ["PASS", "FAIL", "BLOCKED"]},
+    "verdict": {"enum": ["PASS", "FAIL", "TRIAGE_REQUIRED", "BLOCKED"]},
     "checks": {
       "type": "array",
       "minItems": 1,
@@ -36,6 +36,28 @@
     "must_not_violations": {"type": "array", "items": {"type": "string"}},
     "unknowns": {"type": "array", "items": {"type": "string"}},
     "required_changes": {"type": "array", "items": {"type": "string"}},
-    "residual_risks": {"type": "array", "items": {"type": "string"}}
+    "residual_risks": {"type": "array", "items": {"type": "string"}},
+    "triage_request": {"$ref": "#/$defs/triageRequest"}
+  },
+  "$defs": {
+    "triageRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed_problem", "evidence", "proposed_classification", "requested_change"],
+      "properties": {
+        "observed_problem": {"type": "string", "minLength": 1},
+        "evidence": {"type": "array", "items": {"type": "string"}},
+        "proposed_classification": {
+          "enum": [
+            "IMPLEMENTATION_DEFECT",
+            "CONTRACT_MISMATCH",
+            "SPEC_DEFECT",
+            "OWNER_DECISION_REQUIRED",
+            "EXTERNAL_BLOCKED"
+          ]
+        },
+        "requested_change": {"type": "string"}
+      }
+    }
   }
 }

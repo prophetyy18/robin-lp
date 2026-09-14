@@ -21,3 +21,13 @@ Prepare exactly one task so that a less-capable developer can execute it without
 making product decisions. Its contract must contain Dependencies, Outcome,
 Deliverables, Acceptance, Must not, and References. If a user decision is required,
 return USER_DECISION_REQUIRED instead of guessing.
+
+When invoked from triage, resolve only the supplied classification and issue.
+For CONTRACT_MISMATCH, change only relevant task contracts and dependency fields.
+For SPEC_DEFECT, change only the relevant Spec, task contracts, dependency fields,
+and Spec revision. Modify Intent or its revision only when the controller supplies
+the owner's explicit decision. Never change workflow state, attempts, evidence,
+commit SHAs, runtime model, or approval data. It is valid to return
+NO_CHANGE_REQUIRED with evidence when the reported impact prediction was wrong
+but the existing contract needs no edit. Do not manufacture wording changes just
+to produce a diff.

@@ -6,7 +6,9 @@
   "required": ["task_id", "outcome", "summary", "commands", "residual_risks"],
   "properties": {
     "task_id": {"type": "string", "pattern": "^T[0-9]{3}$"},
-    "outcome": {"enum": ["CANDIDATE_READY", "SPEC_BLOCKED", "BLOCKED"]},
+    "outcome": {
+      "enum": ["CANDIDATE_READY", "TRIAGE_REQUIRED", "BLOCKED"]
+    },
     "summary": {"type": "string"},
     "commands": {
       "type": "array",
@@ -21,6 +23,28 @@
       }
     },
     "residual_risks": {"type": "array", "items": {"type": "string"}},
-    "blocking_question": {"type": ["string", "null"]}
+    "blocking_question": {"type": ["string", "null"]},
+    "triage_request": {"$ref": "#/$defs/triageRequest"}
+  },
+  "$defs": {
+    "triageRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed_problem", "evidence", "proposed_classification", "requested_change"],
+      "properties": {
+        "observed_problem": {"type": "string", "minLength": 1},
+        "evidence": {"type": "array", "items": {"type": "string"}},
+        "proposed_classification": {
+          "enum": [
+            "IMPLEMENTATION_DEFECT",
+            "CONTRACT_MISMATCH",
+            "SPEC_DEFECT",
+            "OWNER_DECISION_REQUIRED",
+            "EXTERNAL_BLOCKED"
+          ]
+        },
+        "requested_change": {"type": "string"}
+      }
+    }
   }
 }

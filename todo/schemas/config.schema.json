@@ -60,7 +60,11 @@
         "IN_DEVELOPMENT",
         "AWAITING_REVIEW",
         "CHANGES_REQUESTED",
-        "SPEC_BLOCKED",
+        "TRIAGE_REQUIRED",
+        "PLANNING",
+        "AWAITING_PLAN_REVIEW",
+        "PLAN_REVIEW_BLOCKED",
+        "OWNER_DECISION_REQUIRED",
         "BLOCKED",
         "APPROVED"
       ]
