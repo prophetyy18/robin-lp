@@ -12,7 +12,7 @@
   },
   "active_phase": "P00",
   "active_task": "T001",
-  "workflow_state": "TRIAGE_REQUIRED",
+  "workflow_state": "PLANNING",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -27,7 +27,7 @@
     },
     "T001": {
       "phase": "P00",
-      "status": "TRIAGE_REQUIRED",
+      "status": "PLANNING",
       "depends_on": [
         "T000"
       ],
