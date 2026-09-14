@@ -84,6 +84,7 @@ def _make_repo(tmp_path: Path) -> tuple[Path, str]:
     (repo / "src" / "value.txt").write_text("base\n", encoding="utf-8")
     (repo / "AGENTS.md").write_text("test policy\n", encoding="utf-8")
     (repo / "CLAUDE.md").write_text("test policy\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("__pycache__/\n*.py[cod]\n", encoding="utf-8")
     (repo / "todo" / "README.md").write_text("test workflow\n", encoding="utf-8")
     for agent in (
         "stage-developer",
@@ -167,6 +168,106 @@ def test_visible_manager_prepare_and_finish_round_trip(tmp_path: Path) -> None:
     assert state == "APPROVED"
     assert report.is_file()
     assert manager.status()["workflow_state"] == "APPROVED"
+
+
+def test_ignored_bytecode_does_not_change_protected_snapshot(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    prepared = manager.prepare_develop("T001")
+    development = Path(str(prepared["development_worktree"]))
+    (development / "src" / "value.txt").write_text("good\n", encoding="utf-8")
+    cache = development / "tools" / "workflow" / "__pycache__" / "core.cpython-312.pyc"
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(b"local bytecode")
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "CANDIDATE_READY",
+            "summary": "done",
+            "commands": [],
+            "residual_risks": [],
+        },
+    )
+
+    attempt = manager.finish_develop("T001")
+
+    assert attempt.candidate_commit is not None
+
+
+def test_rejected_protected_change_preserves_developer_handoff(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    prepared = manager.prepare_develop("T001")
+    development = Path(str(prepared["development_worktree"]))
+    (development / "todo" / "phases" / "P00" / "T001.md").write_text("changed\n", encoding="utf-8")
+    result_path = development / ".workflow" / "developer-result.json"
+    _write_json(
+        result_path,
+        {
+            "task_id": "T001",
+            "outcome": "CANDIDATE_READY",
+            "summary": "done",
+            "commands": [],
+            "residual_risks": [],
+        },
+    )
+
+    with pytest.raises(WorkflowError, match="developer modified a protected"):
+        manager.finish_develop("T001")
+
+    assert result_path.is_file()
+
+
+def test_fail_verdict_with_unknowns_requests_changes(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    prepared = manager.prepare_develop("T001")
+    development = Path(str(prepared["development_worktree"]))
+    (development / "src" / "value.txt").write_text("good\n", encoding="utf-8")
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "CANDIDATE_READY",
+            "summary": "done",
+            "commands": [],
+            "residual_risks": [],
+        },
+    )
+    attempt = manager.finish_develop("T001")
+    review = manager.prepare_review("T001")
+    review_worktree = Path(str(review["review_worktree"]))
+    _write_json(
+        review_worktree / ".workflow" / "review-result.json",
+        {
+            "task_id": "T001",
+            "base_commit": attempt.base_commit,
+            "candidate_commit": attempt.candidate_commit,
+            "verdict": "FAIL",
+            "checks": [
+                {
+                    "id": "A",
+                    "status": "FAIL",
+                    "evidence": ["acceptance failed"],
+                    "finding": "repair required",
+                },
+                {
+                    "id": "B",
+                    "status": "UNKNOWN",
+                    "evidence": [],
+                    "finding": "secondary evidence unavailable",
+                },
+            ],
+            "must_not_violations": [],
+            "unknowns": ["secondary evidence unavailable"],
+            "required_changes": ["repair acceptance A"],
+        },
+    )
+
+    state, _ = manager.finish_review("T001")
+
+    assert state == "CHANGES_REQUESTED"
 
 
 def test_config_validation_rejects_dependency_cycle(tmp_path: Path) -> None:

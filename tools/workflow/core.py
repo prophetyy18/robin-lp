@@ -220,6 +220,27 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def _validate_object_keys(
+    value: Mapping[str, Any],
+    *,
+    required: set[str],
+    optional: set[str] | None = None,
+    label: str,
+) -> None:
+    optional_fields = optional or set()
+    missing = required - value.keys()
+    unexpected = value.keys() - required - optional_fields
+    if missing:
+        raise WorkflowError(f"{label} is missing fields: {', '.join(sorted(missing))}")
+    if unexpected:
+        raise WorkflowError(f"{label} has unexpected fields: {', '.join(sorted(unexpected))}")
+
+
+def _validate_string_list(value: object, label: str) -> None:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise WorkflowError(f"{label} must be a list of strings")
+
+
 def _snapshot(paths: Sequence[Path], root: Path) -> dict[str, str]:
     snapshot: dict[str, str] = {}
     for path in paths:
@@ -229,16 +250,21 @@ def _snapshot(paths: Sequence[Path], root: Path) -> dict[str, str]:
 
 
 def _protected_paths(root: Path) -> list[Path]:
-    paths: list[Path] = []
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        relative = path.relative_to(root).as_posix()
-        if relative in PROTECTED_FILES or any(
-            relative.startswith(item) for item in PROTECTED_PREFIXES
-        ):
-            paths.append(path)
-    return sorted(paths)
+    # Match Git's view of repository content. Files ignored by the repository
+    # (bytecode, test caches, build output, and similar local artefacts) are not
+    # candidate changes and must not alter the protected snapshot. Tracked files
+    # and non-ignored untracked files remain covered.
+    pathspecs = [*sorted(PROTECTED_FILES), *PROTECTED_PREFIXES]
+    relative_paths = _git(
+        root,
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        *pathspecs,
+    ).stdout.splitlines()
+    return sorted(root / relative for relative in relative_paths if (root / relative).is_file())
 
 
 def _working_tree_changes(root: Path) -> list[str]:
@@ -651,7 +677,6 @@ class WorkflowManager:
         worktree = Path(attempt.development_worktree)
         config = self.load_config(worktree)
         self._validate_developer_result(result, task_id)
-        (worktree / ".workflow" / "developer-result.json").unlink(missing_ok=True)
         after = _snapshot(_protected_paths(worktree), worktree)
         if before != after:
             raise WorkflowError(
@@ -675,6 +700,7 @@ class WorkflowManager:
             }[outcome]
             self._set_state(config, task_id, state, base_commit=attempt.base_commit)
             _write_json(worktree / "todo" / "config.yaml", config)
+            (worktree / ".workflow" / "developer-result.json").unlink(missing_ok=True)
             _git(worktree, "add", "-A")
             _git(worktree, "commit", "-m", f"chore(workflow): record {task_id} {state.lower()}")
             self.save_attempt(attempt)
@@ -686,6 +712,7 @@ class WorkflowManager:
         changed = _git(worktree, "status", "--porcelain").stdout.strip()
         if not changed:
             raise WorkflowError("developer produced no candidate changes")
+        (worktree / ".workflow" / "developer-result.json").unlink(missing_ok=True)
         _git(worktree, "add", "-A")
         _git(
             worktree,
@@ -708,6 +735,12 @@ class WorkflowManager:
         return attempt
 
     def _validate_developer_result(self, result: Mapping[str, Any], task_id: str) -> None:
+        _validate_object_keys(
+            result,
+            required={"task_id", "outcome", "summary", "commands", "residual_risks"},
+            optional={"blocking_question", "triage_request"},
+            label="developer result",
+        )
         if result.get("task_id") != task_id:
             raise WorkflowError("developer result task_id does not match")
         outcome = result.get("outcome")
@@ -715,20 +748,43 @@ class WorkflowManager:
             raise WorkflowError("developer result has invalid outcome")
         if not isinstance(result.get("summary"), str):
             raise WorkflowError("developer result summary must be a string")
-        if not isinstance(result.get("commands"), list):
+        commands = result.get("commands")
+        if not isinstance(commands, list):
             raise WorkflowError("developer result commands must be a list")
-        if not isinstance(result.get("residual_risks"), list):
-            raise WorkflowError("developer result residual_risks must be a list")
+        for command in commands:
+            if not isinstance(command, dict):
+                raise WorkflowError("developer result command must be an object")
+            _validate_object_keys(
+                command,
+                required={"command", "result"},
+                label="developer result command",
+            )
+            if not all(isinstance(command[key], str) for key in ("command", "result")):
+                raise WorkflowError("developer result command fields must be strings")
+        _validate_string_list(result.get("residual_risks"), "developer result residual_risks")
+        if result.get("blocking_question") is not None and not isinstance(
+            result.get("blocking_question"), str
+        ):
+            raise WorkflowError("developer result blocking_question must be a string or null")
         if outcome == "TRIAGE_REQUIRED":
             self._validate_triage_request(result.get("triage_request"))
 
     def _validate_triage_request(self, value: object) -> None:
         if not isinstance(value, dict):
             raise WorkflowError("TRIAGE_REQUIRED must include triage_request")
+        _validate_object_keys(
+            value,
+            required={
+                "observed_problem",
+                "evidence",
+                "proposed_classification",
+                "requested_change",
+            },
+            label="triage_request",
+        )
         if not isinstance(value.get("observed_problem"), str) or not value["observed_problem"]:
             raise WorkflowError("triage_request must describe the observed problem")
-        if not isinstance(value.get("evidence"), list):
-            raise WorkflowError("triage_request evidence must be a list")
+        _validate_string_list(value.get("evidence"), "triage_request evidence")
         classifications = {
             "IMPLEMENTATION_DEFECT",
             "CONTRACT_MISMATCH",
@@ -742,6 +798,21 @@ class WorkflowManager:
             raise WorkflowError("triage_request requested_change must be a string")
 
     def _validate_review_result(self, result: Mapping[str, Any], attempt: AttemptRecord) -> str:
+        _validate_object_keys(
+            result,
+            required={
+                "task_id",
+                "base_commit",
+                "candidate_commit",
+                "verdict",
+                "checks",
+                "must_not_violations",
+                "unknowns",
+                "required_changes",
+            },
+            optional={"residual_risks", "triage_request"},
+            label="review result",
+        )
         if result.get("task_id") != attempt.task_id:
             raise WorkflowError("review task_id does not match")
         if result.get("base_commit") != attempt.base_commit:
@@ -762,12 +833,25 @@ class WorkflowManager:
                 "UNKNOWN",
             }:
                 raise WorkflowError("review contains an invalid check")
+            _validate_object_keys(
+                check,
+                required={"id", "status", "evidence", "finding"},
+                label="review check",
+            )
+            if not isinstance(check.get("id"), str) or not check["id"]:
+                raise WorkflowError("review check id must be a non-empty string")
+            _validate_string_list(check.get("evidence"), "review check evidence")
+            if not isinstance(check.get("finding"), str):
+                raise WorkflowError("review check finding must be a string")
             statuses.append(check["status"])
         violations = result.get("must_not_violations")
         unknowns = result.get("unknowns")
         required = result.get("required_changes")
-        if not all(isinstance(value, list) for value in (violations, unknowns, required)):
-            raise WorkflowError("review finding collections must be lists")
+        _validate_string_list(violations, "review must_not_violations")
+        _validate_string_list(unknowns, "review unknowns")
+        _validate_string_list(required, "review required_changes")
+        if "residual_risks" in result:
+            _validate_string_list(result.get("residual_risks"), "review residual_risks")
         if verdict == "TRIAGE_REQUIRED":
             self._validate_triage_request(result.get("triage_request"))
             return "TRIAGE_REQUIRED"
@@ -782,8 +866,12 @@ class WorkflowManager:
             raise WorkflowError("PASS contradicts failed/unknown checks or unresolved findings")
         if mechanically_passes:
             return "APPROVED"
-        if verdict == "BLOCKED" or "UNKNOWN" in statuses or unknowns:
+        if verdict == "BLOCKED":
             return "BLOCKED"
+        if verdict == "FAIL":
+            if "FAIL" not in statuses and not violations and not required:
+                raise WorkflowError("FAIL must include a failed check or required change")
+            return "CHANGES_REQUESTED"
         return "CHANGES_REQUESTED"
 
     def prepare_review(self, task_id: str) -> dict[str, object]:
@@ -836,18 +924,27 @@ class WorkflowManager:
             raise WorkflowError(f"review result is missing: {result_path}")
         result = _load_json(result_path)
         state = self._validate_review_result(result, attempt)
-        result_path.unlink()
-        reviewer_changes = _git(review_worktree, "status", "--porcelain").stdout.strip()
+        rendered_review = _render_review(result)
+        reviewer_changes = [
+            path
+            for path in _working_tree_changes(review_worktree)
+            if path != ".workflow/review-result.json"
+        ]
         if reviewer_changes:
             raise WorkflowError("reviewer left changes outside its result handoff")
         if _sha(review_worktree) != attempt.candidate_commit:
             raise WorkflowError("review worktree no longer matches candidate commit")
+        recorded = self._record_review_result(attempt, result, state, rendered_review)
+        result_path.unlink()
         _git(self.repo, "worktree", "remove", str(review_worktree), check=False)
-
-        return self._record_review_result(attempt, result, state)
+        return recorded
 
     def _record_review_result(
-        self, attempt: AttemptRecord, result: Mapping[str, Any], state: str
+        self,
+        attempt: AttemptRecord,
+        result: Mapping[str, Any],
+        state: str,
+        rendered_review: str | None = None,
     ) -> tuple[str, Path]:
         task_id = attempt.task_id
         worktree = Path(attempt.development_worktree)
@@ -862,7 +959,10 @@ class WorkflowManager:
         )
         relative_md = relative_json.with_suffix(".md")
         _write_json(worktree / relative_json, result)
-        (worktree / relative_md).write_text(_render_review(result), encoding="utf-8")
+        (worktree / relative_md).write_text(
+            rendered_review if rendered_review is not None else _render_review(result),
+            encoding="utf-8",
+        )
         updates: dict[str, object] = {
             "base_commit": attempt.base_commit,
             "candidate_commit": attempt.candidate_commit,
@@ -968,6 +1068,19 @@ class WorkflowManager:
     def _validate_triage_result(
         self, result: Mapping[str, Any], task_id: str, issue_commit: str
     ) -> str:
+        _validate_object_keys(
+            result,
+            required={
+                "task_id",
+                "issue_commit",
+                "classification",
+                "summary",
+                "evidence",
+                "recommended_action",
+            },
+            optional={"owner_question"},
+            label="triage result",
+        )
         if result.get("task_id") != task_id or result.get("issue_commit") != issue_commit:
             raise WorkflowError("triage result identity or issue_commit does not match")
         classification = result.get("classification")
@@ -982,8 +1095,9 @@ class WorkflowManager:
             raise WorkflowError("triage result classification is invalid")
         if not isinstance(result.get("summary"), str) or not result["summary"]:
             raise WorkflowError("triage result summary must be non-empty")
-        if not isinstance(result.get("evidence"), list):
-            raise WorkflowError("triage result evidence must be a list")
+        _validate_string_list(result.get("evidence"), "triage result evidence")
+        if not isinstance(result.get("recommended_action"), str):
+            raise WorkflowError("triage result recommended_action must be a string")
         if classification == "OWNER_DECISION_REQUIRED" and not isinstance(
             result.get("owner_question"), str
         ):
@@ -1128,6 +1242,11 @@ class WorkflowManager:
         return plan
 
     def _validate_planner_result(self, result: Mapping[str, Any], task_id: str) -> str:
+        _validate_object_keys(
+            result,
+            required={"task_id", "outcome", "summary", "rationale", "unresolved_questions"},
+            label="planner result",
+        )
         if result.get("task_id") != task_id:
             raise WorkflowError("planner result task_id does not match")
         outcome = result.get("outcome")
@@ -1142,8 +1261,7 @@ class WorkflowManager:
             result.get("rationale"), str
         ):
             raise WorkflowError("planner result summary and rationale must be strings")
-        if not isinstance(result.get("unresolved_questions"), list):
-            raise WorkflowError("planner unresolved_questions must be a list")
+        _validate_string_list(result.get("unresolved_questions"), "planner unresolved_questions")
         return outcome
 
     def prepare_plan_review(self, task_id: str) -> dict[str, object]:
@@ -1230,6 +1348,19 @@ class WorkflowManager:
         return state, worktree / markdown_report
 
     def _validate_plan_review_result(self, result: Mapping[str, Any], plan: PlanRecord) -> str:
+        _validate_object_keys(
+            result,
+            required={
+                "task_id",
+                "base_commit",
+                "candidate_commit",
+                "verdict",
+                "summary",
+                "required_changes",
+                "unknowns",
+            },
+            label="plan review result",
+        )
         if (
             result.get("task_id") != plan.task_id
             or result.get("base_commit") != plan.base_commit
@@ -1241,13 +1372,15 @@ class WorkflowManager:
         unknowns = result.get("unknowns")
         if verdict not in {"PASS", "FAIL", "BLOCKED"}:
             raise WorkflowError("plan review verdict is invalid")
-        if not isinstance(required, list) or not isinstance(unknowns, list):
-            raise WorkflowError("plan review findings must be lists")
+        if not isinstance(result.get("summary"), str):
+            raise WorkflowError("plan review summary must be a string")
+        _validate_string_list(required, "plan review required_changes")
+        _validate_string_list(unknowns, "plan review unknowns")
         if verdict == "PASS":
             if required or unknowns:
                 raise WorkflowError("plan review PASS contradicts unresolved findings")
             return "CHANGES_REQUESTED"
-        if verdict == "BLOCKED" or unknowns:
+        if verdict == "BLOCKED":
             return "PLAN_REVIEW_BLOCKED"
         return "PLANNING"
 

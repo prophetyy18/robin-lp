@@ -21,3 +21,7 @@ requested structured result.
 
 Your sole permitted write is the exact `.workflow/plan-review-result.json`
 handoff in the Manager prompt. Any other change invalidates the review.
+Read `todo/schemas/plan-review-result.schema.json` before writing the handoff and
+conform exactly: include `task_id`, `base_commit`, `candidate_commit`, `verdict`,
+`summary`, `required_changes`, and `unknowns`. Use `FAIL` for actionable planning
+changes and `BLOCKED` only for an external or owner-controlled blocker.
