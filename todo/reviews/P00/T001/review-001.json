@@ -1,0 +1,213 @@
+{
+  "task_id": "T001",
+  "phase": "P00",
+  "base_commit": "7fbdf204c8d333ea0c0b0c8dc12d547751c0a884",
+  "candidate_commit": "33d28ab885657b9c1845d0699fa10d5b642cb388",
+  "verdict": "FAIL",
+  "summary": "T001's deliverables are all correctly implemented: pip-compile-generated SHA-256-pinned requirements.lock.txt, focused tests/test_lockfile.py (5/5 green), README install sequence update, unchanged minimal-deps pyproject.toml. Two acceptance clauses are unsatisfied: (1) no real clean-room 'pip install --require-hashes' was performed — only a pip --dry-run — and (2) 'all quality commands pass twice' fails on both runs because tests/test_workflow_contracts.py::test_repository_workflow_configuration_is_valid hard-codes assert config['tasks']['T001']['status'] == 'READY' but the controller has correctly transitioned T001 to AWAITING_REVIEW. The candidate does not modify that test; resolving it is an orthogonal planning concern outside T001 scope. Ruff check, ruff format --check, mypy src tests all pass cleanly twice; 147 files already formatted; 39 source files clean under strict mypy. No Must-not violations; no secrets; no unrelated edits.",
+  "checks": [
+    {
+      "id": "diff_minimal_and_scoped",
+      "status": "PASS",
+      "finding": "T001 diff is minimal, scoped, and contains no unrelated edits or secrets.",
+      "evidence": [
+        "git diff --stat between 7fbdf20 and 33d28ab shows README.md, requirements.lock.txt, tests/test_lockfile.py, todo/config.yaml, todo/evidence/P00/T001/attempt-001-developer.json only."
+      ],
+      "files": [
+        "README.md",
+        "requirements.lock.txt",
+        "tests/test_lockfile.py",
+        "todo/config.yaml"
+      ]
+    },
+    {
+      "id": "no_secrets_in_diff",
+      "status": "PASS",
+      "finding": "No private keys, API secrets, tokens, or env reads in the candidate diff; .gitignore continues to block .env/.key/.pem.",
+      "evidence": [
+        "Searched candidate diff for private keys, API secrets, tokens, passwords. None present."
+      ],
+      "files": []
+    },
+    {
+      "id": "deliverable_pyproject_toml",
+      "status": "PASS",
+      "finding": "pyproject.toml is unchanged and declares requires-python='>=3.12' with Python 3.12/3.13 classifiers.",
+      "evidence": [
+        "pyproject.toml declares requires-python = '>=3.12' and classifiers Programming Language :: Python :: 3.12 and 3.13."
+      ],
+      "files": [
+        "pyproject.toml"
+      ]
+    },
+    {
+      "id": "deliverable_locked_dependencies",
+      "status": "PASS",
+      "finding": "requirements.lock.txt is pip-compile-generated with --generate-hashes; 27 packages, 586 SHA-256 entries cover every direct runtime and dev dep.",
+      "evidence": [
+        "Header documents the regeneration recipe. pip install --require-hashes --dry-run resolves cleanly."
+      ],
+      "files": [
+        "requirements.lock.txt"
+      ]
+    },
+    {
+      "id": "deliverable_src_package",
+      "status": "PASS",
+      "finding": "src/robinhood_lp/ subpackages config, discovery, protocol, rpc, storage exist with __init__.py and __main__.py.",
+      "evidence": [
+        "Directory listing shows the expected skeleton."
+      ],
+      "files": [
+        "src/robinhood_lp/"
+      ]
+    },
+    {
+      "id": "deliverable_tests_dir",
+      "status": "PASS",
+      "finding": "tests/ contains the existing suite plus the new tests/test_lockfile.py.",
+      "evidence": [
+        "Directory listing."
+      ],
+      "files": [
+        "tests/"
+      ]
+    },
+    {
+      "id": "deliverable_quality_commands_defined",
+      "status": "PASS",
+      "finding": "pytest, ruff check, ruff format --check, mypy src tests are all wired via pyproject.toml.",
+      "evidence": [
+        "pyproject.toml [tool.pytest.ini_options] and [tool.mypy] strict=true, python_version='3.12'."
+      ],
+      "files": [
+        "pyproject.toml"
+      ]
+    },
+    {
+      "id": "deliverable_smoke_test",
+      "status": "PASS",
+      "finding": "tests/test_smoke.py contains three passing CLI/import smoke tests.",
+      "evidence": [
+        "test_package_version_is_string, test_python_dash_m_version_exits_zero, test_python_dash_m_help_exits_zero all green."
+      ],
+      "files": [
+        "tests/test_smoke.py"
+      ]
+    },
+    {
+      "id": "deliverable_lockfile_tests",
+      "status": "PASS",
+      "finding": "tests/test_lockfile.py adds five passing shape/consistency tests for the lockfile.",
+      "evidence": [
+        "test_lockfile_exists_at_repo_root, _is_parseable_and_consistent, _covers_every_direct_runtime_dependency, _covers_every_direct_dev_dependency, _pins_eth_hash_pycryptodome_backend all pass."
+      ],
+      "files": [
+        "tests/test_lockfile.py"
+      ]
+    },
+    {
+      "id": "acceptance_clean_install_evidence",
+      "status": "FAIL",
+      "finding": "The candidate did not perform a real clean-room 'pip install --require-hashes -r requirements.lock.txt'; only a pip --dry-run was executed.",
+      "evidence": [
+        "Developer handoff explicitly states a clean-room byte-identical install was not re-exercised.",
+        "Legacy evidence file todo/evidence/legacy/2026-09-14/T001-environment-delivery.md records the same gap."
+      ],
+      "files": [
+        "todo/evidence/P00/T001/attempt-001-developer.json",
+        "todo/evidence/legacy/2026-09-14/T001-environment-delivery.md"
+      ]
+    },
+    {
+      "id": "acceptance_quality_commands_pass_twice",
+      "status": "FAIL",
+      "finding": "Both pytest runs report 1 failed (tests/test_workflow_contracts.py::test_repository_workflow_configuration_is_valid hard-codes T001.status=='READY'), 284 passed, 2 skipped. ruff check, ruff format --check, mypy src tests all pass both runs.",
+      "evidence": [
+        "Run 1: 1 failed, 284 passed, 2 skipped in 1.07s.",
+        "Run 2: 1 failed, 284 passed, 2 skipped in 1.09s. Identical summary, no flakes.",
+        "The failing test asserts config['tasks']['T001']['status']=='READY' but the controller has correctly moved T001 to AWAITING_REVIEW.",
+        "ruff check: All checks passed.",
+        "ruff format --check: 147 files already formatted.",
+        "mypy src tests: Success: no issues found in 39 source files."
+      ],
+      "files": [
+        "tests/test_workflow_contracts.py",
+        "tools/workflow/core.py"
+      ]
+    },
+    {
+      "id": "acceptance_python_bounds",
+      "status": "PASS",
+      "finding": "pyproject.toml declares requires-python='>=3.12' and Python 3.12/3.13 classifiers; host Python 3.12.14 runs all quality commands.",
+      "evidence": [
+        "pyproject.toml metadata.",
+        "Host python is 3.12.14 at /home/lpdev/miniconda3/envs/robinhood-lp/bin/python."
+      ],
+      "files": [
+        "pyproject.toml"
+      ]
+    },
+    {
+      "id": "must_not_blockchain_storage_dataframe_deps",
+      "status": "PASS",
+      "finding": "Runtime deps remain pydantic, eth-hash[pycryptodome], httpx; no web3, eth-account, pyarrow, pandas, numpy, polars added.",
+      "evidence": [
+        "pyproject.toml [project] dependencies section."
+      ],
+      "files": [
+        "pyproject.toml"
+      ]
+    },
+    {
+      "id": "must_not_expose_environment_contents",
+      "status": "PASS",
+      "finding": "No diagnostic code added by the candidate logs environment variables or host metadata.",
+      "evidence": [
+        "test_lockfile.py only reads the lockfile from disk.",
+        "Existing tests/test_no_signing_paths.py and tests/test_config.py::test_loader_rejects_credential_url_in_config remain green."
+      ],
+      "files": [
+        "tests/test_lockfile.py"
+      ]
+    },
+    {
+      "id": "dependency_T000_approved",
+      "status": "PASS",
+      "finding": "T000 status is APPROVED with approved_commit 6c3177883a676a06f8b571d0a598f524e319fa34; T001.depends_on is exactly [T000].",
+      "evidence": [
+        "todo/config.yaml T000 entry."
+      ],
+      "files": [
+        "todo/config.yaml"
+      ]
+    }
+  ],
+  "unknowns": [
+    "Whether a fresh 'pip install --require-hashes -r requirements.lock.txt' against an empty pip cache or new venv would succeed without hash errors. pip --dry-run --require-hashes resolves cleanly in the host environment but a true clean-room install was not exercised."
+  ],
+  "must_not_violations": [],
+  "required_changes": [
+    "Triage the conflict between tests/test_workflow_contracts.py::test_repository_workflow_configuration_is_valid and the workflow state machine (READY -> IN_DEVELOPMENT -> AWAITING_REVIEW). Until the assertion is repaired or the test is restructured, pytest cannot satisfy 'all quality commands pass twice' for any task once its active review state has been entered. This is an orthogonal planning/contract concern; the developer role cannot resolve it from inside T001 scope.",
+    "Re-run 'pip install --require-hashes -r requirements.lock.txt' in a clean environment (clear pip cache or new venv) and capture the command, the resolved wheel set, and a hash-verification log under todo/evidence/P00/T001/. The current attempt only performed a pip --dry-run."
+  ],
+  "reviewer_notes": [
+    "The candidate is technically correct on every direct deliverable; the lockfile self-consistency tests are strong.",
+    "Two independent pytest runs produced byte-identical summaries (1 failed, 284 passed, 2 skipped); no flake, no environmental variance.",
+    "ruff check, ruff format --check, mypy src tests all green; 147 files already formatted; 39 source files clean under strict mypy.",
+    "The candidate's README addition accurately documents the locked install and references the Must-not rule.",
+    "tests/test_lockfile.py is well-scoped to shape/consistency; the actual clean-room install belongs in CI evidence under todo/evidence/P00/T001/."
+  ],
+  "file_paths_reviewed": [
+    "/home/lpdev/lp-worktrees/review-t001-attempt-001/requirements.lock.txt",
+    "/home/lpdev/lp-worktrees/review-t001-attempt-001/tests/test_lockfile.py",
+    "/home/lpdev/lp-worktrees/review-t001-attempt-001/tests/test_smoke.py",
+    "/home/lpdev/lp-worktrees/review-t001-attempt-001/tests/test_workflow_contracts.py",
+    "/home/lpdev/lp-worktrees/review-t001-attempt-001/pyproject.toml",
+    "/home/lpdev/lp-worktrees/review-t001-attempt-001/README.md",
+    "/home/lpdev/lp-worktrees/review-t001-attempt-001/todo/config.yaml",
+    "/home/lpdev/lp-worktrees/review-t001-attempt-001/todo/phases/P00-engineering-baseline/T001.md",
+    "/home/lpdev/lp-worktrees/review-t001-attempt-001/todo/evidence/P00/T001/attempt-001-developer.json",
+    "/home/lpdev/lp-worktrees/review-t001-attempt-001/tools/workflow/core.py"
+  ]
+}
