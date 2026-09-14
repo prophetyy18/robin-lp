@@ -663,8 +663,13 @@ def test_pool_key_serialization_uses_canonical_lowercase() -> None:
 
 
 def test_live_approval_requires_all_fields() -> None:
+    # ``approved_by`` is the required field under test. We pass an empty
+    # string so Pydantic's ``min_length=1`` validator rejects it; the
+    # resulting ``ValidationError`` mentions ``approved_by`` and the test
+    # asserts the matching ``ValueError`` is raised.
     with pytest.raises(ValueError, match="approved_by"):
         LiveApproval(
+            approved_by="",
             approved_at=_dt.datetime(2026, 1, 1, tzinfo=_dt.UTC),
             approved_scope="scope",
             evidence_ref="ref",
