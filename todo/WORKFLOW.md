@@ -183,6 +183,50 @@ and a human-readable Markdown report.
 Worktree deletion is never attempted for a failed development branch. A detached
 review worktree that contains tracked modifications is retained for diagnosis.
 
+## Pre-existing unverified implementation
+
+Implementation code that exists in the repository but was **not** produced
+by the `develop → review` workflow for the specific task it nominally
+satisfies is "pre-existing unverified implementation" (previously referred
+to informally as "orphan code"). It remains in the Git history as evidence;
+it does **not** advance any task's status in `todo/config.yaml`. `APPROVED`
+still requires an independent Reviewer verdict on the exact candidate SHA.
+
+### Migration rule
+
+The migration rule for pre-existing unverified implementation is
+**preserve, review per task, claim after approval**.
+
+1. **Preserve.** No migration step rebases, squashes, or deletes the
+   pre-existing commits. The current `main` HEAD and every historical
+   commit on it remain intact until each task is independently approved
+   by the controller's Reviewer process.
+2. **Review per task.** For each `PLANNED` task whose contract already has
+   a pre-existing implementation, the Manager activates that task normally
+   (`ready`, then `develop`). The Developer process receives the current
+   `main` HEAD as its base commit, reads and cites the pre-existing code,
+   and may reuse or extend it rather than rewrite it from scratch. Code
+   reuse must still satisfy the task contract's Outcome, Deliverables,
+   Acceptance, and Must-not clauses; the *Implementation status* notes in
+   each task contract enumerate the gaps that must be closed.
+3. **Claim after approval.** A task is not delivered until the independent
+   Reviewer returns `APPROVED` for the Developer candidate commit. Until
+   then, the pre-existing code is a hint, not acceptance. No commit is
+   fast-forwarded into the `approved_commit` slot without the Reviewer's
+   verdict on the exact candidate SHA.
+
+If the Developer discovers that the pre-existing code is missing acceptance
+evidence already recorded in the task contract (for example, a known defect
+listed under *Implementation status*), the Developer must close that gap
+inside the same task — deferring it is not allowed. If the Developer finds
+a contract or Spec defect, it returns `TRIAGE_REQUIRED` and the planning
+path applies as usual; the pre-existing branch is preserved as a diagnostic
+snapshot per the Failure handling section above.
+
+Pre-existing implementation is **never** fast-forwarded directly into
+`APPROVED`. Every fast-forward operation runs through the controller and is
+bound to the exact candidate SHA the Reviewer inspected.
+
 ## Bootstrap exercise
 
 `tests/test_workflow.py::test_fake_fail_repair_pass_workflow` creates a temporary

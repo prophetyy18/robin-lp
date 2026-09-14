@@ -54,10 +54,19 @@ python -m pip install -e '.[dev]'
 ## Run the workflow with Claude Code
 
 Yes: Claude Code can act as the workflow Manager. Start it from the repository
-root:
+root.
+
+The workflow controller and quality gates (`pytest`, `ruff`, `mypy`,
+`tools.workflow`) require the project Python at
+`/home/lpdev/miniconda3/envs/robinhood-lp/bin/python`. System `python` is not
+on this server's PATH and `python -m tools.workflow …` will fail without the
+full path. Put the project Python first (or invoke every workflow command by
+its absolute path) before starting Claude so that `python` inside the session
+resolves to the right interpreter:
 
 ```bash
 cd /home/lpdev/lp
+export PATH="/home/lpdev/miniconda3/envs/robinhood-lp/bin:$PATH"
 claude --permission-mode manual
 ```
 
