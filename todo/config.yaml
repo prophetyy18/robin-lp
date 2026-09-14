@@ -12,7 +12,7 @@
   },
   "active_phase": "P00",
   "active_task": "T001",
-  "workflow_state": "BLOCKED",
+  "workflow_state": "TRIAGE_REQUIRED",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -27,12 +27,12 @@
     },
     "T001": {
       "phase": "P00",
-      "status": "BLOCKED",
+      "status": "TRIAGE_REQUIRED",
       "depends_on": [
         "T000"
       ],
       "task_file": "todo/phases/P00-engineering-baseline/T001.md",
-      "attempt": 1,
+      "attempt": 2,
       "base_commit": "7fbdf204c8d333ea0c0b0c8dc12d547751c0a884",
       "candidate_commit": "33d28ab885657b9c1845d0699fa10d5b642cb388",
       "approved_commit": null,

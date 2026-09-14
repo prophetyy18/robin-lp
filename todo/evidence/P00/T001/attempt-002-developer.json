@@ -1,0 +1,36 @@
+{
+  "task_id": "T001",
+  "outcome": "TRIAGE_REQUIRED",
+  "summary": "T001 attempt 1 implementation is complete and correct (requirements.lock.txt, tests/test_lockfile.py, README install sequence, unchanged pyproject.toml), but the acceptance clause 'all quality commands pass twice' is unsatisfiable from inside T001 scope because tests/test_workflow_contracts.py::test_repository_workflow_configuration_is_valid hard-codes assert config['tasks']['T001']['status'] == 'READY' while the workflow state machine correctly transitions active tasks out of READY (READY -> IN_DEVELOPMENT -> AWAITING_REVIEW). Modifying that test would exceed Developer scope and would corrupt a workflow contract invariant. Additionally, no real clean-room 'pip install --require-hashes' was performed; only pip --dry-run. The test contract defect is the primary blocker and must be resolved by a planner before any retry can pass quality gates.",
+  "commands": [
+    {
+      "command": "git log --oneline -3",
+      "result": "63cfb2c chore(workflow): record T001 review 1; 33d28ab feat(t001): candidate attempt 1; 7fbdf20 chore(workflow): migrate agent control plane"
+    },
+    {
+      "command": "grep -n 'T001' tests/test_workflow_contracts.py",
+      "result": "Hard-coded assertion at the relevant line: 'assert config[\"tasks\"][\"T001\"][\"status\"] == \"READY\"'"
+    },
+    {
+      "command": "cat todo/reviews/P00/T001/review-001.md | head -40",
+      "result": "Reviewer verdict FAIL with required_changes naming the test/state-machine conflict"
+    }
+  ],
+  "residual_risks": [
+    "If the planner does not repair the test/state-machine conflict, every future task attempt will hit the same 'pytest fails once a task leaves READY' failure and waste developer cycles.",
+    "Until a real clean-room 'pip install --require-hashes -r requirements.lock.txt' is captured under todo/evidence/P00/T001/, the 'build and install from a clean environment' acceptance clause remains unverified.",
+    "If the planner decides the test should be deleted rather than repaired, downstream contract tests (e.g., test_repository_workflow_configuration_is_valid for other tasks) need a parallel fix."
+  ],
+  "blocking_question": null,
+  "triage_request": {
+    "observed_problem": "tests/test_workflow_contracts.py::test_repository_workflow_configuration_is_valid hard-codes assert config['tasks']['T001']['status'] == 'READY'. The workflow state machine (tools/workflow/core.py) correctly transitions every active task out of READY once prepare-develop is invoked. The conflict is observable: pytest fails identically on every active review with '1 failed' and the same hard-coded assertion message, regardless of any T001 deliverable. The Developer role cannot satisfy 'all quality commands pass twice' from inside T001 scope because (a) the test is not a T001 deliverable, (b) modifying the assertion would either weaken it to a tautology or change a workflow contract invariant the rest of the system relies on, and (c) removing the test would remove the only static check that the workflow configuration matches the documented task statuses.",
+    "evidence": [
+      "Reviewer handoff todo/reviews/P00/T001/review-001.md: verdict=FAIL, required_changes includes 'Triage the conflict between tests/test_workflow_contracts.py::test_repository_workflow_configuration_is_valid and the workflow state machine'.",
+      "Reviewer check 'acceptance_quality_commands_pass_twice' in todo/reviews/P00/T001/review-001.json: status=FAIL, evidence cites both pytest runs reporting 1 failed, 284 passed, 2 skipped, identical failure on the same assertion.",
+      "tests/test_workflow_contracts.py: contains a hard-coded READY check for T001 (and likely every other task). The Developer scope is bounded by the T001 task contract, which lists only 'one import/CLI smoke test' under Deliverables — modifying contract tests is outside that scope.",
+      "tools/workflow/core.py ALLOWED_TRANSITIONS: 'READY' can only transition to 'IN_DEVELOPMENT' or 'BLOCKED'; 'IN_DEVELOPMENT' to 'AWAITING_REVIEW' / 'TRIAGE_REQUIRED' / 'BLOCKED'. The state machine is correct; the test is wrong."
+    ],
+    "proposed_classification": "CONTRACT_MISMATCH",
+    "requested_change": "Issue Triager should classify this as CONTRACT_MISMATCH (or SPEC_DEFECT) and route the issue to the Planner. The Planner should repair tests/test_workflow_contracts.py::test_repository_workflow_configuration_is_valid so the assertion either (a) is parameterised over the expected per-task state instead of hard-coding READY, (b) excludes the active task under test, or (c) is moved out of the static-check layer into an integration check that runs only on a fresh checkout where every task IS READY. The Planner must also decide whether the same defect exists for other tasks in the test file and apply the parallel fix. The Developer will then re-attempt T001 in a follow-up attempt to capture the missing clean-room pip install evidence."
+  }
+}
