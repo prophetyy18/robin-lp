@@ -1,0 +1,68 @@
+{
+  "task_id": "T001",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Attempt 4 captures the missing clean-room pip-install evidence and re-runs all four quality commands twice. The implementation files (pyproject.toml, requirements.lock.txt, README.md, tests/test_lockfile.py, src/robinhood_lp/, tests/test_smoke.py) were NOT modified; they are exactly the attempt-1 deliverable plus the Owner-authorized maintenance 65f5c76 changes. A fresh Python 3.12 venv was created at /tmp/lp-t001-cleanroom-venv using /home/lpdev/miniconda3/envs/robinhood-lp/bin/python3.12 -m venv, then 'pip install --require-hashes -r requirements.lock.txt' completed end-to-end with exit code 0 (pip 25.0.1, Python 3.12.14). The resolved wheel set (27 packages with SHA-256 hashes) was captured to todo/evidence/P00/T001/attempt-004-pip-install.json. All four quality commands pass twice; ruff check / ruff format / mypy outputs are byte-identical between the two runs. Pytest summary lines are byte-identical after stripping the wall-clock duration (1.65s vs 1.82s), which is non-deterministic. Lockfile self-consistency tests pass 5/5 (test_lockfile.py). The Owner-authorized maintenance already hardens test_workflow_contracts.py to use subset comparison {\"T000\",\"T004\"} <= APPROVED_set so the previous 1-failed pytest symptom is gone. Acceptance clause 'build and install from a clean environment' is now evidenced.",
+  "commands": [
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python3.12 -m venv /tmp/lp-t001-cleanroom-venv",
+      "result": "Clean-room Python 3.12.14 venv created at /tmp/lp-t001-cleanroom-venv. Pip 25.0.1 is the only tool installed in the venv at this point."
+    },
+    {
+      "command": "/tmp/lp-t001-cleanroom-venv/bin/pip install --require-hashes -r /home/lpdev/lp-worktrees/dev-t001-attempt-001/requirements.lock.txt",
+      "result": "Exit code 0. pip 25.0.1. Resolved and installed 27 runtime packages from requirements.lock.txt (28 site-packages total including pip itself). All hashes verified against the lockfile (pycryptodome 3.23.0 backend present for eth-hash[pycryptodome]). See todo/evidence/P00/T001/attempt-004-pip-install.json for the full wheel set, command argv, pip version, and per-package hashes."
+    },
+    {
+      "command": "Build todo/evidence/P00/T001/attempt-004-pip-install.json by parsing requirements.lock.txt and inspecting the clean-room venv (pip list --format=json)",
+      "result": "Wrote /home/lpdev/lp-worktrees/dev-t001-attempt-001/todo/evidence/P00/T001/attempt-004-pip-install.json containing: full command text + argv, Python 3.12.14, pip 25.0.1, mode=full install --require-hashes (no --dry-run, no --no-index), install_succeeded=true, exit_code=0, 27 resolved wheels with SHA-256 hashes, 28 installed packages, pycryptodome backend verified."
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q  (run 1)",
+      "result": "................s....................................................... [ 24%]\n........................................................................ [ 49%]\n....................................s................................... [ 74%]\n........................................................................ [ 99%]\n..                                                                       [100%]\n=========================== short test summary info ============================\nSKIPPED [1] tests/test_abi_artifacts.py:152: sha256 is a manual annotation; not enforced\nSKIPPED [1] tests/test_protocol_ids.py:289: vector 'reordered_inputs' supplies unsorted currencies; see test_reordered_inputs_refused_by_python_invariant\n288 passed, 2 skipped in 1.65s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check  (run 1)",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check  (run 1)",
+      "result": "149 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src tests  (run 1)",
+      "result": "Success: no issues found in 39 source files"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q  (run 2)",
+      "result": "................s....................................................... [ 24%]\n........................................................................ [ 49%]\n....................................s................................... [ 74%]\n........................................................................ [ 99%]\n..                                                                       [100%]\n=========================== short test summary info ============================\nSKIPPED [1] tests/test_abi_artifacts.py:152: sha256 is a manual annotation; not enforced\nSKIPPED [1] tests/test_protocol_ids.py:289: vector 'reordered_inputs' supplies unsorted currencies; see test_reordered_inputs_refused_by_python_invariant\n288 passed, 2 skipped in 1.82s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check  (run 2)",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check  (run 2)",
+      "result": "149 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src tests  (run 2)",
+      "result": "Success: no issues found in 39 source files"
+    },
+    {
+      "command": "diff /tmp/run1-*.txt /tmp/run2-*.txt  (byte-identical verification, with pytest wall-clock duration stripped)",
+      "result": "ruff check: byte-identical (both runs: 'All checks passed!'). ruff format --check: byte-identical (both runs: '149 files already formatted'). mypy: byte-identical (both runs: 'Success: no issues found in 39 source files'). pytest: summary lines byte-identical after stripping the wall-clock duration (run 1 1.65s, run 2 1.82s); the dot/s test progress, the SKIPPED reasons, and the '288 passed, 2 skipped' outcome line are identical."
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_lockfile.py -v",
+      "result": "5 passed in 0.02s -- all lockfile self-consistency tests pass: test_lockfile_exists_at_repo_root, test_lockfile_is_parseable_and_consistent, test_lockfile_covers_every_direct_runtime_dependency, test_lockfile_covers_every_direct_dev_dependency, test_lockfile_pins_eth_hash_pycryptodome_backend."
+    },
+    {
+      "command": "git -C /home/lpdev/lp-worktrees/dev-t001-attempt-001 status --short",
+      "result": "Only todo/evidence/P00/T001/attempt-004-pip-install.json (untracked) and todo/config.yaml (workflow state bumped to IN_DEVELOPMENT by the controller, attempt=4) are non-clean. The deliverable files (pyproject.toml, requirements.lock.txt, README.md, tests/test_lockfile.py, tests/test_smoke.py, src/robinhood_lp/) are untouched."
+    }
+  ],
+  "residual_risks": [
+    "Pytest's wall-clock duration differs between runs (1.65s vs 1.82s); the substantive test progress dots, skip reasons, and '288 passed, 2 skipped' line are identical.",
+    "Network was used to resolve wheels from PyPI; if a future run happens without network access, rerun with --no-index against a local wheel dir, or with --dry-run --require-hashes and record the resolved set in the evidence file (per task contract).",
+    "The Owner-authorized maintenance 65f5c76 still requires an independent reviewer's verification; this developer result is only the candidate handoff."
+  ]
+}
