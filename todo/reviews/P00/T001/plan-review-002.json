@@ -1,0 +1,59 @@
+{
+  "task_id": "T001",
+  "phase": "P00",
+  "base_commit": "a84c40f4f3468ae92018adc5c6f310ed79c590f7",
+  "candidate_commit": "b1ab97b2e66678d7e281f2a2884f6272ba4d39d7",
+  "classification": "CONTRACT_MISMATCH",
+  "verdict": "PASS",
+  "summary": "Independent verification confirms the Planner's NO_CHANGE_REQUIRED outcome is justified. The controller's planning scope enforcement (tools/workflow/core.py lines 1068-1083) restricts CONTRACT_MISMATCH changes to todo/phases/* and todo/config.yaml only; tests/ is forbidden. The Planner correctly identified that the actual test_workflow_contracts.py repair cannot be performed at the planning layer. The triage report correctly identified the underlying defect (hard-coded READY assertion vs. controller's state machine); the T001 task contract Deliverables list correctly excludes tests/test_workflow_contracts.py; and the Reviewer verdict FAIL with the same required_changes is consistent. The unresolved_questions are properly Owner-scoped (reclassification or residual-risk acceptance). The developer_followup correctly describes attempt 3's required evidence. The Plan Reviewer accepts the planning correction as proportionate and well-reasoned.",
+  "rationale": "The Planner did not manufacture a forbidden-path edit. The Planner did not weaken or skip any test. The Planner did not bypass the controller's scope enforcement. The Planner correctly recognised that the contract mismatch has no scope-compliant fix at the planning layer and routed the decision back to the Owner via the Manager. This is the correct planning-layer behaviour under the workflow contract; the actual fix requires an Owner decision to reclassify the issue or to accept the residual risk.",
+  "checks": [
+    {
+      "id": "planner_outcome_justified",
+      "status": "PASS",
+      "finding": "NO_CHANGE_REQUIRED outcome is justified given the controller's planning scope enforcement.",
+      "evidence": [
+        "tools/workflow/core.py lines 1068-1083 restrict CONTRACT_MISMATCH to todo/phases/* and todo/config.yaml only.",
+        "tests/test_workflow_contracts.py is not in that allow-list."
+      ]
+    },
+    {
+      "id": "triage_classification_correct",
+      "status": "PASS",
+      "finding": "Triage correctly identified CONTRACT_MISMATCH.",
+      "evidence": [
+        "Triage report at todo/triage/P00/T001/triage-002.json",
+        "test_workflow_contracts.py line 30 hard-codes READY assertion."
+      ]
+    },
+    {
+      "id": "developer_scope_correct",
+      "status": "PASS",
+      "finding": "Developer role legitimately cannot fix the test.",
+      "evidence": [
+        "T001 task contract Deliverables list contains only 'one import/CLI smoke test'."
+      ]
+    },
+    {
+      "id": "unresolved_questions_owner_scoped",
+      "status": "PASS",
+      "finding": "Three unresolved_questions are Owner decisions, not planning decisions.",
+      "evidence": [
+        "reclassify to OWNER_DECISION_REQUIRED or SPEC_DEFECT",
+        "accept T001 with residual risk",
+        "split test fix into separate planning cycle"
+      ]
+    },
+    {
+      "id": "developer_followup_complete",
+      "status": "PASS",
+      "finding": "Developer attempt 3 followup correctly identifies required evidence.",
+      "evidence": [
+        "re-run quality commands twice",
+        "capture clean-room pip install evidence under todo/evidence/P00/T001/"
+      ]
+    }
+  ],
+  "required_changes": [],
+  "unknowns": []
+}
