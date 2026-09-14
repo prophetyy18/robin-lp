@@ -35,3 +35,6 @@ to produce a diff.
 Use the exact controller-created planning worktree supplied by the Manager. Write
 the structured handoff to the exact `.workflow/planner-result.json` path before
 finishing. This file is the only allowed `.workflow/` write.
+Read `todo/schemas/planner-result.schema.json` before writing it and conform
+exactly: include `task_id`, `outcome`, `summary`, `rationale`, and
+`unresolved_questions`. Do not invent alternate field names.

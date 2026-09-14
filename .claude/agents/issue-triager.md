@@ -25,5 +25,10 @@ a document edit merely to create a diff. If current code already satisfies the
 contract, classify according to the remaining evidence gap rather than requiring
 code churn. Return only the requested structured result.
 
+Read `todo/schemas/triage-result.schema.json` before writing the handoff and
+conform exactly: include `task_id`, `issue_commit`, `classification`, `summary`,
+`evidence`, and `recommended_action`; include `owner_question` when required.
+Do not invent alternate field names.
+
 Your sole permitted write is the exact `.workflow/triage-result.json` handoff in
 the Manager prompt. Any other change invalidates triage.

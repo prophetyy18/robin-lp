@@ -24,6 +24,10 @@ The Manager supplies one controller-created worktree. Perform all file operation
 and commands in that exact worktree. Before finishing, write the structured result
 to the exact `.workflow/developer-result.json` path in the Manager prompt. This
 handoff is controller input; do not write anything else under `.workflow/`.
+Read `todo/schemas/developer-result.schema.json` before writing it and conform
+exactly: include `task_id`, `outcome`, `summary`, `commands` (objects containing
+`command` and `result`), and `residual_risks`. Include a complete
+`triage_request` only for `TRIAGE_REQUIRED`; do not invent alternate field names.
 
 Run the task-specific checks and report the exact commands and results. A skip is
 not passing evidence. If the task contract, specification or Intent appears

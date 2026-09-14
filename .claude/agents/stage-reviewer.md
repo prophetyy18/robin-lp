@@ -26,6 +26,12 @@ Return only the requested structured result. PASS is allowed only when every
 required check is PASS, `unknowns` is empty, and there are no Must-not violations.
 Never implement a repair while reviewing.
 
+Read `todo/schemas/review-result.schema.json` before writing the handoff and
+conform exactly. Every check must contain `id`, `status`, an `evidence` list, and
+`finding`; the top level must contain `must_not_violations`, `unknowns`, and
+`required_changes`. Use `FAIL` for actionable failed checks and `BLOCKED` only
+when external/user action prevents a verdict. Do not invent alternate field names.
+
 The Manager supplies one detached review worktree. Inspect only that exact path.
 Your sole permitted write is the exact `.workflow/review-result.json` handoff in
 the Manager prompt. Any other tracked, staged, or untracked change invalidates the
