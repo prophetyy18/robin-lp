@@ -1,0 +1,188 @@
+# T001 independent review
+
+- Base commit: `90336df3a76db5dfe25c5d4cf8e0eb3d6ce8fbab`
+- Candidate commit: `49b460cae625fbbf4d8767213f9b99194499510f`
+- Verdict: **PASS**
+
+## Checks
+
+### diff_minimal_and_scoped — PASS
+
+Candidate 49b460c adds todo/evidence/P00/T001/attempt-004-pip-install.json (new), todo/evidence/P00/T001/attempt-004-developer.json (new), and a routine todo/config.yaml workflow state transition (CHANGES_REQUESTED -> AWAITING_REVIEW, attempt 2 -> 4, base_commit updated); no source/test/lockfile/README/pyproject/spec/intent/protected paths are modified.
+
+Evidence:
+
+- git log --oneline -5 shows HEAD at 49b460c 'feat(t001): candidate attempt 4' on top of base 90336df.
+- git diff --stat 90336df..49b460c reports 3 files changed, 1000 insertions(+), 4 deletions(-): todo/config.yaml (8 +/-), todo/evidence/P00/T001/attempt-004-developer.json (+68), todo/evidence/P00/T001/attempt-004-pip-install.json (+928).
+- git diff 90336df..49b460c -- pyproject.toml README.md requirements.lock.txt src/ tests/ docs/ AGENTS.md CLAUDE.md tools/ is empty.
+
+### no_secrets_in_diff — PASS
+
+No private keys, API secrets, tokens, passwords, wallet credentials, env reads, or .env dumps in the candidate diff.
+
+Evidence:
+
+- Searched candidate diff for password|secret|private_key|seed|api_key|token|bearer|credential|wallet -> no matches.
+- pip install evidence contains only Python version, pip version, package names, package versions, and SHA-256 wheel hashes (no credentials).
+- developer handoff contains only command argv, exit codes, and pytest output (no credentials).
+
+### deliverable_pyproject_toml — PASS
+
+pyproject.toml unchanged against base; declares requires-python='>=3.12', Python 3.12/3.13 classifiers, and runtime deps pydantic / eth-hash[pycryptodome] / httpx.
+
+Evidence:
+
+- pyproject.toml diff against base is empty.
+- pyproject.toml has requires-python = ">=3.12" and classifiers include 'Programming Language :: Python :: 3.12' and '3.13'.
+- pyproject.toml [project.optional-dependencies].dev lists pytest, pytest-asyncio, pytest-cov, ruff, mypy.
+
+### deliverable_locked_dependencies — PASS
+
+requirements.lock.txt unchanged against base; 628 lines, 27 packages, 586 SHA-256 hash entries; pip install evidence records 27 wheels resolved against the lockfile hashes in a fresh venv.
+
+Evidence:
+
+- requirements.lock.txt diff against base is empty.
+- wc -l requirements.lock.txt -> 628; grep -c '^[^# ]' -> 27 packages; grep -c sha256 -> 586 hash entries.
+- pip install evidence: resolved_wheel_count=27, all_packages_have_hashes=True, install_succeeded=True, exit_code=0.
+
+### deliverable_src_package — PASS
+
+src/robinhood_lp/ subpackages preserved: config, discovery, protocol, rpc, storage plus __init__.py and __main__.py; entry points unchanged.
+
+Evidence:
+
+- src/ diff against base is empty.
+- ls src/robinhood_lp/ shows config/ discovery/ protocol/ rpc/ storage/ __init__.py __main__.py.
+
+### deliverable_tests_dir — PASS
+
+tests/ structure preserved; test_lockfile.py (5 tests), test_smoke.py (3 tests), test_workflow_contracts.py (subset comparison present, no hard-coded T001 READY assertion).
+
+Evidence:
+
+- tests/ diff against base is empty.
+- tests/test_lockfile.py 5/5 PASSED in independent review run.
+- tests/test_smoke.py 3/3 PASSED in independent review run.
+- tests/test_workflow_contracts.py 4/4 PASSED in independent review run.
+
+### deliverable_quality_commands_defined — PASS
+
+pytest, ruff check, ruff format --check, mypy src tests are wired via pyproject.toml.
+
+Evidence:
+
+- pyproject.toml [tool.pytest.ini_options] present.
+- pyproject.toml [tool.ruff] and [tool.ruff.format] present.
+- pyproject.toml [tool.mypy] with strict=true and python_version='3.12'.
+
+### deliverable_smoke_test — PASS
+
+tests/test_smoke.py three CLI/import smoke tests all green.
+
+Evidence:
+
+- test_package_version_is_string PASSED.
+- test_python_dash_m_version_exits_zero PASSED.
+- test_python_dash_m_help_exits_zero PASSED.
+
+### deliverable_lockfile_tests — PASS
+
+tests/test_lockfile.py five shape/consistency tests all green.
+
+Evidence:
+
+- test_lockfile_exists_at_repo_root PASSED.
+- test_lockfile_is_parseable_and_consistent PASSED.
+- test_lockfile_covers_every_direct_runtime_dependency PASSED.
+- test_lockfile_covers_every_direct_dev_dependency PASSED.
+- test_lockfile_pins_eth_hash_pycryptodome_backend PASSED.
+
+### test_workflow_contracts_repaired — PASS
+
+tests/test_workflow_contracts.py::test_repository_workflow_configuration_is_valid no longer hard-codes T001.status=='READY'; uses subset comparison {'T000','T004'} <= APPROVED_set.
+
+Evidence:
+
+- grep -n 'T001' tests/test_workflow_contracts.py returns 0 matches (no T001 reference at all).
+- tests/test_workflow_contracts.py asserts {"T000", "T004"} <= {task_id for task_id, task in config["tasks"].items() if task["status"] == "APPROVED"}; this is the Owner-authorized subset comparison from 65f5c76.
+- tests/test_workflow_contracts.py 4/4 PASSED during this review, including test_repository_workflow_configuration_is_valid even though T001 status is now AWAITING_REVIEW (proving the repair).
+- Full pytest suite: 288 passed, 2 skipped (the previously failing workflow contracts test is no longer failing).
+
+### acceptance_clean_install_evidence — PASS
+
+Real clean-room 'pip install --require-hashes -r requirements.lock.txt' was executed in a fresh venv at /tmp/lp-t001-cleanroom-venv; exit 0, 27 wheels resolved, every wheel carries SHA-256 hashes from the lockfile.
+
+Evidence:
+
+- todo/evidence/P00/T001/attempt-004-pip-install.json records full command text, Python 3.12.14, pip 25.0.1, mode=full install --require-hashes (no --dry-run, no --no-index), network_used=True, install_succeeded=True, exit_code=0.
+- resolved_wheel_count=27, installed_package_count=28 (includes pip itself), all_packages_have_hashes=True, eth_hash_pycryptodome_backend_present=True.
+- Fresh venv used (/tmp/lp-t001-cleanroom-venv, not the host env), so the install is independent of any pre-existing state.
+- Lockfile path recorded: /home/lpdev/lp-worktrees/dev-t001-attempt-001/requirements.lock.txt; same content as the requirements.lock.txt at HEAD (628 lines, 27 packages, 586 hashes).
+
+### acceptance_quality_commands_pass_twice — PASS
+
+Two independent pytest runs in this review worktree: '288 passed, 2 skipped' both times (only the wall-clock duration differs: 1.41s vs 1.22s, non-deterministic). ruff check 'All checks passed!' both runs. ruff format --check '149 files already formatted' both runs. mypy src tests 'Success: no issues found in 39 source files' both runs.
+
+Evidence:
+
+- Run 1: pytest -q -> 288 passed, 2 skipped in 1.41s; ruff check -> All checks passed!; ruff format --check -> 149 files already formatted; mypy src tests -> Success: no issues found in 39 source files.
+- Run 2: pytest -q -> 288 passed, 2 skipped in 1.22s; ruff check -> All checks passed!; ruff format --check -> 149 files already formatted; mypy src tests -> Success: no issues found in 39 source files.
+- Skip reasons (pre-existing, not failures): tests/test_abi_artifacts.py:152 'sha256 is a manual annotation; not enforced' and tests/test_protocol_ids.py:289 'vector reordered_inputs supplies unsorted currencies; see test_reordered_inputs_refused_by_python_invariant'.
+- All four commands executed from /home/lpdev/lp-worktrees/review-t001-attempt-004 via /home/lpdev/miniconda3/envs/robinhood-lp/bin/python (Python 3.12.14).
+
+### acceptance_python_bounds — PASS
+
+pyproject.toml declares requires-python='>=3.12' and Python 3.12/3.13 classifiers; host Python 3.12.14 runs every quality command and the recorded clean-room install.
+
+Evidence:
+
+- pyproject.toml metadata: requires-python = ">=3.12"; classifiers include 'Programming Language :: Python :: 3.12' and '3.13'.
+- Review interpreter: Python 3.12.14 at /home/lpdev/miniconda3/envs/robinhood-lp/bin/python.
+- Clean-room venv at /tmp/lp-t001-cleanroom-venv/bin/python also reports Python 3.12.14 (per evidence file).
+
+### must_not_blockchain_storage_dataframe_deps — PASS
+
+Runtime dependencies unchanged: pydantic, eth-hash[pycryptodome], httpx. No web3, eth-account, pyarrow, pandas, numpy, polars, sqlalchemy, or other blockchain/storage/dataframe libraries added.
+
+Evidence:
+
+- pyproject.toml [project].dependencies section is exactly ['pydantic>=2.8,<3', 'eth-hash[pycryptodome]>=0.7', 'httpx>=0.27'].
+- pyproject.toml diff against base is empty -> no dependency additions.
+- requirements.lock.txt diff against base is empty -> no transitive additions.
+
+### must_not_expose_environment_contents — PASS
+
+No diagnostic code added by the candidate logs environment variables, host metadata, secrets, or filesystem paths beyond the documented evidence fields.
+
+Evidence:
+
+- Pip install evidence is structured JSON with named fields (command, python_version, pip_version, resolved_wheel_set, etc.); no env-dump strings.
+- Developer handoff contains command argv, exit codes, and pytest/ruff/mypy outputs; no env dumps.
+- tests/test_no_signing_paths.py and tests/test_config.py::test_loader_rejects_credential_url_in_config remain green (rolled up into the 288 passed total).
+
+### dependency_T000_approved — PASS
+
+T000 status is APPROVED with approved_commit 6c3177883a676a06f8b571d0a598f524e319fa34; T001.depends_on is exactly ['T000']; phase entry gate satisfied.
+
+Evidence:
+
+- todo/config.yaml T000 entry: status=APPROVED, approved_commit=6c3177883a676a06f8b571d0a598f524e319fa34.
+- todo/config.yaml T001 entry: depends_on=['T000'].
+- T000 is the only dependency and it is APPROVED.
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- todo/config.yaml records T001.candidate_commit as 33d28ab885657b9c1845d0699fa10d5b642cb388 (stale value from attempt 1) instead of the actual attempt-4 candidate 49b460cae625fbbf4d8767213f9b99194499510f. The substantive review target is unambiguous (49b460c as instructed) and the field does not gate acceptance; the controller should refresh candidate_commit on each attempt transition going forward. Not an acceptance violation.
