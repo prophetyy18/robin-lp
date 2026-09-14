@@ -51,6 +51,50 @@ Run from the repository root with the project Python:
 /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow review T001
 ```
 
+### Claude Code as the Manager
+
+The interactive Claude Code session in the main checkout may orchestrate these
+commands, but it must not implement or review the task itself. Tell it the exact
+task ID and instruct it to:
+
+1. read `AGENTS.md`, `CLAUDE.md`, this file, `config.yaml`, `README.md`, and the
+   selected task contract;
+2. run `validate` and `status`;
+3. call `develop <task>` only when that task is `READY`;
+4. call `review <task>` after a candidate is produced;
+5. call `retry <task>` followed by a fresh `review <task>` after
+   `CHANGES_REQUESTED`;
+6. stop on `SPEC_BLOCKED`, `BLOCKED`, or `APPROVED`, report the evidence and
+   commit SHAs, and never start the next numbered task automatically.
+
+The ready-to-copy Manager prompt is in the root `README.md`. A request such as
+“implement T001 directly” is not a valid workflow invocation because it does not
+preserve role isolation.
+
+## Permission model
+
+There are three separate permission boundaries:
+
+- **Manager session:** start with `claude --permission-mode manual`. The operator
+  approves only the expected `python -m tools.workflow <action> <task>` command.
+- **Developer process:** the controller uses `acceptEdits` with an explicit tool
+  allowlist. It may edit implementation files in its development worktree, but
+  cannot invoke Agent, commit, push, merge, deploy, sign or broadcast.
+- **Reviewer process:** the controller uses `dontAsk`, omits Edit/Write and uses a
+  command allowlist. Anything requiring another permission is denied without an
+  interactive prompt. Any tracked, staged or untracked file it leaves behind
+  invalidates the review.
+
+The controller itself performs the required Git worktree, candidate commit and
+approved fast-forward operations under the server user's normal filesystem
+permissions. It never uses `sudo` and never pushes. A dirty main checkout,
+unwritable worktree parent, Git lock, denied child command, unavailable network,
+or missing credential causes the command to stop; do not bypass the gate by
+loosening global permissions. Preserve the error, inspect `status` and
+`git worktree list`, then correct the specific host permission or configuration
+before retrying. `SPEC_BLOCKED` requires planning or an owner decision, not a
+filesystem permission override.
+
 If review returns `CHANGES_REQUESTED`, start a new developer process:
 
 ```bash

@@ -686,10 +686,9 @@ class WorkflowManager:
                 cwd=review_worktree,
                 developer=False,
             )
-            if _git(review_worktree, "diff", "--quiet", check=False).returncode != 0:
-                raise WorkflowError("reviewer modified tracked files")
-            if _git(review_worktree, "diff", "--cached", "--quiet", check=False).returncode != 0:
-                raise WorkflowError("reviewer staged tracked changes")
+            reviewer_changes = _git(review_worktree, "status", "--porcelain").stdout.strip()
+            if reviewer_changes:
+                raise WorkflowError("reviewer left tracked, staged, or untracked changes")
             state = self._validate_review_result(result, attempt)
         finally:
             _git(self.repo, "worktree", "remove", str(review_worktree), check=False)

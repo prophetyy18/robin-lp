@@ -37,6 +37,18 @@ Prefer simple, modular implementations.
 
 ## Development Workflow
 
+When the user asks this outer Claude Code session to execute the workflow, act
+only as the Manager: read `todo/WORKFLOW.md`, run its `validate` and `status`
+commands, and invoke `develop`, `review`, or `retry` for exactly one numbered
+task. Do not edit the business implementation or perform the independent review
+in the Manager context. The controller must create the fresh Developer and
+Reviewer processes. Stop on `SPEC_BLOCKED` or `BLOCKED`, do not advance to the
+next task, and do not push unless the user separately requests it.
+The recommended outer session permission mode is `manual`; request approval only
+for the exact `tools.workflow` command needed for the current transition. Never
+ask the user to approve `sudo`, a direct implementation edit, or a direct
+commit/merge as a workaround for a failed gate.
+
 Before implementing a feature:
 
 1. Read `AGENTS.md`, `todo/config.yaml`, `todo/README.md`, and the one selected

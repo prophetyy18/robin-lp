@@ -52,7 +52,7 @@ V1 产品。
   测试通过证据。
 - 系统 shell 的 Python 仍为 3.10.12；服务器现有
   `/home/lpdev/miniconda3/envs/robinhood-lp`，提供 Python 3.12.14、pytest 9.1.1、
-  Ruff 和 mypy。Workflow Bootstrap 完成后已在该环境得到 274 passed、2 skipped，
+  Ruff 和 mypy。Workflow Bootstrap 完成后已在该环境得到 275 passed、2 skipped，
   Ruff 和 mypy 通过；但 T001 仍缺少仓库内 dependency lock、独立 clean-install 和
   任务合同要求的连续两次完整质量门证据，因此不能据此批准。
 - GitHub Actions 的当前结果未能从本环境验证。任何“全部测试通过”声明都必须

@@ -230,3 +230,24 @@ def test_fake_fail_repair_pass_workflow(tmp_path: Path) -> None:
     assert config["tasks"]["T001"]["approved_commit"] == second.candidate_commit
     assert _git(repo, "status", "--porcelain") == ""
     assert manager.load_attempt("T001") is None
+
+
+def test_reviewer_untracked_change_invalidates_review(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    fake_claude = _make_fake_claude(tmp_path)
+    script = fake_claude.read_text(encoding="utf-8")
+    script = script.replace(
+        'elif agent == "stage-reviewer":\n',
+        'elif agent == "stage-reviewer":\n'
+        '    Path("reviewer-note.txt").write_text("not allowed\\n")\n',
+    )
+    fake_claude.write_text(script, encoding="utf-8")
+    manager = WorkflowManager(
+        repo,
+        claude_command=str(fake_claude),
+        worktree_root=tmp_path / "worktrees",
+    )
+
+    manager.develop("T001")
+    with pytest.raises(WorkflowError, match="untracked changes"):
+        manager.review("T001")
