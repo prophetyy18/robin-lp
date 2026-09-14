@@ -12,7 +12,7 @@
   },
   "active_phase": "P00",
   "active_task": "T002",
-  "workflow_state": "AWAITING_REVIEW",
+  "workflow_state": "CHANGES_REQUESTED",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -40,16 +40,16 @@
     },
     "T002": {
       "phase": "P00",
-      "status": "AWAITING_REVIEW",
+      "status": "CHANGES_REQUESTED",
       "depends_on": [
         "T001"
       ],
       "task_file": "todo/phases/P00-engineering-baseline/T002.md",
       "attempt": 1,
       "base_commit": "ebc98bcbf2d38e92d2bab9de7173719d5ef3b1f2",
-      "candidate_commit": null,
+      "candidate_commit": "289d1237f98c91f7d12d7bb5176d524e313ff8ae",
       "approved_commit": null,
-      "latest_review": null
+      "latest_review": "todo/reviews/P00/T002/review-001.json"
     },
     "T003": {
       "phase": "P00",
