@@ -297,7 +297,7 @@ deployment report passes; every discovered pool has an explicit support reason.
 **Phase prohibitions:** no signing middleware, hosted filters as sole ingestion
 mechanism, copied deployment address without code verification, or unbounded RPC.
 
-- [ ] **T020 — Build a read-only bounded RPC adapter** (depends on T002, T011)
+- [x] **T020 — Build a read-only bounded RPC adapter** (depends on T002, T011)
   - Outcome: deterministic, observable reads despite provider limits/failures.
   - Deliverables: bounded `eth_getLogs`, block/header/receipt and block-pinned
     `eth_call`; timeouts, classified retries with jitter, endpoint failover, adaptive
@@ -309,7 +309,7 @@ mechanism, copied deployment address without code verification, or unbounded RPC
     retry forever, or log endpoint credentials.
   - References: R9, R10, R11.
 
-- [ ] **T021 — Pin canonical V4 artifacts** (depends on T001)
+- [x] **T021 — Pin canonical V4 artifacts** (depends on T001)
   - Outcome: decoding/state calls are tied to reviewable protocol sources.
   - Deliverables: minimum PoolManager and StateView interfaces/ABIs, event topics,
     selectors, source repo+commit, compiler/package version, license, and SHA-256.
@@ -319,7 +319,7 @@ mechanism, copied deployment address without code verification, or unbounded RPC
     incompatible core/periphery commits.
   - References: R3, R4, R7.
 
-- [ ] **T022 — Discover and register pools from `Initialize`**
+- [x] **T022 — Discover and register pools from `Initialize`**
   (depends on T010, T020, T021, T024)
   - Outcome: complete, idempotent PoolKey registry for a verified PoolManager range.
   - Deliverables: Initialize decoder/scanner, derived-ID verification, registry,
@@ -331,7 +331,7 @@ mechanism, copied deployment address without code verification, or unbounded RPC
     pools whose metadata call fails.
   - References: R3, R4, R12.
 
-- [ ] **T023 — Classify pool and hook eligibility** (depends on T022)
+- [x] **T023 — Classify pool and hook eligibility** (depends on T022)
   - Outcome: ingestion capability cannot be confused with simulation capability.
   - Deliverables: reason-coded classification for deployment, static/dynamic fee,
     hook flags/code hash/upgradeability evidence, metadata/data coverage, modeled
@@ -343,7 +343,7 @@ mechanism, copied deployment address without code verification, or unbounded RPC
     fall back to plain-pool behavior.
   - References: R6, R14.
 
-- [ ] **T024 — Verify chain capabilities and contract deployments**
+- [x] **T024 — Verify chain capabilities and contract deployments**
   (depends on T002, T020, T021)
   - Outcome: configured mutable facts are proven before ingestion.
   - Deliverables: report containing RPC-reported chain ID, genesis hash, latest/safe/
@@ -368,7 +368,7 @@ synthetic reorg tests while producing zero unexplained gaps.
 **Phase prohibitions:** no in-place destruction of raw history, future-state calls,
 silent schema coercion, interpolation, or completion based only on “no rows”.
 
-- [ ] **T030 — Define versioned raw and normalized schemas**
+- [x] **T030 — Define versioned raw and normalized schemas**
   (depends on T011, T021)
   - Outcome: raw evidence is lossless and normalized data is evolvable.
   - Deliverables: schemas for block/header/receipt context and V4 `Initialize`,
