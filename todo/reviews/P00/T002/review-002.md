@@ -1,0 +1,218 @@
+# T002 independent review
+
+- Base commit: `ebc98bcbf2d38e92d2bab9de7173719d5ef3b1f2`
+- Candidate commit: `762775949b9f348ef53839ae50cba00bdebf9731`
+- Verdict: **PASS**
+
+## Checks
+
+### diff_minimal_and_scoped — PASS
+
+Candidate touches only config code (src/robinhood_lp/config/__init__.py, loader.py, models.py, secrets.py), config test/fixtures (tests/test_config.py, tests/fixtures/config/valid_robinhood.toml), .env.example, and the controller's todo/ bookkeeping. No source/test/protected/spec/intent paths outside the candidate's scope.
+
+Evidence:
+
+- git diff --stat ebc98bc..7627759 shows 12 files changed, 1308 insertions, 35 deletions; only .env.example, src/robinhood_lp/config/**, tests/**, todo/evidence/P00/T002/**, todo/reviews/P00/T002/**, todo/config.yaml are modified.
+- git status reports clean working tree; candidate commit 7627759 is HEAD.
+
+### valid_fixture_loads — PASS
+
+The shipped tests/fixtures/config/valid_robinhood.toml (single Robinhood-chain, single active PoolKey, single target token) loads cleanly and exposes the expected fields.
+
+Evidence:
+
+- pytest -v tests/test_config.py::test_valid_v1_fixture_loads PASSED (asserts chains==1, pools==1, target_token live is None, is_live_eligible False)
+- pytest -v tests/test_config.py::test_valid_v1_fixture_exposes_expected_fields PASSED (asserts chain_id=46630, rpc_url_env=ROBINHOOD_CHAIN_RPC_URL, support_level=PAPER, default_run_mode=PAPER)
+
+### multi_chain_rejected — PASS
+
+A RootConfig containing more than one ChainConfig is rejected by the structural V1 single-chain rule.
+
+Evidence:
+
+- pytest -v tests/test_config.py::test_root_config_rejects_two_chains PASSED (matches 'V1 requires exactly one')
+
+### multiple_active_pool_rejected — PASS
+
+A RootConfig containing more than one PoolConfig is rejected.
+
+Evidence:
+
+- pytest -v tests/test_config.py::test_root_config_rejects_two_pools PASSED (matches 'at most one active PoolConfig')
+
+### unknown_fields_rejected — PASS
+
+RootConfig and all nested models inherit _StrictModel with extra='forbid'; an unknown top-level key produces an 'Extra inputs are not permitted' ValidationError.
+
+Evidence:
+
+- pytest -v tests/test_config.py::test_root_config_rejects_unknown_field PASSED (matches 'Extra inputs')
+- pytest -v tests/test_config.py::test_pool_key_rejects_unknown_field PASSED
+
+### duplicate_identities_rejected — PASS
+
+Two PoolConfig entries with identical PoolKey tuples are rejected. The structural single-pool rule already forbids two pools from coexisting, so duplicate identities are caught by that path; the dedicated model_validator was intentionally removed by the developer (documented in residual_risks).
+
+Evidence:
+
+- pytest -v tests/test_config.py::test_root_config_rejects_duplicate_pool_identities PASSED (matches '(at most one active PoolConfig|duplicate)')
+
+### literal_credential_url_rejected_and_redacted — PASS
+
+Loader's _check_no_credential_urls catches a literal credential URL at parse time and rejects it with a structural error that does NOT contain the credential substring. Pydantic-level ValidationErrors are also passed through redact_text; the credential-URL redaction test passes.
+
+Evidence:
+
+- pytest -v tests/test_config.py::test_loader_rejects_credential_url_in_config PASSED (matches 'credential-shaped URL')
+- pytest -v tests/test_config.py::test_loader_redacts_credential_url_in_validation_error PASSED (asserts 'supersecret' and 'user:supersecret' not in error message)
+
+### invalid_addresses_ranges_rejected — PASS
+
+Invalid addresses (wrong length, non-hex) and invalid ranges (zero tick spacing, fee above MAX_LP_FEE not equal to DYNAMIC_FEE_FLAG, currency0>=currency1, malformed address strings) are rejected by the strict models.
+
+Evidence:
+
+- pytest -v tests/test_config.py::test_pool_key_rejects_malformed_address PASSED
+- pytest -v tests/test_config.py::test_pool_key_currency_ordering_is_enforced PASSED
+- pytest -v tests/test_config.py::test_pool_key_rejects_fee_above_max_and_not_sentinel PASSED
+- pytest -v tests/test_config.py::test_pool_key_rejects_zero_tick_spacing PASSED
+- pytest -v tests/test_config.py::test_target_token_rejects_malformed_address PASSED
+
+### chain_id_mismatch_rejected — PASS
+
+A pool whose chain_id is not present in the chains list, or a target_token whose chain_id is not in the chains list, is rejected. T002 does not require cross-chain address derivation; this check verifies malformed chain references are refused.
+
+Evidence:
+
+- pytest -v tests/test_config.py::test_root_config_rejects_chain_id_mismatch_on_pool PASSED (matches 'chain_id=1')
+- pytest -v tests/test_config.py::test_root_config_rejects_target_token_with_unknown_chain PASSED (matches 'target_token.chain_id')
+
+### serialization_never_includes_secrets — PASS
+
+model_dump_json / dict / repr / str of a loaded valid config only contains env-var *names* (e.g. ROBINHOOD_CHAIN_RPC_URL) and no secret values. The contract stores RPC URLs and Keystore paths by env-var name, so serialization is safe by construction.
+
+Evidence:
+
+- pytest -v tests/test_config.py::test_root_config_serialization_never_includes_secret_values PASSED (asserts 'supersecret', 'hunter2', 'password=', 'Bearer ', 64-hex, 'https://user:', 'LP_KEYSTORE_PASSWORD' absent; 'ROBINHOOD_CHAIN_RPC_URL' present)
+- pytest -v tests/test_config.py::test_pool_key_serialization_uses_canonical_lowercase PASSED (addresses canonicalised to lowercase; no checksum-mixed form)
+
+### keystore_secret_reference — PASS
+
+.env.example declares LP_KEYSTORE_PATH= (env-var name only, empty value, with comment). The SignerConfig model stores only the env-var name (keystore_path_env); a literal password field is refused by extra='forbid'; a literal filesystem path is refused by the UPPER_SNAKE_CASE env-var name validator.
+
+Evidence:
+
+- .env.example line: 'LP_KEYSTORE_PATH=' (empty value, comment-only context).
+- pytest -v tests/test_config.py::test_root_config_rejects_password_field_in_signer PASSED (matches 'Extra inputs')
+- pytest -v tests/test_config.py::test_root_config_rejects_literal_keystore_path PASSED (matches 'UPPER_SNAKE_CASE')
+- pytest -v tests/test_config.py::test_signer_config_rejects_lowercase_env_name PASSED
+- pytest -v tests/test_config.py::test_signer_config_rejects_credential_url_as_env_name PASSED
+
+### live_promotion_binding — PASS
+
+support_level='live' on a PoolConfig is rejected at the RootConfig layer when target_token.live is None OR when the signer block is absent.
+
+Evidence:
+
+- pytest -v tests/test_config.py::test_root_config_rejects_live_pool_without_approval_block PASSED
+- pytest -v tests/test_config.py::test_root_config_rejects_live_pool_without_signer PASSED
+- pytest -v tests/test_config.py::test_root_config_accepts_live_pool_with_full_approval_block PASSED (full live path with signer accepted)
+
+### error_redaction_interface — PASS
+
+The loader applies redact_text at the loader boundary (loader.py imports redact_text from secrets and threads it through both TOMLDecodeError and ValidationError handlers). redact_text scrubs credential URLs, Bearer tokens, key=value secret assignments, and 64-hex blobs from any free-form text.
+
+Evidence:
+
+- pytest -v tests/test_config.py::test_redact_text_masks_credential_url PASSED
+- pytest -v tests/test_config.py::test_redact_text_masks_bearer_token PASSED
+- pytest -v tests/test_config.py::test_redact_text_masks_kv_secrets PASSED
+- pytest -v tests/test_config.py::test_redact_text_masks_64hex_secret PASSED
+- pytest -v tests/test_config.py::test_redact_text_passes_through_safe_strings PASSED
+- pytest -v tests/test_config.py::test_loader_redacts_bearer_and_kv_secrets_in_error PASSED
+
+### must_not_default_to_latest — PASS
+
+No config field defaults to the string 'latest'. start_block is declared as int = Field(default=0, ge=0, ...); a negative value is rejected by the ge=0 constraint; a string 'latest' is rejected by the int type itself.
+
+Evidence:
+
+- pytest -v tests/test_config.py::test_root_config_rejects_latest_start_block PASSED (uses start_block=-1, matches 'start_block')
+
+### must_not_auto_correct_addresses — PASS
+
+_validate_address only lowercases the hex digits (preserves the address bytes); no EIP-55 checksum re-derivation, no case-folding that silently changes bytes. An invalid (non 20-byte hex) address is rejected.
+
+Evidence:
+
+- pytest -v tests/test_config.py::test_chain_config_does_not_auto_correct_address_case PASSED (asserts lowercase canonicalisation without bytes substitution).
+- pytest -v tests/test_config.py::test_pool_key_rejects_malformed_address PASSED
+
+### must_not_accept_symbol_identifiers — PASS
+
+Address fields require 20-byte 0x-prefixed hex (the _ADDRESS_RE regex). Symbol strings ('USDC', 'ETH', etc.) are rejected as ValidationError at parse time. chain_id is a PositiveInt and rejects string identifiers.
+
+Evidence:
+
+- pytest -v tests/test_config.py::test_target_token_rejects_malformed_address PASSED
+- pytest -v tests/test_config.py::test_target_token_rejects_unknown_enum_value PASSED
+
+### deliverable_dot_env_example_names_only — PASS
+
+.env.example lists env-var names only, with empty values and explanatory comments. No real credentials, no real URLs, no real passwords are present.
+
+Evidence:
+
+- .env.example content: ETH_MAINNET_RPC_URL=, BASE_RPC_URL=, ROBINHOOD_CHAIN_RPC_URL=, LP_KEYSTORE_PATH= (all empty values, all accompanied by documentation comments).
+
+### two_byte_identical_quality_runs — PASS
+
+All four quality commands produce byte-identical (modulo pytest wall-clock) PASS output across two runs. The previously failing gate `mypy src tests` now exits 0 with 'Success: no issues found in 39 source files' both runs; the mypy regression from attempt 1 is fixed.
+
+Evidence:
+
+- pytest -q run 1: '313 passed, 2 skipped in 1.47s' (2 SKIPPED: tests/test_abi_artifacts.py sha256 manual annotation, tests/test_protocol_ids.py reordered_inputs vector).
+- pytest -q run 2: '313 passed, 2 skipped in 1.44s' (byte-identical summary except wall-clock).
+- ruff check run 1: 'All checks passed!'
+- ruff check run 2: 'All checks passed!'
+- ruff format --check run 1: '151 files already formatted'
+- ruff format --check run 2: '151 files already formatted'
+- mypy src tests run 1: 'Success: no issues found in 39 source files' (exit 0)
+- mypy src tests run 2: 'Success: no issues found in 39 source files' (exit 0)
+- tests/test_config.py::test_live_approval_requires_all_fields PASSED; the fix passes approved_by='' which triggers Pydantic's min_length=1 validator (independently verified: ValidationError string contains 'approved_by' substring, and ValidationError is a ValueError subclass).
+
+### dependency_T001_approved — PASS
+
+T001 status is APPROVED with approved_commit 49b460cae625fbbf4d8767213f9b99194499510f. T002.depends_on is exactly [T001].
+
+Evidence:
+
+- git log --oneline -5 shows T001 review-record 1fb214e and T001 candidate 49b460c immediately before the T002 base ebc98bc.
+- todo/config.yaml T001 entry: status=APPROVED, approved_commit=49b460cae625fbbf4d8767213f9b99194499510f, attempt=4.
+- todo/config.yaml T002 entry: depends_on=[T001], base_commit=ebc98bcbf2d38e92d2bab9de7173719d5ef3b1f2.
+
+### no_secrets_in_diff — PASS
+
+The candidate diff does not introduce any private keys, API secrets, tokens, passwords, credential-bearing URLs, or env-var reads of secret values. .env.example adds LP_KEYSTORE_PATH by name only (empty value).
+
+Evidence:
+
+- All 'supersecret', 'hunter2', 'Bearer', and credential-URL occurrences in the diff are inside test code as negative fixtures (asserting these substrings are NOT echoed in error messages), not real secrets.
+- Signer's keystore path is loaded by env-var name only; no env-var read of LP_KEYSTORE_PASSWORD or similar in the diff (intentional per G-SIGNER-01).
+- .env.example grep: 'LP_KEYSTORE_PATH=' with empty value; surrounded by comments only.
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- todo/config.yaml still records T002.candidate_commit=289d123 (attempt 1 SHA) rather than 7627759 (attempt 2 SHA). This is a controller-side bookkeeping lag, not a candidate defect; the actual git HEAD in the review worktree is 7627759 and all quality gates pass against it. A future bookkeeping commit will refresh the controller record.
