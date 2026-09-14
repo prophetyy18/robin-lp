@@ -14,11 +14,10 @@ The current server uses:
 - worktrees under `/home/lpdev/lp-worktrees/` by default.
 
 Claude Code is authenticated through MiniMax's Anthropic-compatible endpoint.
-The controller reads `agent_runtime` from `todo/config.yaml` and passes
-`--model MiniMax-M3[1m]` on every Developer and Reviewer launch. Fallback is
-prohibited. Agent frontmatter uses `model: inherit` only so that the controller's
-explicit runtime selection remains authoritative. Authentication stays in the
-user-level Claude Code settings and is never printed or persisted in this repo.
+The Manager session starts with `--model MiniMax-M3[1m]`; every project Agent uses
+`model: inherit`. Fallback is prohibited and `validate` checks the declared runtime.
+Authentication stays in user-level Claude Code settings and is never printed or
+persisted in this repo.
 
 On this server the China endpoint is `https://api.minimax.cn/anthropic`. The
 literal `[1m]` suffix is the Claude Code configuration form documented by MiniMax;
@@ -47,8 +46,12 @@ Run from the repository root with the project Python:
 ```bash
 /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow validate
 /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow status
-/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow develop T001
-/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow review T001
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow prepare-develop T001
+# Invoke the returned stage-developer visibly, then:
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow finish-develop T001
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow prepare-review T001
+# Invoke the returned stage-reviewer visibly, then:
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow finish-review T001
 ```
 
 After T001 is approved, the Manager may select one dependency-complete planned
@@ -67,12 +70,15 @@ task ID and instruct it to:
 1. read `AGENTS.md`, `CLAUDE.md`, this file, `config.yaml`, `README.md`, and the
    selected task contract;
 2. run `validate` and `status`;
-3. call `develop <task>` only when that task is `READY`;
-4. call `review <task>` after a candidate is produced;
-5. call `retry <task>` followed by a fresh `review <task>` after
+3. call `prepare-develop <task>`, visibly invoke the returned Developer, then
+   call `finish-develop <task>` after its handoff exists;
+4. call `prepare-review <task>`, visibly invoke the returned Reviewer, then
+   call `finish-review <task>`;
+5. call `prepare-retry <task>` followed by the same finish and a fresh review after
    `CHANGES_REQUESTED`;
-6. call `triage <task>` only after a structured `TRIAGE_REQUIRED` result;
-7. call `plan <task>` and `review-plan <task>` only when triage routes the issue
+6. use `prepare-triage`/`finish-triage` only after `TRIAGE_REQUIRED`;
+7. use `prepare-plan`/`finish-plan` and
+   `prepare-plan-review`/`finish-plan-review` only when triage routes the issue
    to planning; ask the owner before passing `--owner-decision`;
 8. stop on `BLOCKED`, `OWNER_DECISION_REQUIRED`, or `APPROVED`, report the evidence and
    commit SHAs, and never start the next numbered task automatically.
@@ -87,13 +93,12 @@ There are three separate permission boundaries:
 
 - **Manager session:** start with `claude --permission-mode manual`. The operator
   approves only the expected `python -m tools.workflow <action> <task>` command.
-- **Developer process:** the controller uses `acceptEdits` with an explicit tool
+- **Developer Agent:** its definition uses `acceptEdits` with an explicit tool
   allowlist. It may edit implementation files in its development worktree, but
   cannot invoke Agent, commit, push, merge, deploy, sign or broadcast.
-- **Reviewer process:** the controller uses `dontAsk`, omits Edit/Write and uses a
-  command allowlist. Anything requiring another permission is denied without an
-  interactive prompt. Any tracked, staged or untracked file it leaves behind
-  invalidates the review.
+- **Reviewer Agent:** its definition uses `dontAsk`, omits Edit, and allows Write
+  only for its declared `.workflow/review-result.json` handoff. Any other tracked,
+  staged or untracked file invalidates the review.
 
 The controller itself performs the required Git worktree, candidate commit and
 approved fast-forward operations under the server user's normal filesystem
@@ -108,27 +113,33 @@ matching planning route, not a filesystem permission override.
 If review returns `CHANGES_REQUESTED`, start a new developer process:
 
 ```bash
-/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow retry T001
-/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow review T001
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow prepare-retry T001
+# Invoke Developer, finish-develop, prepare-review, invoke Reviewer, then:
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow finish-review T001
 ```
 
 Exceptional scope or specification discoveries use:
 
 ```bash
-/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow triage T001
-/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow plan T001
-/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow review-plan T001
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow prepare-triage T001
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow finish-triage T001
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow prepare-plan T001
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow finish-plan T001
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow prepare-plan-review T001
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow finish-plan-review T001
 ```
 
 If triage returns `OWNER_DECISION_REQUIRED`, stop and ask the owner. Only after
-the owner answers may the Manager run `plan T001 --owner-decision "..."`. Triage
+the owner answers may the Manager run `prepare-plan T001 --owner-decision "..."`. Triage
 is an exception path, not a mandatory ceremony. The planning role may return
 `NO_CHANGE_REQUIRED`; an independent Plan Reviewer can accept that evidence
 without forcing a meaningless edit.
 
-`develop` and `retry` invoke a new non-interactive Claude Code process. `review`
-creates a detached worktree at the exact candidate SHA and invokes another new
-process with the read-only reviewer definition.
+Python never invokes Claude Code. Each `prepare-*` command returns the Agent name,
+worktree, immutable SHAs and prompt. The Manager invokes that Agent through Claude
+Code, where the owner can inspect its transcript and send follow-ups. The Agent
+writes only its declared `.workflow/*.json` handoff; the matching `finish-*`
+command validates and records it.
 
 ## Commit and branch behaviour
 
@@ -137,9 +148,9 @@ The controller, not an Agent:
 1. requires a clean invoking checkout and approved dependencies;
 2. creates `workflow/<task>-attempt-<number>` and an isolated development worktree;
 3. snapshots every protected Intent, Spec, task and workflow file;
-4. launches the Developer without Git commit/push permission;
+4. returns the Developer manifest for the Manager to invoke visibly;
 5. rejects any protected-file change, records evidence and creates a candidate commit;
-6. launches the Reviewer in a detached worktree at that candidate;
+6. creates the detached Reviewer worktree and returns its visible Agent manifest;
 7. rejects a Reviewer that changes tracked files;
 8. persists both JSON and Markdown review reports;
 9. retains a failed branch for a fresh retry, or fast-forwards an approved branch;
@@ -200,10 +211,10 @@ The migration rule for pre-existing unverified implementation is
 1. **Preserve.** No migration step rebases, squashes, or deletes the
    pre-existing commits. The current `main` HEAD and every historical
    commit on it remain intact until each task is independently approved
-   by the controller's Reviewer process.
+   by the independent Reviewer Agent.
 2. **Review per task.** For each `PLANNED` task whose contract already has
    a pre-existing implementation, the Manager activates that task normally
-   (`ready`, then `develop`). The Developer process receives the current
+   (`ready`, then `prepare-develop`). The Developer Agent receives the current
    `main` HEAD as its base commit, reads and cites the pre-existing code,
    and may reuse or extend it rather than rewrite it from scratch. Code
    reuse must still satisfy the task contract's Outcome, Deliverables,

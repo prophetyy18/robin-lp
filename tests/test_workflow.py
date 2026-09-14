@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -118,156 +117,61 @@ def _make_repo(tmp_path: Path) -> tuple[Path, str]:
     return repo, _git(repo, "rev-parse", "HEAD")
 
 
-def _make_fake_claude(tmp_path: Path) -> Path:
-    script = tmp_path / "fake-claude"
-    script.write_text(
-        textwrap.dedent(
-            """\
-            #!/usr/bin/env python3
-            import json
-            import re
-            import sys
-            from pathlib import Path
+def test_visible_manager_prepare_and_finish_round_trip(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
 
-            assert sys.argv[sys.argv.index("--model") + 1] == "MiniMax-M3[1m]"
-            assert "--fallback-model" not in sys.argv
-            agent = sys.argv[sys.argv.index("--agent") + 1]
-            prompt = sys.argv[-1]
-            if agent == "stage-developer":
-                repaired = Path("todo/reviews").exists()
-                Path("src/value.txt").write_text("good\\n" if repaired else "bad\\n")
-                payload = {
-                    "task_id": "T001",
-                    "outcome": "CANDIDATE_READY",
-                    "summary": "deterministic fake candidate",
-                    "commands": [{"command": "fake-check", "result": "completed"}],
-                    "residual_risks": [],
-                    "blocking_question": None,
-                }
-            elif agent == "stage-reviewer":
-                base = re.search(r"Base commit: ([0-9a-f]{40})", prompt).group(1)
-                candidate = re.search(r"Candidate commit: ([0-9a-f]{40})", prompt).group(1)
-                passed = Path("src/value.txt").read_text().strip() == "good"
-                payload = {
-                    "task_id": "T001",
-                    "base_commit": base,
-                    "candidate_commit": candidate,
-                    "verdict": "PASS" if passed else "FAIL",
-                    "checks": [{
-                        "id": "ACCEPTANCE",
-                        "status": "PASS" if passed else "FAIL",
-                        "evidence": ["src/value.txt"] if passed else [],
-                        "finding": "value is good" if passed else "value is not good",
-                    }],
-                    "must_not_violations": [],
-                    "unknowns": [],
-                    "required_changes": [] if passed else ["write the required good value"],
-                    "residual_risks": [],
-                }
-            else:
-                raise SystemExit(3)
-            print(json.dumps({"structured_output": payload}))
-            """
-        ),
-        encoding="utf-8",
+    prepared = manager.prepare_develop("T001")
+    development = Path(str(prepared["development_worktree"]))
+    assert prepared["agent"] == "stage-developer"
+    (development / "src" / "value.txt").write_text("good\n", encoding="utf-8")
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "CANDIDATE_READY",
+            "summary": "visible developer completed the task",
+            "commands": [{"command": "fake-check", "result": "passed"}],
+            "residual_risks": [],
+            "blocking_question": None,
+        },
     )
-    script.chmod(script.stat().st_mode | 0o111)
-    return script
+    attempt = manager.finish_develop("T001")
+    assert attempt.candidate_commit
 
-
-def _make_triage_claude(
-    tmp_path: Path,
-    *,
-    classification: str,
-    plan_outcome: str = "NO_CHANGE_REQUIRED",
-    owner_edit: bool = False,
-    review_verdict: str = "PASS",
-) -> Path:
-    script = tmp_path / "fake-triage-claude"
-    source = textwrap.dedent(
-        """\
-        #!/usr/bin/env python3
-        import json
-        import re
-        import sys
-        from pathlib import Path
-
-        classification = __CLASSIFICATION__
-        plan_outcome = __PLAN_OUTCOME__
-        owner_edit = __OWNER_EDIT__
-        review_verdict = __REVIEW_VERDICT__
-        assert sys.argv[sys.argv.index("--model") + 1] == "MiniMax-M3[1m]"
-        agent = sys.argv[sys.argv.index("--agent") + 1]
-        prompt = sys.argv[-1]
-        if agent == "stage-developer":
-            payload = {
-                "task_id": "T001",
-                "outcome": "TRIAGE_REQUIRED",
-                "summary": "scope prediction needs independent triage",
-                "commands": [],
-                "residual_risks": [],
-                "blocking_question": None,
-                "triage_request": {
-                    "observed_problem": "declared document impact may be inaccurate",
-                    "evidence": ["task contract and current files"],
-                    "proposed_classification": classification,
-                    "requested_change": "review the declared scope",
-                },
-            }
-        elif agent == "issue-triager":
-            issue = re.search(r"Issue commit: ([0-9a-f]{40})", prompt).group(1)
-            payload = {
-                "task_id": "T001",
-                "issue_commit": issue,
-                "classification": classification,
-                "summary": "independent deterministic triage",
-                "evidence": ["task contract"],
-                "recommended_action": "run the matching planning route",
-                "owner_question": "Which product behavior is intended?"
-                if classification == "OWNER_DECISION_REQUIRED"
-                else None,
-            }
-        elif agent == "planner":
-            if owner_edit:
-                target = Path("docs/intent/owner-decision.md")
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text("owner decision recorded\\n")
-            payload = {
-                "task_id": "T001",
-                "outcome": plan_outcome,
-                "summary": "planning result",
-                "rationale": "a content edit is not required" if not owner_edit else "owner decided",
-                "unresolved_questions": [],
-            }
-        elif agent == "plan-reviewer":
-            base = re.search(r"Base commit: ([0-9a-f]{40})", prompt).group(1)
-            candidate = re.search(r"Candidate commit: ([0-9a-f]{40})", prompt).group(1)
-            payload = {
-                "task_id": "T001",
-                "base_commit": base,
-                "candidate_commit": candidate,
-                "verdict": review_verdict,
-                "summary": "planning route is proportionate",
-                "required_changes": ["narrow the plan"] if review_verdict == "FAIL" else [],
-                "unknowns": ["external fact unavailable"] if review_verdict == "BLOCKED" else [],
-            }
-        else:
-            raise SystemExit(3)
-        print(json.dumps({"structured_output": payload}))
-        """
+    review = manager.prepare_review("T001")
+    review_worktree = Path(str(review["review_worktree"]))
+    assert review["agent"] == "stage-reviewer"
+    _write_json(
+        review_worktree / ".workflow" / "review-result.json",
+        {
+            "task_id": "T001",
+            "base_commit": attempt.base_commit,
+            "candidate_commit": attempt.candidate_commit,
+            "verdict": "PASS",
+            "checks": [
+                {
+                    "id": "ACCEPTANCE",
+                    "status": "PASS",
+                    "evidence": ["src/value.txt contains good"],
+                    "finding": "acceptance satisfied",
+                }
+            ],
+            "must_not_violations": [],
+            "unknowns": [],
+            "required_changes": [],
+            "residual_risks": [],
+        },
     )
-    source = source.replace("__CLASSIFICATION__", repr(classification))
-    source = source.replace("__PLAN_OUTCOME__", repr(plan_outcome))
-    source = source.replace("__OWNER_EDIT__", repr(owner_edit))
-    source = source.replace("__REVIEW_VERDICT__", repr(review_verdict))
-    script.write_text(source, encoding="utf-8")
-    script.chmod(script.stat().st_mode | 0o111)
-    return script
+    state, report = manager.finish_review("T001")
+    assert state == "APPROVED"
+    assert report.is_file()
+    assert manager.status()["workflow_state"] == "APPROVED"
 
 
 def test_config_validation_rejects_dependency_cycle(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
-    manager = WorkflowManager(repo, claude_command="unused", worktree_root=tmp_path / "worktrees")
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
     config = manager.load_config()
     config["tasks"]["T000"]["depends_on"] = ["T001"]
     with pytest.raises(WorkflowError, match="dependency cycle"):
@@ -276,7 +180,7 @@ def test_config_validation_rejects_dependency_cycle(tmp_path: Path) -> None:
 
 def test_protected_path_change_is_rejected(tmp_path: Path) -> None:
     repo, base = _make_repo(tmp_path)
-    manager = WorkflowManager(repo, claude_command="unused", worktree_root=tmp_path / "worktrees")
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
     (repo / "todo" / "phases" / "P00" / "T001.md").write_text("changed\n", encoding="utf-8")
     with pytest.raises(WorkflowError, match="protected paths changed"):
         manager.check_changed_paths(base)
@@ -284,14 +188,14 @@ def test_protected_path_change_is_rejected(tmp_path: Path) -> None:
 
 def test_short_or_symbolic_base_is_rejected(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
-    manager = WorkflowManager(repo, claude_command="unused", worktree_root=tmp_path / "worktrees")
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
     with pytest.raises(WorkflowError, match="full lowercase Git SHA"):
         manager.check_changed_paths("HEAD")
 
 
 def test_illegal_state_transition_is_rejected(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
-    manager = WorkflowManager(repo, claude_command="unused", worktree_root=tmp_path / "worktrees")
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
     config = manager.load_config()
     with pytest.raises(WorkflowError, match="READY -> APPROVED"):
         manager._set_state(config, "T001", "APPROVED")
@@ -299,7 +203,7 @@ def test_illegal_state_transition_is_rejected(tmp_path: Path) -> None:
 
 def test_non_m3_agent_runtime_is_rejected(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
-    manager = WorkflowManager(repo, claude_command="unused", worktree_root=tmp_path / "worktrees")
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
     config = manager.load_config()
     config["agent_runtime"]["model"] = "MiniMax-M2.7"
     with pytest.raises(WorkflowError, match="MiniMax-M3"):
@@ -308,7 +212,7 @@ def test_non_m3_agent_runtime_is_rejected(tmp_path: Path) -> None:
 
 def test_config_rejects_more_than_one_active_task(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
-    manager = WorkflowManager(repo, claude_command="unused", worktree_root=tmp_path / "worktrees")
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
     config = manager.load_config()
     config["tasks"]["T000"]["status"] = "READY"
     with pytest.raises(WorkflowError, match="exactly the active task"):
@@ -336,7 +240,7 @@ def test_every_nonterminal_state_has_a_route_to_approved() -> None:
 
 def test_ready_activates_one_dependency_complete_planned_task(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
-    manager = WorkflowManager(repo, claude_command="unused", worktree_root=tmp_path / "worktrees")
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
     config = manager.load_config()
     config["tasks"]["T001"]["status"] = "PLANNED"
     config["active_task"] = "T000"
@@ -352,163 +256,118 @@ def test_ready_activates_one_dependency_complete_planned_task(tmp_path: Path) ->
     assert _git(repo, "status", "--porcelain") == ""
 
 
-def test_fake_fail_repair_pass_workflow(tmp_path: Path) -> None:
-    repo, _ = _make_repo(tmp_path)
-    fake_claude = _make_fake_claude(tmp_path)
-    manager = WorkflowManager(
-        repo,
-        claude_command=str(fake_claude),
-        worktree_root=tmp_path / "worktrees",
-    )
-
-    first = manager.develop("T001")
-    assert first.candidate_commit is not None
-    state, failed_report = manager.review("T001")
-    assert state == "CHANGES_REQUESTED"
-    assert failed_report.is_file()
-
-    second = manager.develop("T001", retry=True)
-    assert second.attempt == 2
-    assert second.candidate_commit != first.candidate_commit
-    state, passed_report = manager.review("T001")
-
-    assert state == "APPROVED"
-    assert passed_report.is_file()
-    assert (repo / "src" / "value.txt").read_text(encoding="utf-8") == "good\n"
-    config = manager.load_config()
-    assert config["tasks"]["T001"]["status"] == "APPROVED"
-    assert config["tasks"]["T001"]["approved_commit"] == second.candidate_commit
-    assert _git(repo, "status", "--porcelain") == ""
-    assert manager.load_attempt("T001") is None
-
-
 def test_reviewer_untracked_change_invalidates_review(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
-    fake_claude = _make_fake_claude(tmp_path)
-    script = fake_claude.read_text(encoding="utf-8")
-    script = script.replace(
-        'elif agent == "stage-reviewer":\n',
-        'elif agent == "stage-reviewer":\n'
-        '    Path("reviewer-note.txt").write_text("not allowed\\n")\n',
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    prepared = manager.prepare_develop("T001")
+    development = Path(str(prepared["development_worktree"]))
+    (development / "src" / "value.txt").write_text("good\n", encoding="utf-8")
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "CANDIDATE_READY",
+            "summary": "done",
+            "commands": [],
+            "residual_risks": [],
+        },
     )
-    fake_claude.write_text(script, encoding="utf-8")
-    manager = WorkflowManager(
-        repo,
-        claude_command=str(fake_claude),
-        worktree_root=tmp_path / "worktrees",
+    manager.finish_develop("T001")
+    review = manager.prepare_review("T001")
+    review_worktree = Path(str(review["review_worktree"]))
+    (review_worktree / "reviewer-note.txt").write_text("not allowed\n", encoding="utf-8")
+    attempt = manager.load_attempt("T001")
+    assert attempt is not None
+    _write_json(
+        review_worktree / ".workflow" / "review-result.json",
+        {
+            "task_id": "T001",
+            "base_commit": attempt.base_commit,
+            "candidate_commit": attempt.candidate_commit,
+            "verdict": "PASS",
+            "checks": [{"id": "A", "status": "PASS", "evidence": [], "finding": "ok"}],
+            "must_not_violations": [],
+            "unknowns": [],
+            "required_changes": [],
+        },
     )
-
-    manager.develop("T001")
-    with pytest.raises(WorkflowError, match="untracked changes"):
-        manager.review("T001")
+    with pytest.raises(WorkflowError, match="outside its result handoff"):
+        manager.finish_review("T001")
 
 
-def test_contract_triage_no_change_plan_returns_to_development(tmp_path: Path) -> None:
+def test_visible_owner_planning_route(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
-    fake_claude = _make_triage_claude(tmp_path, classification="CONTRACT_MISMATCH")
-    manager = WorkflowManager(
-        repo,
-        claude_command=str(fake_claude),
-        worktree_root=tmp_path / "worktrees",
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    prepared = manager.prepare_develop("T001")
+    development = Path(str(prepared["development_worktree"]))
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "TRIAGE_REQUIRED",
+            "summary": "owner behavior is missing",
+            "commands": [],
+            "residual_risks": [],
+            "triage_request": {
+                "observed_problem": "intent choice is absent",
+                "evidence": ["task contract"],
+                "proposed_classification": "OWNER_DECISION_REQUIRED",
+                "requested_change": "record the choice",
+            },
+        },
     )
+    manager.finish_develop("T001")
 
-    attempt = manager.develop("T001")
-    assert manager.load_config(Path(attempt.development_worktree))["workflow_state"] == (
-        "TRIAGE_REQUIRED"
+    triage = manager.prepare_triage("T001")
+    triage_worktree = Path(str(triage["triage_worktree"]))
+    _write_json(
+        triage_worktree / ".workflow" / "triage-result.json",
+        {
+            "task_id": "T001",
+            "issue_commit": triage["issue_commit"],
+            "classification": "OWNER_DECISION_REQUIRED",
+            "summary": "owner must choose",
+            "evidence": ["intent does not decide"],
+            "recommended_action": "ask owner",
+            "owner_question": "Which behavior is intended?",
+        },
     )
-    state, _ = manager.triage("T001")
-    assert state == "PLANNING"
-    plan = manager.plan("T001")
-    assert plan is not None
-    state, _ = manager.review_plan("T001")
-
-    assert state == "CHANGES_REQUESTED"
-    assert manager.load_config(Path(attempt.development_worktree))["workflow_state"] == (
-        "CHANGES_REQUESTED"
-    )
-
-
-def test_owner_decision_is_required_before_intent_planning(tmp_path: Path) -> None:
-    repo, _ = _make_repo(tmp_path)
-    fake_claude = _make_triage_claude(
-        tmp_path,
-        classification="OWNER_DECISION_REQUIRED",
-        plan_outcome="PLAN_READY",
-        owner_edit=True,
-    )
-    manager = WorkflowManager(
-        repo,
-        claude_command=str(fake_claude),
-        worktree_root=tmp_path / "worktrees",
-    )
-
-    attempt = manager.develop("T001")
-    state, _ = manager.triage("T001")
+    state, _ = manager.finish_triage("T001")
     assert state == "OWNER_DECISION_REQUIRED"
     with pytest.raises(WorkflowError, match="owner's explicit decision"):
-        manager.plan("T001")
+        manager.prepare_plan("T001")
 
-    plan = manager.plan("T001", owner_decision="Keep the current single-owner V1 intent")
+    planning = manager.prepare_plan("T001", owner_decision="Keep one active pool")
+    assert planning["agent"] == "planner"
+    (development / "docs" / "intent").mkdir(parents=True, exist_ok=True)
+    (development / "docs" / "intent" / "decision.md").write_text(
+        "one active pool\n", encoding="utf-8"
+    )
+    _write_json(
+        development / ".workflow" / "planner-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "PLAN_READY",
+            "summary": "owner decision recorded",
+            "rationale": "matches explicit decision",
+            "unresolved_questions": [],
+        },
+    )
+    plan = manager.finish_plan("T001")
     assert plan is not None
-    state, _ = manager.review_plan("T001")
-    assert state == "CHANGES_REQUESTED"
-    assert (Path(attempt.development_worktree) / "docs" / "intent" / "owner-decision.md").is_file()
-
-
-def test_failed_plan_review_can_be_replanned_without_dead_end(tmp_path: Path) -> None:
-    repo, _ = _make_repo(tmp_path)
-    fake_claude = _make_triage_claude(
-        tmp_path,
-        classification="CONTRACT_MISMATCH",
-        plan_outcome="PLAN_READY",
-        review_verdict="FAIL",
+    review = manager.prepare_plan_review("T001")
+    review_worktree = Path(str(review["review_worktree"]))
+    _write_json(
+        review_worktree / ".workflow" / "plan-review-result.json",
+        {
+            "task_id": "T001",
+            "base_commit": plan.base_commit,
+            "candidate_commit": plan.candidate_commit,
+            "verdict": "PASS",
+            "summary": "planning is aligned",
+            "required_changes": [],
+            "unknowns": [],
+        },
     )
-    manager = WorkflowManager(
-        repo,
-        claude_command=str(fake_claude),
-        worktree_root=tmp_path / "worktrees",
-    )
-
-    manager.develop("T001")
-    manager.triage("T001")
-    manager.plan("T001")
-    state, _ = manager.review_plan("T001")
-    assert state == "PLANNING"
-
-    source = fake_claude.read_text(encoding="utf-8")
-    fake_claude.write_text(
-        source.replace("review_verdict = 'FAIL'", "review_verdict = 'PASS'"),
-        encoding="utf-8",
-    )
-    manager.plan("T001")
-    state, _ = manager.review_plan("T001")
-    assert state == "CHANGES_REQUESTED"
-
-
-def test_blocked_plan_review_can_be_retried_without_replanning(tmp_path: Path) -> None:
-    repo, _ = _make_repo(tmp_path)
-    fake_claude = _make_triage_claude(
-        tmp_path,
-        classification="CONTRACT_MISMATCH",
-        review_verdict="BLOCKED",
-    )
-    manager = WorkflowManager(
-        repo,
-        claude_command=str(fake_claude),
-        worktree_root=tmp_path / "worktrees",
-    )
-
-    manager.develop("T001")
-    manager.triage("T001")
-    manager.plan("T001")
-    state, _ = manager.review_plan("T001")
-    assert state == "PLAN_REVIEW_BLOCKED"
-    assert manager.load_plan("T001") is not None
-
-    source = fake_claude.read_text(encoding="utf-8")
-    fake_claude.write_text(
-        source.replace("review_verdict = 'BLOCKED'", "review_verdict = 'PASS'"),
-        encoding="utf-8",
-    )
-    state, _ = manager.review_plan("T001")
+    state, _ = manager.finish_plan_review("T001")
     assert state == "CHANGES_REQUESTED"

@@ -39,11 +39,11 @@ Prefer simple, modular implementations.
 
 When the user asks this outer Claude Code session to execute the workflow, act
 only as the Manager: read `todo/WORKFLOW.md`, run its `validate` and `status`
-commands, and invoke the documented development, review, triage or planning
-command for exactly one numbered
-task. Do not edit the business implementation or perform the independent review
-in the Manager context. The controller must create every fresh role process.
-The normal route remains `develop → review`; do not invoke triage or planning
+commands, invoke its short prepare/finish gates for exactly one numbered task,
+and launch the returned project Agent visibly with Claude Code's Agent tool. Do
+not edit the business implementation or perform an independent role in the
+Manager context. Python must never launch Claude or hide an Agent run.
+The normal route remains Developer → Reviewer; do not invoke triage or planning
 unless a structured result requests it. Stop on `BLOCKED` or
 `OWNER_DECISION_REQUIRED`, do not advance to the next task, and do not push
 unless the user separately requests it.

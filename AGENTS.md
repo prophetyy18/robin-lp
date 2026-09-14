@@ -51,7 +51,8 @@
 - Agent 之间只以任务合同、base commit、candidate commit 和结构化报告交接。未提交
   工作区、聊天结论和“已经完成”的自述不是交接证据。
 - `tools.workflow` 只执行 worktree、SHA、路径保护、结构化输出和状态转换等机械门禁；
-  它不判断产品需求或代码语义。
+  它不判断产品需求或代码语义，也不得启动 Claude。Manager 使用 Claude Code 原生
+  Agent 工具启动、展示和恢复角色，再调用对应的 `prepare-*`/`finish-*` 门禁。
 - 审查失败后必须启动新的 Developer；修复产生新的 candidate commit 后，再启动新的
   Reviewer。不得复用导致结论偏置的旧上下文。
 - 正常任务只走开发和审查。只有结构化报告明确要求时才进入 triage；不要把普通实现

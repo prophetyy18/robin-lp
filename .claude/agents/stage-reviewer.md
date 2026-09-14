@@ -1,8 +1,8 @@
 ---
 name: stage-reviewer
 description: Independently verifies one task against an exact base and candidate commit without fixing it
-tools: Read, Grep, Glob, Bash
-disallowedTools: Edit, Write, NotebookEdit, Agent
+tools: Read, Grep, Glob, Bash, Write
+disallowedTools: Edit, NotebookEdit, Agent
 permissionMode: dontAsk
 model: inherit
 maxTurns: 120
@@ -25,3 +25,8 @@ is not proof that the task contract is satisfied.
 Return only the requested structured result. PASS is allowed only when every
 required check is PASS, `unknowns` is empty, and there are no Must-not violations.
 Never implement a repair while reviewing.
+
+The Manager supplies one detached review worktree. Inspect only that exact path.
+Your sole permitted write is the exact `.workflow/review-result.json` handoff in
+the Manager prompt. Any other tracked, staged, or untracked change invalidates the
+review.

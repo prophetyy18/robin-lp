@@ -67,7 +67,8 @@ resolves to the right interpreter:
 ```bash
 cd /home/lpdev/lp
 export PATH="/home/lpdev/miniconda3/envs/robinhood-lp/bin:$PATH"
-claude --permission-mode manual
+claude --agent workflow-manager --model 'MiniMax-M3[1m]' \
+  --add-dir /home/lpdev/lp-worktrees --permission-mode manual
 ```
 
 Then give it this instruction (replace `T001` with the one task you want this
@@ -76,31 +77,28 @@ session to handle):
 ```text
 Act as the workflow Manager for exactly T001. Read AGENTS.md, CLAUDE.md,
 todo/config.yaml, todo/README.md, todo/WORKFLOW.md, and the T001 task contract.
-Do not implement or review the task yourself. First run workflow validate and
-status. If T001 is PLANNED, its dependencies are APPROVED, and the prior active
-task is finished, use tools.workflow ready T001. If the gates pass and T001 is
-READY, use tools.workflow develop T001, then use
-tools.workflow review T001. If review returns CHANGES_REQUESTED, use retry and a
-fresh review until APPROVED or genuinely BLOCKED. If a Developer or Reviewer
-returns TRIAGE_REQUIRED, run triage T001. Follow only the resulting route: plan
-and review-plan for a contract/spec correction, ask me before an owner decision,
-or retry for an implementation defect. Stop on BLOCKED or OWNER_DECISION_REQUIRED
-and report the exact evidence or decision needed. Do not start the next task and do
-not push.
+Do not implement, plan, triage, or review the task yourself. Run workflow validate
+and status, then use only the prepare/finish commands in todo/WORKFLOW.md. After
+each prepare command, visibly invoke the returned project Agent with the returned
+prompt. Let me observe or steer it. Run the matching finish command only after its
+handoff exists. Stop on BLOCKED or OWNER_DECISION_REQUIRED. Do not start the next
+task and do not push.
 ```
 
-The outer Claude session is only the Manager. `tools.workflow` creates a fresh
-Developer worktree and process, commits the candidate, creates a separate
-read-only Reviewer at the exact candidate SHA, and records the verdict. Do not
+The outer Claude session is only the Manager. `tools.workflow` creates and checks
+worktrees, commits and state transitions; Claude Code itself runs every visible
+specialist Agent. Python never invokes Claude. Do not
 prompt the outer session with “implement T001 directly”; that bypasses the
 isolation and review gates. See [`todo/WORKFLOW.md`](todo/WORKFLOW.md) for command
 details and recovery behavior.
 
-In the Manager session, approve only the displayed `python -m tools.workflow`
+In the Manager session, approve only the displayed short `python -m tools.workflow`
 command whose task ID and action you expect. Do not approve an unrelated shell,
 `sudo`, direct Git mutation, deployment, signing, or broadcast command. The
-Developer and Reviewer are non-interactive: an action outside their allowlist is
-denied instead of being forwarded to you as a permission prompt.
+Specialist progress and permission requests remain visible in Claude Code.
+Use `/tasks` while a specialist is running; open its transcript to inspect its
+work or send a follow-up directly. The Manager resumes the same named Planner
+when a planning discussion needs more than one turn.
 
 ## Architecture
 

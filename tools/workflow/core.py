@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -324,14 +323,12 @@ class WorkflowManager:
         self,
         repo: Path,
         *,
-        claude_command: str = "claude",
         worktree_root: Path | None = None,
     ) -> None:
         self.repo = repo.resolve()
         discovered = Path(_git(self.repo, "rev-parse", "--show-toplevel").stdout.strip()).resolve()
         if discovered != self.repo:
             raise WorkflowError(f"run from repository root {discovered}")
-        self.claude_command = claude_command
         self.worktree_root = (
             worktree_root or self.repo.parent / f"{self.repo.name}-worktrees"
         ).resolve()
@@ -456,6 +453,7 @@ class WorkflowManager:
     def validate_repository(self) -> None:
         self.load_config()
         for agent in (
+            "workflow-manager",
             "stage-developer",
             "stage-reviewer",
             "issue-triager",
@@ -522,6 +520,9 @@ class WorkflowManager:
     def _plan_path(self, task_id: str) -> Path:
         return self.runtime_dir / f"{task_id}-plan.json"
 
+    def _protected_snapshot_path(self, task_id: str) -> Path:
+        return self.runtime_dir / f"{task_id}-protected.json"
+
     def save_attempt(self, attempt: AttemptRecord) -> None:
         _write_json(self._attempt_path(attempt.task_id), attempt.to_dict())
 
@@ -561,76 +562,8 @@ class WorkflowManager:
         config["active_task"] = task_id
         config["workflow_state"] = state
 
-    def _agent_result(self, result: CommandResult) -> dict[str, Any]:
-        if result.returncode != 0:
-            detail = result.stderr.strip() or result.stdout.strip() or "no output"
-            raise WorkflowError(f"Claude Code failed ({result.returncode}): {detail}")
-        try:
-            envelope = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise WorkflowError("Claude Code did not return a JSON envelope") from exc
-        structured = envelope.get("structured_output")
-        if not isinstance(structured, dict):
-            raise WorkflowError("Claude Code JSON has no structured_output object")
-        return structured
-
-    def _launch_agent(
-        self,
-        *,
-        agent: str,
-        prompt: str,
-        schema_path: Path,
-        cwd: Path,
-        role: str,
-    ) -> dict[str, Any]:
-        runtime = self.load_config(cwd)["agent_runtime"]
-        model = runtime["model"]
-        schema = schema_path.read_text(encoding="utf-8")
-        tools = ["Read", "Grep", "Glob"]
-        if role in {"developer", "reviewer"}:
-            tools.extend(
-                (
-                    "Bash(git status *)",
-                    "Bash(git diff *)",
-                    "Bash(git log *)",
-                    "Bash(python *)",
-                    "Bash(python3 *)",
-                    "Bash(pytest *)",
-                    "Bash(ruff *)",
-                    "Bash(mypy *)",
-                )
-            )
-        elif role in {"triager", "plan-reviewer"}:
-            tools.extend(("Bash(git status *)", "Bash(git diff *)", "Bash(git log *)"))
-        elif role == "planner":
-            tools.extend(("Edit", "Write", "WebSearch", "WebFetch"))
-        else:
-            raise WorkflowError(f"unknown agent role {role}")
-        if role == "developer":
-            tools.extend(("Edit", "Write"))
-        editable = role in {"developer", "planner"}
-        args = (
-            self.claude_command,
-            "-p",
-            "--agent",
-            agent,
-            "--model",
-            model,
-            "--permission-mode",
-            "acceptEdits" if editable else "dontAsk",
-            "--permission-prompts",
-            "none",
-            "--allowedTools",
-            ",".join(tools),
-            "--output-format",
-            "json",
-            "--json-schema",
-            schema,
-            prompt,
-        )
-        return self._agent_result(_run(args, cwd=cwd, check=False, timeout=7200))
-
-    def develop(self, task_id: str, *, retry: bool = False) -> AttemptRecord:
+    def prepare_develop(self, task_id: str, *, retry: bool = False) -> dict[str, object]:
+        """Prepare an isolated worktree without hiding the Claude Code agent run."""
         if retry:
             attempt = self.load_attempt(task_id)
             if attempt is None:
@@ -684,20 +617,41 @@ class WorkflowManager:
         _write_json(worktree / "todo" / "config.yaml", config)
         protected = _protected_paths(worktree)
         before = _snapshot(protected, worktree)
+        self.save_attempt(attempt)
+        _write_json(self._protected_snapshot_path(task_id), before)
         task_file = config["tasks"][task_id]["task_file"]
         prompt = (
             f"Implement exactly {task_id}. The frozen contract is {task_file}. "
             f"The approved base is {attempt.base_commit}. This is attempt {attempt.attempt}. "
-            "Do not commit. Return the required structured developer result."
+            f"Work only in {worktree}. Do not commit. Before finishing, write the required "
+            f"structured developer result to {worktree / '.workflow' / 'developer-result.json'}."
         )
-        result = self._launch_agent(
-            agent="stage-developer",
-            prompt=prompt,
-            schema_path=worktree / "todo" / "schemas" / "developer-result.schema.json",
-            cwd=worktree,
-            role="developer",
-        )
+        return {**attempt.to_dict(), "agent": "stage-developer", "prompt": prompt}
+
+    def finish_develop(self, task_id: str) -> AttemptRecord:
+        """Validate and seal a visible stage-developer run."""
+        attempt = self.load_attempt(task_id)
+        if attempt is None:
+            raise WorkflowError(f"{task_id} has no prepared development attempt")
+        worktree = Path(attempt.development_worktree)
+        result_path = worktree / ".workflow" / "developer-result.json"
+        if not result_path.is_file():
+            raise WorkflowError(f"developer result is missing: {result_path}")
+        result = _load_json(result_path)
+        before = _load_json(self._protected_snapshot_path(task_id))
+        return self._finish_develop(attempt, result, before)
+
+    def _finish_develop(
+        self,
+        attempt: AttemptRecord,
+        result: Mapping[str, Any],
+        before: Mapping[str, Any],
+    ) -> AttemptRecord:
+        task_id = attempt.task_id
+        worktree = Path(attempt.development_worktree)
+        config = self.load_config(worktree)
         self._validate_developer_result(result, task_id)
+        (worktree / ".workflow" / "developer-result.json").unlink(missing_ok=True)
         after = _snapshot(_protected_paths(worktree), worktree)
         if before != after:
             raise WorkflowError(
@@ -750,6 +704,7 @@ class WorkflowManager:
             development_worktree=attempt.development_worktree,
         )
         self.save_attempt(attempt)
+        self._protected_snapshot_path(task_id).unlink(missing_ok=True)
         return attempt
 
     def _validate_developer_result(self, result: Mapping[str, Any], task_id: str) -> None:
@@ -831,7 +786,8 @@ class WorkflowManager:
             return "BLOCKED"
         return "CHANGES_REQUESTED"
 
-    def review(self, task_id: str) -> tuple[str, Path]:
+    def prepare_review(self, task_id: str) -> dict[str, object]:
+        """Create the exact detached review worktree without launching Claude."""
         attempt = self.load_attempt(task_id)
         if attempt is None or attempt.candidate_commit is None:
             raise WorkflowError(f"{task_id} has no candidate commit")
@@ -852,27 +808,50 @@ class WorkflowManager:
         _git(
             self.repo, "worktree", "add", "--detach", str(review_worktree), attempt.candidate_commit
         )
-        try:
-            task_file = config["tasks"][task_id]["task_file"]
-            prompt = (
-                f"Independently review exactly {task_id} using {task_file}. "
-                f"Base commit: {attempt.base_commit}. Candidate commit: {attempt.candidate_commit}. "
-                "Inspect the full diff and run every obtainable acceptance check. "
-                "Return the required structured review result and do not fix anything."
-            )
-            result = self._launch_agent(
-                agent="stage-reviewer",
-                prompt=prompt,
-                schema_path=review_worktree / "todo" / "schemas" / "review-result.schema.json",
-                cwd=review_worktree,
-                role="reviewer",
-            )
-            reviewer_changes = _git(review_worktree, "status", "--porcelain").stdout.strip()
-            if reviewer_changes:
-                raise WorkflowError("reviewer left tracked, staged, or untracked changes")
-            state = self._validate_review_result(result, attempt)
-        finally:
-            _git(self.repo, "worktree", "remove", str(review_worktree), check=False)
+        task_file = config["tasks"][task_id]["task_file"]
+        prompt = (
+            f"Independently review exactly {task_id} using {task_file}. "
+            f"Base commit: {attempt.base_commit}. Candidate commit: {attempt.candidate_commit}. "
+            f"Work only in {review_worktree}. Inspect the full diff and run every obtainable "
+            f"acceptance check. Do not fix anything. Write the structured review result only to "
+            f"{review_worktree / '.workflow' / 'review-result.json'} before finishing."
+        )
+        return {
+            **attempt.to_dict(),
+            "agent": "stage-reviewer",
+            "review_worktree": str(review_worktree),
+            "prompt": prompt,
+        }
+
+    def finish_review(self, task_id: str) -> tuple[str, Path]:
+        """Validate and record a visible stage-reviewer run."""
+        attempt = self.load_attempt(task_id)
+        if attempt is None or attempt.candidate_commit is None:
+            raise WorkflowError(f"{task_id} has no candidate commit")
+        review_worktree = (
+            self.worktree_root / f"review-{task_id.lower()}-attempt-{attempt.attempt:03d}"
+        )
+        result_path = review_worktree / ".workflow" / "review-result.json"
+        if not result_path.is_file():
+            raise WorkflowError(f"review result is missing: {result_path}")
+        result = _load_json(result_path)
+        state = self._validate_review_result(result, attempt)
+        result_path.unlink()
+        reviewer_changes = _git(review_worktree, "status", "--porcelain").stdout.strip()
+        if reviewer_changes:
+            raise WorkflowError("reviewer left changes outside its result handoff")
+        if _sha(review_worktree) != attempt.candidate_commit:
+            raise WorkflowError("review worktree no longer matches candidate commit")
+        _git(self.repo, "worktree", "remove", str(review_worktree), check=False)
+
+        return self._record_review_result(attempt, result, state)
+
+    def _record_review_result(
+        self, attempt: AttemptRecord, result: Mapping[str, Any], state: str
+    ) -> tuple[str, Path]:
+        task_id = attempt.task_id
+        worktree = Path(attempt.development_worktree)
+        config = self.load_config(worktree)
 
         relative_json = (
             Path("todo")
@@ -919,7 +898,7 @@ class WorkflowManager:
             / f"triage-{attempt.attempt:03d}.json"
         )
 
-    def triage(self, task_id: str) -> tuple[str, Path]:
+    def prepare_triage(self, task_id: str) -> dict[str, object]:
         attempt = self.load_attempt(task_id)
         if attempt is None:
             raise WorkflowError(f"{task_id} has no retained attempt")
@@ -936,24 +915,39 @@ class WorkflowManager:
         if triage_worktree.exists():
             raise WorkflowError(f"triage worktree path already exists: {triage_worktree}")
         _git(self.repo, "worktree", "add", "--detach", str(triage_worktree), issue_commit)
-        try:
-            result = self._launch_agent(
-                agent="issue-triager",
-                prompt=(
-                    f"Classify the exceptional issue for {task_id}. Issue commit: {issue_commit}. "
-                    f"Task contract: {config['tasks'][task_id]['task_file']}. "
-                    "Use the recorded Developer or Reviewer triage_request as the report, "
-                    "verify it against the repository, and return structured triage only."
-                ),
-                schema_path=triage_worktree / "todo" / "schemas" / "triage-result.schema.json",
-                cwd=triage_worktree,
-                role="triager",
-            )
-            if _git(triage_worktree, "status", "--porcelain").stdout.strip():
-                raise WorkflowError("triager left tracked, staged, or untracked changes")
-            classification = self._validate_triage_result(result, task_id, issue_commit)
-        finally:
-            _git(self.repo, "worktree", "remove", str(triage_worktree), check=False)
+        prompt = (
+            f"Classify the exceptional issue for {task_id}. Issue commit: {issue_commit}. "
+            f"Task contract: {config['tasks'][task_id]['task_file']}. Work only in "
+            f"{triage_worktree}. Use the recorded triage_request, verify it, and write the "
+            f"structured result only to {triage_worktree / '.workflow' / 'triage-result.json'}."
+        )
+        return {
+            **attempt.to_dict(),
+            "agent": "issue-triager",
+            "issue_commit": issue_commit,
+            "triage_worktree": str(triage_worktree),
+            "prompt": prompt,
+        }
+
+    def finish_triage(self, task_id: str) -> tuple[str, Path]:
+        attempt = self.load_attempt(task_id)
+        if attempt is None:
+            raise WorkflowError(f"{task_id} has no retained attempt")
+        worktree = Path(attempt.development_worktree)
+        config = self.load_config(worktree)
+        issue_commit = _sha(worktree)
+        triage_worktree = (
+            self.worktree_root / f"triage-{task_id.lower()}-attempt-{attempt.attempt:03d}"
+        )
+        result_path = triage_worktree / ".workflow" / "triage-result.json"
+        if not result_path.is_file():
+            raise WorkflowError(f"triage result is missing: {result_path}")
+        result = _load_json(result_path)
+        classification = self._validate_triage_result(result, task_id, issue_commit)
+        result_path.unlink()
+        if _git(triage_worktree, "status", "--porcelain").stdout.strip():
+            raise WorkflowError("triager left changes outside its result handoff")
+        _git(self.repo, "worktree", "remove", str(triage_worktree), check=False)
 
         state = {
             "IMPLEMENTATION_DEFECT": "CHANGES_REQUESTED",
@@ -996,7 +990,7 @@ class WorkflowManager:
             raise WorkflowError("owner decision triage must include owner_question")
         return classification
 
-    def plan(self, task_id: str, *, owner_decision: str | None = None) -> PlanRecord | None:
+    def prepare_plan(self, task_id: str, *, owner_decision: str | None = None) -> dict[str, object]:
         attempt = self.load_attempt(task_id)
         if attempt is None:
             raise WorkflowError(f"{task_id} has no retained attempt")
@@ -1031,25 +1025,46 @@ class WorkflowManager:
 
         plan_base = _sha(worktree)
         task_file = config["tasks"][task_id]["task_file"]
-        result = self._launch_agent(
-            agent="planner",
-            prompt=(
-                f"Resolve the triaged issue for exactly {task_id}. Classification: {classification}. "
-                f"Triage report: {triage_path}. Task contract: {task_file}. "
-                f"Planning base commit: {plan_base}. "
-                + (
-                    f"The owner's recorded decision is: {owner_decision.strip()}. "
-                    if owner_decision
-                    else ""
-                )
-                + "Change only the paths allowed for this classification. A no-change result is valid "
-                "when supported by evidence. Return the structured planner result."
-            ),
-            schema_path=worktree / "todo" / "schemas" / "planner-result.schema.json",
-            cwd=worktree,
-            role="planner",
+        prompt = (
+            f"Resolve the triaged issue for exactly {task_id}. Classification: {classification}. "
+            f"Triage report: {triage_path}. Task contract: {task_file}. "
+            f"Planning base commit: {plan_base}. "
+            + (
+                f"The owner's recorded decision is: {owner_decision.strip()}. "
+                if owner_decision
+                else ""
+            )
+            + f"Work only in {worktree}. Change only paths allowed for this classification. "
+            f"A no-change result is valid. Write the structured result to "
+            f"{worktree / '.workflow' / 'planner-result.json'}."
         )
+        _write_json(
+            self.runtime_dir / f"{task_id}-planning-context.json",
+            {"classification": classification, "plan_base": plan_base},
+        )
+        return {
+            **attempt.to_dict(),
+            "agent": "planner",
+            "classification": classification,
+            "plan_base": plan_base,
+            "prompt": prompt,
+        }
+
+    def finish_plan(self, task_id: str) -> PlanRecord | None:
+        attempt = self.load_attempt(task_id)
+        if attempt is None:
+            raise WorkflowError(f"{task_id} has no retained attempt")
+        worktree = Path(attempt.development_worktree)
+        config = self.load_config(worktree)
+        context = _load_json(self.runtime_dir / f"{task_id}-planning-context.json")
+        classification = _required_string(context, "classification")
+        plan_base = _required_string(context, "plan_base")
+        result_path = worktree / ".workflow" / "planner-result.json"
+        if not result_path.is_file():
+            raise WorkflowError(f"planner result is missing: {result_path}")
+        result = _load_json(result_path)
         outcome = self._validate_planner_result(result, task_id)
+        result_path.unlink()
         changed = _working_tree_changes(worktree)
         forbidden: list[str] = []
         for path in changed:
@@ -1109,6 +1124,7 @@ class WorkflowManager:
             candidate_commit=_sha(worktree),
         )
         self.save_plan(plan)
+        (self.runtime_dir / f"{task_id}-planning-context.json").unlink(missing_ok=True)
         return plan
 
     def _validate_planner_result(self, result: Mapping[str, Any], task_id: str) -> str:
@@ -1130,7 +1146,7 @@ class WorkflowManager:
             raise WorkflowError("planner unresolved_questions must be a list")
         return outcome
 
-    def review_plan(self, task_id: str) -> tuple[str, Path]:
+    def prepare_plan_review(self, task_id: str) -> dict[str, object]:
         attempt = self.load_attempt(task_id)
         plan = self.load_plan(task_id)
         if attempt is None or plan is None:
@@ -1152,23 +1168,38 @@ class WorkflowManager:
         if review_worktree.exists():
             raise WorkflowError(f"plan review worktree path already exists: {review_worktree}")
         _git(self.repo, "worktree", "add", "--detach", str(review_worktree), plan.candidate_commit)
-        try:
-            result = self._launch_agent(
-                agent="plan-reviewer",
-                prompt=(
-                    f"Review the planning correction for {task_id}. "
-                    f"Classification: {plan.classification}. Base commit: {plan.base_commit}. "
-                    f"Candidate commit: {plan.candidate_commit}. Return structured plan review only."
-                ),
-                schema_path=review_worktree / "todo" / "schemas" / "plan-review-result.schema.json",
-                cwd=review_worktree,
-                role="plan-reviewer",
-            )
-            if _git(review_worktree, "status", "--porcelain").stdout.strip():
-                raise WorkflowError("plan reviewer left tracked, staged, or untracked changes")
-            state = self._validate_plan_review_result(result, plan)
-        finally:
-            _git(self.repo, "worktree", "remove", str(review_worktree), check=False)
+        prompt = (
+            f"Review the planning correction for {task_id}. Classification: {plan.classification}. "
+            f"Base commit: {plan.base_commit}. Candidate commit: {plan.candidate_commit}. Work only "
+            f"in {review_worktree}. Write the structured result only to "
+            f"{review_worktree / '.workflow' / 'plan-review-result.json'}."
+        )
+        return {
+            **plan.to_dict(),
+            "agent": "plan-reviewer",
+            "review_worktree": str(review_worktree),
+            "prompt": prompt,
+        }
+
+    def finish_plan_review(self, task_id: str) -> tuple[str, Path]:
+        attempt = self.load_attempt(task_id)
+        plan = self.load_plan(task_id)
+        if attempt is None or plan is None:
+            raise WorkflowError(f"{task_id} has no plan candidate")
+        worktree = Path(attempt.development_worktree)
+        config = self.load_config(worktree)
+        review_worktree = (
+            self.worktree_root / f"plan-review-{task_id.lower()}-attempt-{attempt.attempt:03d}"
+        )
+        result_path = review_worktree / ".workflow" / "plan-review-result.json"
+        if not result_path.is_file():
+            raise WorkflowError(f"plan review result is missing: {result_path}")
+        result = _load_json(result_path)
+        state = self._validate_plan_review_result(result, plan)
+        result_path.unlink()
+        if _git(review_worktree, "status", "--porcelain").stdout.strip():
+            raise WorkflowError("plan reviewer left changes outside its result handoff")
+        _git(self.repo, "worktree", "remove", str(review_worktree), check=False)
 
         json_report = (
             Path("todo")
@@ -1236,10 +1267,3 @@ class WorkflowManager:
         if forbidden:
             raise WorkflowError("protected paths changed: " + ", ".join(forbidden))
         return changed
-
-
-def find_claude() -> str:
-    executable = shutil.which("claude")
-    if executable is None:
-        raise WorkflowError("claude executable is not available")
-    return executable

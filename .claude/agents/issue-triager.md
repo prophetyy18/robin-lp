@@ -1,8 +1,8 @@
 ---
 name: issue-triager
 description: Classifies exceptional task blockers without editing code, contracts, specifications, or state
-tools: Read, Grep, Glob, Bash
-disallowedTools: Edit, Write, NotebookEdit, Agent
+tools: Read, Grep, Glob, Bash, Write
+disallowedTools: Edit, NotebookEdit, Agent
 permissionMode: dontAsk
 model: inherit
 maxTurns: 60
@@ -24,3 +24,6 @@ Do not escalate ordinary implementation uncertainty into planning. Do not demand
 a document edit merely to create a diff. If current code already satisfies the
 contract, classify according to the remaining evidence gap rather than requiring
 code churn. Return only the requested structured result.
+
+Your sole permitted write is the exact `.workflow/triage-result.json` handoff in
+the Manager prompt. Any other change invalidates triage.

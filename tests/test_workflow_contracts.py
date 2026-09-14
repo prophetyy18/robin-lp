@@ -20,7 +20,7 @@ REQUIRED_SECTIONS = (
 
 
 def test_repository_workflow_configuration_is_valid() -> None:
-    manager = WorkflowManager(ROOT, claude_command="unused")
+    manager = WorkflowManager(ROOT)
     manager.validate_repository()
     config = manager.load_config()
 
@@ -31,6 +31,15 @@ def test_repository_workflow_configuration_is_valid() -> None:
     assert {
         task_id for task_id, task in config["tasks"].items() if task["status"] == "APPROVED"
     } == {"T000", "T004"}
+
+
+def test_python_workflow_never_launches_claude() -> None:
+    sources = "\n".join(
+        path.read_text(encoding="utf-8") for path in (ROOT / "tools" / "workflow").glob("*.py")
+    )
+    assert "_launch_agent" not in sources
+    assert "find_claude" not in sources
+    assert '"claude"' not in sources
 
 
 def test_every_task_is_a_separate_complete_contract() -> None:

@@ -20,7 +20,7 @@ remaining UNKNOWN.
 Prepare exactly one task so that a less-capable developer can execute it without
 making product decisions. Its contract must contain Dependencies, Outcome,
 Deliverables, Acceptance, Must not, and References. If a user decision is required,
-return USER_DECISION_REQUIRED instead of guessing.
+return OWNER_DECISION_REQUIRED instead of guessing.
 
 When invoked from triage, resolve only the supplied classification and issue.
 For CONTRACT_MISMATCH, change only relevant task contracts and dependency fields.
@@ -31,3 +31,7 @@ commit SHAs, runtime model, or approval data. It is valid to return
 NO_CHANGE_REQUIRED with evidence when the reported impact prediction was wrong
 but the existing contract needs no edit. Do not manufacture wording changes just
 to produce a diff.
+
+Use the exact controller-created planning worktree supplied by the Manager. Write
+the structured handoff to the exact `.workflow/planner-result.json` path before
+finishing. This file is the only allowed `.workflow/` write.

@@ -37,10 +37,10 @@ V1 产品。
 ### Git
 
 - 当前分支：`main`。
-- Workflow Bootstrap 的起始版本为 `6c31778`，当时 `origin/main` 指向同一提交。
-- 当前工作区包含待提交的 Workflow Bootstrap：Intent/Spec/Implement 文档分层、
-  `todo/` 状态机、独立 Agent、worktree 控制器和测试。完成验证并推送前，远端尚不
-  包含这套工作流。
+- Workflow Bootstrap 已提交并推送到 `main`；当前本地与远端基线包含文档分层、
+  `todo/` 状态机、独立 Agent、worktree 门禁和测试。
+- 当前工作区正在把 Agent 控制面迁移到 Claude Code：Python 不再启动或等待 Claude，
+  所有角色改为可见的 `prepare-* → Agent → finish-*` 流程。该迁移尚未提交。
 - 原 `docs/HANDOVERS/` 未提交内容已原样保存到
   `todo/evidence/legacy/2026-09-14/`，只作为历史候选证据，不批准 T001。
 
@@ -52,7 +52,7 @@ V1 产品。
   测试通过证据。
 - 系统 shell 的 Python 仍为 3.10.12；服务器现有
   `/home/lpdev/miniconda3/envs/robinhood-lp`，提供 Python 3.12.14、pytest 9.1.1、
-  Ruff 和 mypy。Workflow Bootstrap 完成后已在该环境得到 282 passed、2 skipped，
+  Ruff 和 mypy。可见 Agent 迁移后当前得到 280 passed、2 skipped，
   Ruff 和 mypy 通过；但 T001 仍缺少仓库内 dependency lock、独立 clean-install 和
   任务合同要求的连续两次完整质量门证据，因此不能据此批准。
 - GitHub Actions 的当前结果未能从本环境验证。任何“全部测试通过”声明都必须

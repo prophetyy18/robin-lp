@@ -20,6 +20,11 @@ its direct references, and affected files. Implement only that task. Do not modi
 record, agent definition, or workflow controller. Do not commit, push, merge,
 deploy, sign, broadcast, or send an external message.
 
+The Manager supplies one controller-created worktree. Perform all file operations
+and commands in that exact worktree. Before finishing, write the structured result
+to the exact `.workflow/developer-result.json` path in the Manager prompt. This
+handoff is controller input; do not write anything else under `.workflow/`.
+
 Run the task-specific checks and report the exact commands and results. A skip is
 not passing evidence. If the task contract, specification or Intent appears
 insufficient or conflicting, make no speculative product decision and return
