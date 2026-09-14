@@ -5,7 +5,7 @@
 > underlying guarantee is broken.
 >
 > Scope: V1 = research → replay → backtest → testnet execution →
-> paper trading → mainnet automated execution, for a single Robinhood
+> post-testnet paper/shadow → mainnet automated execution, for a single Robinhood
 > Chain `PoolKey` paired with one user-selected target token. Live
 > automated execution is **in** V1 scope and is the V1 acceptance
 > condition (G-LIVE-01); it must be unlocked only via the promotion
@@ -23,16 +23,16 @@
            |                                      |
            v                                      v
 +------------------------------------------------------------------+
-|                     V1 paper-trading process                    |
+|                V1 main application (no key material)            |
 |                                                                  |
 |  +-------------------+   +-----------------+   +-------------+  |
-|  |  config + secrets |   |   RPC adapter    |   |   storage   |  |
-|  |  (read-only)      |   |   (read-only)    |   |  (local)    |  |
+|  | config + service  |   |   RPC adapter    |   |   storage   |  |
+|  | secret references |   |   (read-only)    |   |  (local)    |  |
 |  +---------+---------+   +--------+--------+   +-------+-----+  |
 |            |                      |                    |        |
 |            v                      v                    v        |
 |  +---------------------------------------------------------+    |
-|  |  protocol / replay / features / strategy / risk / paper |    |
+|  | protocol / replay / features / strategy / risk / paper / Web| |
 |  +--------------------------+------------------------------+    |
 |                             |                                   |
 |                             v                                   |
@@ -43,18 +43,19 @@
            |                                       |
            v                                       v
 +-----------------------+               +------------------------+
-|  Robinhood Chain RPC  |               |   operator filesystem  |
-|  (untrusted boundary) |               |   (untrusted)          |
+|  Robinhood Chain RPC  |               | encrypted Keystore +   |
+|  (untrusted boundary) |               | isolated signer/executor|
 +-----------------------+               +------------------------+
 ```
 
 Boundary properties:
 
-- The main V1 process (config, replay, backtest, paper, web console)
-  holds **no signing key, no seed phrase, no API secret, and no
-  capability to broadcast transactions**. Signing material lives only
-  in a separate, isolated signer process (G-SIGNER-01) that the main
-  process cannot reach; the boundary is enforced by
+- The main V1 application (config, replay, backtest, paper, web console)
+  holds **no signing key, seed phrase, Keystore password, or capability to decrypt the
+  Keystore**. Signing material lives only in a separate, isolated signer process
+  (G-SIGNER-01). The main application can submit only a narrow, authenticated,
+  state-bound request; it cannot read or export the key. Before Phase 9 this boundary is
+  enforced by
   `tests/test_no_signing_paths.py` against the `src/robinhood_lp/`
   package, and by ADR-007's pinned, minimal dependency set.
 - All chain reads cross the RPC boundary as plain JSON-RPC requests
@@ -64,11 +65,9 @@ Boundary properties:
   material and is reachable only through a deliberately narrow
   interface (built in Phase 9, T090; not present in the current
   release).
-- The web console (Phase 7+) is **not** in this trust diagram yet
-  because V1 does not yet ship one. When it ships it must appear
-  above the process box with explicit "no private key" rules and the
-  promotion gates from `PROJECT_GOALS.md` §6 (backtest → testnet →
-  paper → security review → human promotion).
+- The Web console is an untrusted input boundary even when locally deployed. It never
+  receives a private key or Keystore password; risk-changing requests require session,
+  CSRF, reauthentication, version and audit checks (T084–T086).
 - Local storage is *untrusted* from the process's point of view: data
   may be tampered with by an attacker with filesystem access. Mitigations
   are append-only layout, SHA-256 manifests, and re-derivation from raw
@@ -90,7 +89,7 @@ Boundary properties:
 | Hook contract upgrade or proxy swap | Pool behavior changes silently | Yes — hook-evolution adversary |
 | Social engineering of the operator | Tricks operator into approving wrong action | Yes — operator adversary |
 | Network passive observer | Sees plaintext RPC traffic (no body encryption) | Limited — RPC URLs only, no auth headers in logs |
-| Internet-scale DoS against the process | Sustained traffic to a public endpoint | Out of V1 scope — no public surface yet |
+| Internet-scale DoS against the process | Sustained traffic to a public endpoint | Limited — V1 requires no public Internet exposure, but the authenticated Web boundary is in scope |
 
 ## 3. STRIDE-classified threats
 
@@ -196,8 +195,8 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
   layout as a future live ledger; an operator mistakes one for the
   other.
 - **Controls:** T071 paper execution distinguishes simulated events in
-  the ledger; T073 observability labels runs with mode.
-- **Owner:** T071 (paper execution) + T073 (observability)
+  the ledger; T080 observability labels runs with mode.
+- **Owner:** T071 (paper execution) + T080 (observability)
 - **Residual risk:** Until T071 ships, no ledger exists, so this is
   preventive. Acceptance will require explicit `paper`/`live` labels
   on every event.
@@ -264,17 +263,19 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
 - **Severity:** Critical
 - **Scenario:** A future code change accidentally enables live
   automated execution without satisfying the V1 promotion gates
-  (backtest → testnet → paper → security review → human promotion;
+  (backtest → testnet → post-testnet paper/shadow → security review → human promotion;
   G-LIVE-GATE-01), or leaks signing material into the main V1
   process in violation of G-SIGNER-01.
 - **Controls:**
-  1. `tests/test_no_signing_paths.py` enforces that no source file in
+  1. Through Phase 8, `tests/test_no_signing_paths.py` enforces that no source file in
      `src/robinhood_lp/` imports a write-capable API or mentions
-     signing-related identifiers. The signer is an out-of-tree
-     process introduced by Phase 9 (T090); the main package cannot
-     reach it directly.
-  2. `RootConfig` rejects `default_run_mode = "live"` and any pool
-     configured at `RunMode.LIVE` (`tests/test_config.py`).
+     signing-related identifiers. T090 replaces this temporary absence proof with a
+     separately packaged signer and a narrow authenticated request boundary; T091/T092
+     add a separately constrained planner/executor, not key access to the main app.
+  2. Before T094, `RootConfig` rejects `default_run_mode = "live"` and any pool
+     configured at `RunMode.LIVE` (`tests/test_config.py`). T094 replaces this temporary
+     refusal with verification of an immutable scoped promotion record; live never
+     becomes a default.
   3. Every `TargetTokenConfig` carries an explicit dual-track
      approval state (`technical_eligibility`, `project_risk`,
      `user_decision`) and a `live_eligible` boolean that the live
@@ -283,7 +284,7 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
   4. Hook or token code-hash changes immediately demote the pool
      (ADM-HOOK-005, ADM-TECH-007) and stop live intents; the demotion
      is auditable, not silent.
-- **Owner:** T004 + T070 + product owner
+- **Owner:** T004 + T070 + T090–T095 + product owner
 - **Residual risk:** Until the signer process and T070 risk gateway
   ship, the main process contains no signing path at all, so the
   threat is *absent* in the current release rather than mitigated.
@@ -292,11 +293,60 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
   `docs/threat-model.md` §1; ADM-HOOK-005, ADM-TECH-007, G-LIVE-GATE-01,
   G-SIGNER-01.
 
+### T-13 Unauthorized or stale Web control request
+
+- **Severity:** Critical
+- **Scenario:** An attacker, stale browser tab, replayed request or CSRF changes a token,
+  PoolKey, strategy, limit, promotion or pause decision without the owner's current intent.
+- **Controls:** authenticated local deployment; CSRF protection; reauthentication for
+  risk-changing operations; optimistic concurrency; immutable version/audit binding;
+  deny on timeout or ambiguous result (T084–T086).
+- **Owner:** T084–T086
+- **Residual risk:** Compromise of the operator's authenticated workstation/session.
+- **Evidence:** `WEB-GLOBAL-003`, T085/T086 acceptance.
+
+### T-14 Forged, replayed, or stale signer/executor request
+
+- **Severity:** Critical
+- **Scenario:** A valid signature is obtained for changed calldata, chain, PoolKey, value,
+  nonce, fee, deadline or stale simulation, or a request is executed twice.
+- **Controls:** T090 authenticated request schema binds every field and authorization;
+  T091 deterministic decoding/preflight; T092/T095 idempotent nonce, replacement,
+  finality and reconciliation evidence.
+- **Owner:** T090–T095
+- **Residual risk:** A compromise spanning both authorization storage and isolated
+  execution services; mitigated by limits, independent reconciliation and kill switches.
+- **Evidence:** Phase 9 acceptance and G-EXEC-01.
+
+### T-15 Keystore, password, or backup exposure
+
+- **Severity:** Critical
+- **Scenario:** Plaintext key/password reaches environment, Web, logs, shell history,
+  process arguments or backups, or a restored signer unlocks unattended.
+- **Controls:** standard encrypted Keystore; hidden interactive password input; plaintext
+  only in signer memory; address-only backup verification; restart locked; secret scans;
+  compromise runbook (T081, T090).
+- **Owner:** T081 + T090
+- **Residual risk:** Host/root or memory compromise while signer is unlocked.
+- **Evidence:** G-SIGNER-01, ADR-003 and T090 acceptance.
+
+### T-16 Manipulated or unavailable USDG valuation
+
+- **Severity:** Critical
+- **Scenario:** An activity-pool spot price, stale quote, depeg assumption or bad indirect
+  path understates exposure/loss and admits a dangerous LP or Swap.
+- **Controls:** point-in-time provenance and availability semantics (T053); independent or
+  quality-qualified conversion sources; USDG depeg handling; missing/stale valuation blocks
+  new risk; raw token amounts remain authoritative (T049, T070).
+- **Owner:** T049 + T053 + T070
+- **Residual risk:** Correlated manipulation of all approved sources.
+- **Evidence:** ADM-POOL-002, G-VALUATION-01 and T053/T070 acceptance.
+
 ## 4. Severity rubric
 
 | Severity | Definition | Examples |
 | --- | --- | --- |
-| Critical | Wrong paper output that the user cannot detect; data corruption that propagates; secret exposure; unauthorized live-mode availability | T-01, T-02, T-03, T-04, T-12 |
+| Critical | Wrong economic output that the user cannot detect; data corruption; secret exposure; unauthorized control or live execution | T-01, T-02, T-03, T-04, T-12–T-16 |
 | High | Wrong operator action enabled by the framework; leak of an identifier that is non-public but not a key | T-05, T-06 |
 | Medium | Operability or correctness degradation that the user can detect and recover from | T-07, T-08, T-09, T-10, T-11 |
 | Low | Cosmetic, performance, or recoverable nuisance | (none in V1) |
@@ -317,6 +367,10 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
 | T-10 | Hard gates + human approval | `docs/product/ASSET_ADMISSION.md` |
 | T-11 | No wall clock in protocol layers | ADR-006 + import test |
 | T-12 | Live-mode refusal + import/path scan | `tests/test_no_signing_paths.py` |
+| T-13 | Authenticated/versioned Web writes | T085/T086 evidence |
+| T-14 | Bound signer request + deterministic planner/executor | T090–T095 evidence |
+| T-15 | Encrypted Keystore + interactive unlock + locked restart | T081/T090 evidence |
+| T-16 | Qualified point-in-time USDG quotes + fail-closed risk | T049/T053/T070 evidence |
 
 ## 6. Residual risks and owner follow-ups
 
@@ -337,9 +391,9 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
   refuse intents whose triple is not
   `ELIGIBLE/≤VERY_HIGH/APPROVED*` AND whose `live_eligible` flag is
   False. *Owner: T070.*
-- **Signer isolation** depends on Phase 9 (T090). Until then, the
-  threat model is satisfied by *absence* of signing in the main
-  process (G-SIGNER-01). *Owner: T090.*
+- **Signer isolation** depends on Phase 9 (T090). Until then, the threat is reduced by
+  absence of signing/broadcast capability. T090–T092 must replace that temporary control
+  with process isolation, request authentication and testnet evidence. *Owner: T090–T092.*
 - **Multi-provider verification** is a T020 stretch; until it ships
   T-01 is mitigated only by the chain-capability report and quality
   reports. *Owner: T020.*

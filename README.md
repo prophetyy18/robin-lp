@@ -9,7 +9,9 @@ Initial research target: concentrated-liquidity LP strategies such as
 > ⚠️ **Default mode: PAPER.** Mainnet automated execution is the V1
 > acceptance condition (G-LIVE-01) and is reached only through the
 > promotion gates in [`docs/product/PROJECT_GOALS.md`](docs/product/PROJECT_GOALS.md)
-> (backtest → testnet → paper → security review → human promotion).
+> (backtest → testnet → post-testnet paper/shadow → security review →
+> human promotion). A preliminary paper run may happen earlier to validate the
+> implementation, but it provides no live-promotion evidence.
 > See [Trading Safety](#trading-safety).
 
 ## Goals
@@ -29,6 +31,9 @@ Research correctness and reliable data collection come first; mainnet
 execution is gated by `docs/product/PROJECT_GOALS.md` and
 `docs/product/ASSET_ADMISSION.md`.
 
+Plan-level goal-to-task coverage is indexed in
+[`docs/product/TRACEABILITY.md`](docs/product/TRACEABILITY.md).
+
 ## Requirements
 
 - Python 3.12+
@@ -41,11 +46,9 @@ execution is gated by `docs/product/PROJECT_GOALS.md` and
 python3.12 -m venv .venv
 source .venv/bin/activate
 
-# install dependencies (added as the project grows)
-pip install -U pip
+# install the package and development tools
+python -m pip install -e '.[dev]'
 ```
-
-A `pyproject.toml` will be introduced once the first modules land.
 
 ## Architecture
 
@@ -66,11 +69,13 @@ strategy. Risk checks always run before execution.
 ## Trading Safety
 
 - **Default mode is PAPER.** No real transactions are sent.
-- Secrets (private keys, seed phrases, API tokens) come from
-  environment variables. They are never printed, logged, or committed.
+- Service secrets such as RPC credentials come from environment/secret injection.
+  The live signer instead opens an encrypted Web3 Keystore and accepts its password
+  only through a non-echoing interactive terminal prompt; neither is exposed to Web,
+  strategy, risk, logs, or configuration serialization.
 - `.env` / `.env.*` / `*.key` / `*.pem` / `secrets/` are git-ignored.
-- Live execution is gated behind an explicit opt-in. Do not enable it
-  without reviewing the risk layer first.
+- Live execution requires the complete evidence gates and an explicit human promotion;
+  a configuration switch alone cannot enable it.
 
 ## LP strategy evaluation
 
@@ -90,6 +95,7 @@ Measured data, not assumptions.
 
 ## Repository conventions
 
+- Coding agents must read [`AGENTS.md`](./AGENTS.md) and `CLAUDE.md` before selecting a task.
 - Smallest reasonable change per commit.
 - Tests accompany every feature; never claim something works without
   running them.

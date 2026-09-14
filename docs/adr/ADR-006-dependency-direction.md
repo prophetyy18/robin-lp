@@ -1,7 +1,7 @@
 ---
 id: ADR-006
 title: Dependency direction between layers
-status: proposed
+status: accepted
 date: 2026-09-12
 owner: T000
 supersedes: []
@@ -22,31 +22,48 @@ replay non-deterministic and testing painful.
 
 ## Decision
 
-Adopt the following **dependency rules**:
+Adopt an explicit directed acyclic dependency graph instead of pretending every component
+belongs in one total order:
 
-- a layer may import symbols only from layers strictly below it;
-- a layer may not import symbols from siblings;
-- a layer may not import a symbol whose transitive closure violates
-  the same rule;
+- protocol/domain contains shared immutable identities, values, events and intent/result
+  contracts and imports no higher layer;
+- RPC and storage are independent adapters that depend on protocol/domain, not on each other;
+- reconstruction and features consume injected read ports, not concrete RPC/storage modules;
+- strategy depends on immutable domain/feature contracts and produces candidate intents;
+- risk depends on domain/valuation/authorization contracts and returns scoped decisions; it
+  never imports a concrete strategy implementation;
+- execution consumes only an approved intent plus protocol/risk contracts; it never imports
+  a concrete strategy;
+- backtest/application orchestration is the only layer that wires strategy → risk → paper or
+  live execution through their public interfaces;
+- presentation calls application services/read models and cannot mutate lower-layer storage
+  or execution directly;
+- sibling implementations do not import one another. A genuinely shared type moves into a
+  lower contracts/domain module instead of creating a sideways dependency;
 - `time`, `datetime.now()`, `random`, and any unseeded randomness are
   forbidden inside the protocol, replay, features, strategy, and
   backtest modules; a deterministic clock is injected instead;
 - CI runs a `depend` / `import-linter` style check (see ADR-007) that
   fails on any violation.
 
-Layer ordering (highest to lowest):
+Allowed dependency shape:
 
 ```
 presentation / reports
-  execution
-    strategy
-      backtest / research
-        risk
-          features
-            reconstruction
-              storage
-                rpc adapter
-                  protocol/domain
+          |
+application / backtest orchestration
+    |          |          |
+ strategy     risk     execution ----> isolated signer (narrow request only)
+    |          |          |
+    +----------+----------+
+               |
+            features
+               |
+        reconstruction
+          /          \
+   RPC adapter    storage adapter
+          \          /
+          protocol / domain contracts
 ```
 
 Mapping from planned modules to layers is recorded in

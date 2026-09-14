@@ -129,8 +129,8 @@ def min_usable_tick(tick_spacing: int) -> int:
     """Return the minimum tick usable with the given tick spacing.
 
     V4 uses C-style truncation toward zero on the MIN_TICK/tick_spacing
-    division; Python's ``//`` matches that for non-negative divisors
-    and negative dividends.
+    division. Python's ``//`` would floor the negative quotient, so the
+    implementation divides the positive magnitude and restores the sign.
     """
     return -((-MIN_TICK) // tick_spacing) * tick_spacing
 

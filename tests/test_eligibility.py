@@ -15,8 +15,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from robinhood_lp.discovery import (
     DELTA_FLAG_BITS,
     EligibilityReasonCode,
@@ -318,7 +316,9 @@ def test_each_decision_has_at_least_one_reason() -> None:
     ]
     for rec in cases:
         decision = classify_pool(rec)
-        assert len(decision.reasons) >= 1, f"empty reasons for fee={rec.pool_key.fee}, hooks={rec.pool_key.hooks.value}"
+        assert len(decision.reasons) >= 1, (
+            f"empty reasons for fee={rec.pool_key.fee}, hooks={rec.pool_key.hooks.value}"
+        )
 
 
 # ---------------------------------------------------------------------------

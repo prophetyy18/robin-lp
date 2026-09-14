@@ -1,7 +1,7 @@
 ---
 id: ADR-007
 title: Continuous integration provider
-status: proposed
+status: accepted
 date: 2026-09-12
 owner: T000
 supersedes: []

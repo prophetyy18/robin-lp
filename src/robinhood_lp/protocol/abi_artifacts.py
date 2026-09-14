@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 # ---------------------------------------------------------------------------
 # Artifact location
@@ -44,7 +44,7 @@ EXPECTED_SOURCE_COMMIT: Final[str] = "e50237c43811bd9b526eff40f26772152a42daba"
 # ---------------------------------------------------------------------------
 
 
-def load_artifact() -> dict:
+def load_artifact() -> dict[str, Any]:
     """Load the current pinned artifact and verify its provenance."""
     path = ARTIFACTS_DIR / CURRENT_ARTIFACT_FILENAME
     if not path.is_file():
@@ -61,7 +61,7 @@ def load_artifact() -> dict:
             f"does not match EXPECTED_SOURCE_COMMIT={EXPECTED_SOURCE_COMMIT!r}; "
             f"update either the file or the constant"
         )
-    return payload
+    return payload  # type: ignore[no-any-return]
 
 
 def _parse_topic(hex_str: str) -> bytes:

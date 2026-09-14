@@ -1,7 +1,7 @@
 ---
 id: ADR-003
 title: Configuration and secrets handling
-status: proposed
+status: accepted
 date: 2026-09-12
 owner: T000
 supersedes: []
@@ -29,8 +29,13 @@ Use **pydantic v2 strict models** as the single configuration surface:
 
 - models are `frozen=True`, `extra="forbid"`, with explicit `Field(...)`
   declarations for every accepted key;
-- secrets are read from environment variables by name, never from
-  config files or CLI flags;
+- service secrets such as RPC credentials are read from environment or deployment-secret
+  injection by name, never embedded in config files or CLI flags;
+- live signing uses a standard encrypted Web3 Keystore file; its password is accepted
+  only through a non-echoing interactive terminal prompt and is never stored in config,
+  environment variables, CLI arguments, Web state, logs, databases, or audit records;
+- only the isolated signer process decrypts the Keystore, keeps the plaintext key in
+  memory, and returns to a locked state after restart;
 - the config root object holds:
   - per-chain: `chain_id`, RPC environment-variable name,
     confirmations/finality policy, start block, verified
@@ -38,8 +43,8 @@ Use **pydantic v2 strict models** as the single configuration surface:
     request limits;
   - per-pool: complete V4 `PoolKey` (currency0, currency1, fee
     including dynamic-fee sentinel, tickSpacing, hooks);
-  - run mode: one of `rejected | ingestion | backtest | paper | live`,
-    defaulting to `paper` when missing, invalid, or partial.
+  - run mode: one of `rejected | ingestion | backtest | paper | live`, defaulting to
+    `paper` only when omitted; invalid or partial values are rejected.
 - serializers reject literal credential URLs and strip secret values
   even when explicitly requested;
 - `.env.example` contains only variable names and placeholders; real
@@ -84,6 +89,7 @@ Re-evaluate this ADR if any of the following occur:
   with a smaller dependency footprint;
 - the project needs remote/centralized configuration with auditable
   change history that pydantic cannot model without bespoke code;
+- the approved custody model changes from an operator-unlocked encrypted Keystore;
 - a CVE in pydantic v2 affects our usage and the upstream fix is
   delayed.
 

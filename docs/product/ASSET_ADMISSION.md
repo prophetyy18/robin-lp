@@ -1,7 +1,7 @@
 # V1 Token 与 Pool 准入要求
 
 状态：草案，逐步确认中
-最后更新：2026-09-13
+最后更新：2026-09-14
 
 ## 1. 文档用途
 
@@ -157,6 +157,26 @@ ID、contract address、实际执行代码，以及系统参与 Swap/LP 所需�
 - 失败行为：不能证明时禁止新增 live 操作并告警。
 - 证据：approval ID、批准时状态摘要、当前状态摘要和比较结果。
 
+### `ADM-TECH-010` — 审批生命周期与重新复核
+
+- 有效期：Token 审批默认没有固定日历到期日。审批在用户未撤销，且其绑定的
+  chain ID、contract address、runtime code hash、代理 implementation/facet、
+  关键管理权限、已建模行为和技术硬门槛均未变化时持续有效。
+- 提醒：系统可以保存 `review_reminder_at` 并通知用户定期复核，但提醒到期不等于
+  审批失效，不得单独阻止一个其他条件仍有效的策略。
+- 技术变化：上述身份、代码、权限、行为或硬门槛任一变化时，状态立即变为
+  `INVALIDATED`；停止新增 LP、Swap、增仓和复投，保留减仓、领取、退出和撤销
+  授权能力，并要求以新证据重新调查和人工审批。
+- 项目风险变化：可信安全事件、异常增发/解锁、holder 或流动性显著集中、稳定币
+  脱锚等实质变化使状态进入 `REVIEW_REQUIRED`；用户复核前不得新增风险。
+- 无法验证：短暂 RPC、索引、外部来源或监控故障进入 `UNVERIFIED_PAUSE`，不把
+  旧审批静默续期或永久撤销。只有重新取得证据并证明绑定状态未变化后才可恢复；
+  无法证明时继续停止新增风险。
+- 审计：创建、提醒、暂停、恢复、失效、复核、拒绝和主动撤销均产生不可变记录，
+  包含原因代码、证据时间、旧/新状态摘要、受影响权限、PoolKey 和策略授权。
+- 禁止：不得因“长时间没有告警”自动续期，不得用 token symbol 继承审批，也不得
+  允许用户覆盖技术硬门槛或让复核自动扩大 `HOLD`、`LP`、`AUTO_SWAP` 和敞口。
+
 ## 6. 匿名与 Meme Token 的处理
 
 匿名或 Meme token 可以在技术检查充分时取得 `Technical Eligibility`，但项目
@@ -247,6 +267,33 @@ User Decision: APPROVED_WITH_LIMITS
   canonical native-currency 表示。
 - 决策：原生身份验证通过后仍需用户明确批准其作为配对资产和允许的敞口。
 
+### `ADM-PAIR-004` — Token 操作权限
+
+- 默认值：未审批时 `HOLD=false`、`LP=false`、`AUTO_SWAP=false`。成为活动池前
+  用户必须明确开启 `HOLD` 和 `LP`；`AUTO_SWAP` 单独审批，不从 `LP` 自动继承。
+- 默认敞口：配对 token 最大 USDG 敞口默认等于当前策略的 LP 资金上限，以容纳
+  出区间后的最坏单边库存；用户可以设置更低值，最终仓位必须据此整体缩小。
+- 权限：目标 token 和配对 token 分别记录 `HOLD`、`LP`、`AUTO_SWAP` 与最大
+  USDG 敞口；`LP`/`AUTO_SWAP` 依赖 `HOLD`，但依赖校验不得自动扩大权限。
+- 活动池要求：两种资产必须允许 `HOLD` 和 `LP`；需要自动配比或再平衡 Swap
+  的策略还要求相关方向的 `AUTO_SWAP` 权限。
+- 降权：撤销 `AUTO_SWAP` 或 `LP` 只阻止新的对应动作；领取、减仓、退出和
+  撤销授权保持可用。撤销 `HOLD` 时已有或退出所得余额必须如实展示并等待人工
+  处置，不能删除、隐藏或自动外转。
+- 审批：任何提权或提高敞口都生成新版本并使相关 live 授权失效；降低权限立即
+  生效，不触发自动清仓。
+- V4 仓位缩放：任一 token 上限降低时保持获批 `tickLower`/`tickUpper` 不变，
+  缩小单一 `liquidityDelta`，再按当前 `sqrtPriceX96` 和 canonical V4 整数数学
+  计算 `amount0`/`amount1`。不得独立削减一边或自动修改 Range；区间外新增仓位
+  只需要单一 currency 属于 V4 正常结果。
+- 最坏敞口：准入检查必须分别计算价格到达上下边界后的单边库存，并计入钱包
+  余量、已计费用和 Hook 返回的 `BalanceDelta`。包含 canonical native ETH 时，
+  LP 可用余额必须排除独立批准的 Gas 储备。
+- 执行约束：使用明确 liquidity 与 `amount0Max`/`amount1Max`、deadline 和预执行
+  结果限制 Mint/Increase；舍入后任一边超限、Hook 结算影响无法验证，或缩小后
+  不满足最小经济仓位时不得进入。不得使用缺少最低 liquidity 保护的
+  delta-derived Mint/Increase 路径。
+
 ## 9. PoolKey 与 Hook 准入
 
 ### `ADM-POOL-001` — PoolKey 独立身份
@@ -256,6 +303,19 @@ User Decision: APPROVED_WITH_LIMITS
 - 边界：同一 token pair 的不同 fee、tick spacing 或 hook 是不同池，一个池
   的批准不得自动传递给另一个池。
 - 证据：Initialize 事件、PoolKey、派生 PoolId、PoolManager 身份和固定区块。
+
+### `ADM-POOL-002` — Live USDG 估值资格
+
+- 要求：进入 live 前，目标 token、配对 token 和 ETH 必须能够通过合格、带
+  来源和时效的价格证据换算为 USDG 等值；是否存在可执行的 USDG Swap route
+  作为独立字段记录，不是获得估值资格的必要条件。
+- 可接受证据：已验证的独立预言机，或经过流动性、时效、操纵风险和来源一致性
+  检查的间接换算。USDG/USD 偏离必须进入换算，不能固定假设二者始终为 1。
+- 失败行为：活动池即时价格不得单独承担 live 风险估值；没有合格估值时禁止
+  新增 LP、Swap、增仓或复投，但不得阻止减少/移除 LP、领取资产、撤销授权和
+  紧急退出。
+- 证据：原始数量、换算路径、每个价格观测、观测/可用时间、置信等级、失效
+  时间、USDG 等值和 USDG route 可用状态。
 
 ### `ADM-HOOK-001` — 无 Hook 的池
 
@@ -289,8 +349,14 @@ User Decision: APPROVED_WITH_LIMITS
   依赖旧证据的 PoolKey 批准必须失效。
 - 失败行为：停止新增风险，暂停活动池资格，展示变化并等待重新验证和人工确认。
 
-## 10. 尚待确认
+## 10. 已延期到 Paper Trading 阶段的参数决策
+
+以下内容不阻塞准入证据结构、采集、展示、`UNKNOWN` 语义和人工审批流程的开发。
+最终指标优先级、来源等级和高风险数值在进入 paper trading 后根据可获得的真实证据决定：
 
 - 可获得时，holder、流动性、部署时长和交易历史优先展示哪些指标；
-- 高风险审批的最大资金、有效期和自动退出条件；
+- 高风险审批的最大资金、额外复核条件和自动退出条件；Token 审批默认无固定
+  日历到期规则已经由 `ADM-TECH-010` 确定；
 - 舆情和外部信息的可信来源层级。
+
+在这些值被审批前，系统必须保留来源和缺失状态，不得伪造证据或将临时测试值用于 live。

@@ -1,7 +1,7 @@
 ---
 id: ADR-008
 title: Binding document precedence
-status: proposed
+status: accepted
 date: 2026-09-13
 owner: T000 / T004
 supersedes: []
@@ -15,9 +15,10 @@ references: [R6]
 V1 ships several categories of binding documents that occasionally
 disagree:
 
-- **Product documents**: `docs/product/PROJECT_GOALS.md`,
-  `docs/product/ASSET_ADMISSION.md` — describe what the system is for
-  and which hard gates are not user-overridable.
+- **Product intent**: `docs/product/PROJECT_GOALS.md` describes what V1 is for.
+- **Product and behavioral specifications**: `docs/product/ASSET_ADMISSION.md`,
+  `docs/product/WEB_CONSOLE.md`, and `docs/specs/*.md` define testable behavior and
+  hard gates within their named scope.
 - **Delivery plan**: `TODO.md` — describes phases and tasks.
 - **Architectural decisions**: `docs/adr/ADR-*.md` and the living
   `docs/architecture.md` — describe technical choices and layering.
@@ -36,9 +37,9 @@ When documents disagree, the following precedence applies (highest
 authority first):
 
 1. **`docs/product/PROJECT_GOALS.md`** — V1 product scope and goals.
-2. **`docs/product/ASSET_ADMISSION.md`** — V1 hard gates that the
-   framework must enforce (`ADM-TECH-*`, `ADM-RISK-*`, `ADM-PAIR-*`,
-   `ADM-HOOK-*`).
+2. **Specialized product/spec documents** — `ASSET_ADMISSION.md` for admission hard
+   gates, `WEB_CONSOLE.md` for Web behavior, and `docs/specs/*.md` for their named
+   strategy/control/math scope.
 3. **`TODO.md`** — phase and task definitions, dependencies,
    acceptance criteria.
 4. **`docs/threat-model.md`** — threat surface and controls.
@@ -92,7 +93,7 @@ Negative / risks:
   or wrong, code and ADRs are forced to follow them;
 - raising a product document's scope without coordinating engineering
   causes churn; demoting scope is also churn;
-- the precedence itself is itself a higher-precedence rule (ADR-008
+- the precedence rule itself lives in ADR-008, which
   ranks below the product documents, not above them), so the
   precedence can be amended by editing ADR-008 alone.
 

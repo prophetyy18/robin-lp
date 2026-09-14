@@ -1,7 +1,7 @@
 ---
 id: ADR-001
 title: Web3 client and concurrency model
-status: proposed
+status: accepted
 date: 2026-09-12
 owner: T000
 supersedes: []

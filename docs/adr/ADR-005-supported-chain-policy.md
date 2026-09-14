@@ -1,7 +1,7 @@
 ---
 id: ADR-005
 title: Supported-chain lifecycle (V1: Robinhood Chain only)
-status: proposed
+status: accepted
 date: 2026-09-13
 owner: T000
 supersedes: []
@@ -35,7 +35,7 @@ matching `TODO.md` §3:
 | `ingestion` | raw + normalized history, quality reports | verified deployment + ABI | valuation, strategy, paper |
 | `backtest` | deterministic replay, valuation, backtest | replay reconciliation + modeled hook effects | paper decisions |
 | `paper` | real-time decisions + simulated ledger | recovery + freshness + risk + shadow reconciliation | signed/broadcast transactions |
-| `live` | reserved for a future separately authorized project | external security review + explicit owner approval | everything until that project exists |
+| `live` | approved mainnet LP/Swap execution within V1 limits | all prior evidence, testnet drills, external security review + explicit owner promotion | execution outside the bound chain, PoolKey, strategy, operations or limits |
 
 V1-specific rules:
 
@@ -90,7 +90,7 @@ Positive:
 - promotion and demotion are auditable events with reason codes;
 - risk checks (T070) can refuse execution intent originating from a
   pool whose level is not `paper` or higher;
-- the single-chain, single-pool constraint is enforced at parse time
+- the single-chain, single-active-pool constraint is enforced at parse time
   rather than discovered at runtime.
 
 Negative / risks:
@@ -111,8 +111,7 @@ Re-evaluate this ADR if any of the following occur:
 - a new class of evidence becomes standard (e.g. formal verification
   of hook bytecode) that warrants a new level between `backtest` and
   `paper`;
-- the project moves into a separate live project and the `live` level
-  needs elaboration (this is the Phase 9 trigger, not a Phase 0 one).
+- V1's live evidence gates, signer custody model, or execution boundary changes.
 
 ## Owner
 

@@ -1,7 +1,7 @@
 ---
 id: ADR-004
 title: Integer / decimal precision policy
-status: proposed
+status: accepted
 date: 2026-09-12
 owner: T000
 supersedes: []

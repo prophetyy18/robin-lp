@@ -1,7 +1,7 @@
 ---
 id: ADR-002
 title: Storage and query format
-status: proposed
+status: accepted
 date: 2026-09-12
 owner: T000
 supersedes: []

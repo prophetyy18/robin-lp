@@ -4,7 +4,7 @@
 > reviewable pull request. Does not ship executable code.
 
 This document records the architectural choices for the Robinhood Chain /
-Uniswap V4 LP research and paper-trading framework. It is the single entry
+Uniswap V4 LP V1 system from research through gated mainnet execution. It is the single entry
 point for cross-cutting decisions; per-decision rationale, alternatives, and
 migration triggers live in the ADR catalogue under `docs/adr/`.
 
@@ -20,8 +20,8 @@ V1 scope (binding; see `docs/product/PROJECT_GOALS.md`):
 
 Goals (binding for the technical framework):
 
-- reproducible research and paper-trading framework for that one V1 pool
-  on Robinhood Chain;
+- reproducible research, paper operation and gated mainnet execution for that one active
+  V1 pool on Robinhood Chain;
 - byte-equivalent replay, valuation, and backtest results across storage
   chunking, ingestion order, and host platform;
 - hard separation between data, protocol math, features, strategy, risk,
@@ -30,8 +30,8 @@ Goals (binding for the technical framework):
   promotion and demotion (the five levels are still defined for forward
   compatibility, but only Robinhood Chain can be promoted above
   `rejected` in V1 — see ADR-005);
-- no production signing, broadcast, or deploy path exists in the current
-  release.
+- live signing material inside the main application, generic arbitrary-call signing, or
+  mainnet enablement that bypasses the promotion gates;
 
 Non-goals (binding for V1):
 
@@ -40,54 +40,32 @@ Non-goals (binding for V1):
 - automatic selection or switching of the target token;
 - profitability of any concrete LP strategy;
 - smart-contract deployment or custom hook authoring;
-- bypassing the V1 promotion gates (backtest → testnet → paper →
+- bypassing the V1 promotion gates (backtest → testnet → post-testnet paper/shadow →
   security review → human promotion) for live execution;
 - bypassing G-SIGNER-01: signing material in the main V1 process;
 - dashboards, queues, and distributed workers beyond measured need.
 
 ## 2. Layered model
 
-Each planned module lives in exactly one layer. A layer may depend only on
-layers strictly below it.
+Each planned module has one primary layer. Imports follow ADR-006; runtime composition is
+shown below and does not grant one component permission to import or control another.
 
 ```
-                   ┌────────────────────────────────┐
-                   │   presentation / reports       │  (Phase 5+, T050+)
-                   └────────────────┬───────────────┘
-                                    │
-                ┌───────────────────┼───────────────────┐
-                │                   │                   │
-     ┌──────────▼────────┐ ┌─────────▼────────┐ ┌───────▼───────┐
-     │    execution      │ │     strategy     │ │ backtest /    │
-     │  (paper, live     │ │    (T060+)       │ │ research      │
-     │   deferred)       │ │                  │ │ (T061+)       │
-     └──────────┬────────┘ └─────────┬────────┘ └───────┬───────┘
-                │                   │                   │
-                └─────────┬─────────┴───────────────────┘
-                          │
-                 ┌────────▼────────┐
-                 │      risk       │  (T070)
-                 └────────┬────────┘
-                          │
-                 ┌────────▼────────┐
-                 │    features     │  (T050–T053)
-                 └────────┬────────┘
-                          │
-                 ┌────────▼────────┐
-                 │ reconstruction  │  (T040–T043)
-                 └────────┬────────┘
-                          │
-                 ┌────────▼────────┐
-                 │     storage     │  (T030–T034)
-                 └────────┬────────┘
-                          │
-                 ┌────────▼────────┐
-                 │   rpc adapter   │  (T020)
-                 └────────┬────────┘
-                          │
-                 ┌────────▼────────┐
-                 │ protocol/domain │  (T010–T013)
-                 └─────────────────┘
+presentation / reports
+          |
+application / backtest orchestration
+    |          |          |
+ strategy     risk     execution ----> isolated signer
+    |          |          |
+    +----------+----------+
+               |
+            features
+               |
+        reconstruction
+          /          \
+   RPC adapter    storage adapter
+          \          /
+          protocol / domain contracts
 ```
 
 ### 2.1 Layer responsibilities
@@ -102,7 +80,8 @@ layers strictly below it.
 | strategy | pure observation→intent functions, deterministic clock/seed | call RPC, storage, signing, or execution; mutate ledger |
 | backtest / research | event-driven engine, baseline strategies, manifests, robustness analysis | use future data, retune on held-out data |
 | risk | centralized approve/reject gateway with reason codes | be bypassed by execution, strategy, or manual override |
-| execution | paper intent→fill→ledger pipeline; live interface behind a separate signer process (G-SIGNER-01) | hold signing material or broadcast transactions in the main V1 process |
+| execution | paper intent→fill→ledger; deterministic V4 planner; separately packaged live executor and isolated signer (G-SIGNER-01) | let strategy bypass risk/planning, hold signing material outside signer, or expose arbitrary calls |
+| application / orchestration | ingestion workflows and strategy → risk → execution wiring through ports | move policy into adapters or bypass a component's public contract |
 | presentation / reports | structured reports, charts, dossiers, release evidence | mutate upstream state, leak credentials |
 
 ### 2.2 Module-to-layer mapping
@@ -115,12 +94,13 @@ layers strictly below it.
 | 1 | T013 | `robinhood_lp.protocol.vectors` (oracle harness) | protocol/domain |
 | 2 | T020 | `robinhood_lp.rpc.adapter` | rpc adapter |
 | 2 | T021 | `robinhood_lp.protocol.abi` (pinned artifacts) | protocol/domain |
-| 2 | T022 | `robinhood_lp.discovery.registry` | rpc adapter + storage |
+| 2 | T022 | `robinhood_lp.discovery.registry` | storage |
 | 2 | T023 | `robinhood_lp.discovery.eligibility` | storage |
 | 2 | T024 | `robinhood_lp.discovery.chain_capability` | rpc adapter |
+| 2 | T025 | `robinhood_lp.admission.lifecycle` | risk |
 | 3 | T030 | `robinhood_lp.storage.schema` | storage |
 | 3 | T031 | `robinhood_lp.storage.raw` | storage |
-| 3 | T032 | `robinhood_lp.storage.ingest` | storage |
+| 3 | T032 | `robinhood_lp.application.ingest` | application / orchestration |
 | 3 | T033 | `robinhood_lp.storage.reorg` | storage |
 | 3 | T034 | `robinhood_lp.storage.quality` | storage |
 | 4 | T040 | `robinhood_lp.replay.engine` | reconstruction |
@@ -133,17 +113,25 @@ layers strictly below it.
 | 5 | T053 | `robinhood_lp.features.quote` | features |
 | 6 | T060 | `robinhood_lp.strategy.base` | strategy |
 | 6 | T061 | `robinhood_lp.backtest.engine` | backtest |
-| 6 | T062 | `robinhood_lp.backtest.baselines` | strategy / backtest |
+| 6 | T062 | `robinhood_lp.backtest.baselines` | strategy |
 | 6 | T063 | `robinhood_lp.backtest.manifest` | backtest |
 | 6 | T064 | `robinhood_lp.backtest.robustness` | backtest |
+| 6 | T065 | `robinhood_lp.strategy.usdg_range` | strategy |
+| 6 | T066 | `robinhood_lp.backtest.threshold_review` | backtest / research |
 | 7 | T070 | `robinhood_lp.risk.checks` | risk |
 | 7 | T071 | `robinhood_lp.execution.paper` | execution |
-| 7 | T072 | `robinhood_lp.execution.realtime` | execution |
+| 7 | T072 | `robinhood_lp.application.realtime` | application / orchestration |
 | 8 | T080 | `robinhood_lp.ops.observability` | presentation / ops |
 | 8 | T081 | `robinhood_lp.ops.controls` | presentation / ops |
 | 8 | T082 | `robinhood_lp.ops.soak` | presentation / ops |
 | 8 | T083 | `robinhood_lp.ops.dossier` | presentation / ops |
-| 9 | T090 | `robinhood_lp.execution.signer` (out-of-tree signer process) | execution (out-of-tree) |
+| 8 | T084–T086 | `robinhood_lp.web` | presentation / controls |
+| 9 | T090 | separately packaged signer service | isolated signing boundary |
+| 9 | T091 | V4 transaction planner | execution |
+| 9 | T092 | testnet executor and evidence | isolated execution service |
+| 9 | T093–T094 | review and promotion evidence | operations / controls |
+| 9 | T095 | mainnet canary execution | isolated execution service |
+| 9 | T096 | final V1 traceability dossier | presentation / ops |
 
 ## 3. Cross-cutting policies
 
@@ -161,9 +149,10 @@ Done in `TODO.md`.
 - **Fail closed.** Missing data, unknown hooks, unsupported RPC behavior,
   address mismatch, or reconciliation failure must reject the operation
   rather than fall back to a default.
-- **No silent secrets.** Secrets come from environment variables.
-  Serialization, logs, reports, and audit records never include raw RPC
-  URLs with credentials, private keys, seeds, or `.env` values.
+- **No silent secrets.** Service credentials come from environment/deployment-secret
+  injection. The signer alone reads an encrypted Keystore and accepts its password via a
+  non-echoing terminal prompt. Serialization, logs, reports, and audit records never
+  include credential URLs, private keys, passwords, seeds, or `.env` values.
 - **Layer purity.** A layer may not import symbols from a layer above it or
   from a sibling layer that would create a cycle. CI enforces this.
 
@@ -174,30 +163,29 @@ superseding decisions are new ADRs that explicitly reference the prior one.
 
 | ID | Title | Status |
 | --- | --- | --- |
-| ADR-001 | Web3 client & concurrency model | proposed |
-| ADR-002 | Storage & query format | proposed |
-| ADR-003 | Configuration & secrets handling | proposed |
-| ADR-004 | Integer / decimal precision policy | proposed |
-| ADR-005 | Supported-chain lifecycle (support levels) | proposed |
-| ADR-006 | Dependency direction between layers | proposed |
-| ADR-007 | Continuous integration provider | proposed |
-| ADR-008 | Binding document precedence | proposed |
+| ADR-001 | Web3 client & concurrency model | accepted |
+| ADR-002 | Storage & query format | accepted |
+| ADR-003 | Configuration & secrets handling | accepted |
+| ADR-004 | Integer / decimal precision policy | accepted |
+| ADR-005 | Supported-chain lifecycle (support levels) | accepted |
+| ADR-006 | Dependency direction between layers | accepted |
+| ADR-007 | Continuous integration provider | accepted |
+| ADR-008 | Binding document precedence | accepted |
 
 ## 5. Open decisions (not blocking research)
 
-These are tracked in `TODO.md` §6 and revisited as evidence arrives. None of
-them block T000 itself.
+These are tracked in `TODO.md` §6 and resolved by the named task before its consumer runs.
 
-- verified Robinhood Chain V4 PoolManager / StateView deployment and code
-  hash (resolved by T024);
-- which Robinhood environment is the first integration target (T024);
-- verified hook source and semantics for any FLYBRAIN/USDG candidate
+Two product choices are already closed: both 5-minute rules use T053-qualified,
+point-in-time USDG prices; pre-testnet preliminary paper validates implementation only,
+while formal live evidence requires post-testnet paper/shadow.
+
+- verified deployment/finality/archive behavior for each Robinhood environment (T024);
+- verified hook source and semantics for the user-selected PoolKey
   (T023, T043);
-- archive/history limits and finality behavior of at least two usable RPC
-  endpoints (T024);
 - storage engine and expected data volume/retention (refined in ADR-002 as
   evidence arrives);
-- quote-currency observation source (resolved in T053);
+- qualified USDG quote source and availability-time semantics (T053);
 - quantitative paper-mode SLOs and soak duration (T082);
-- license compatibility for copied/ported protocol artifacts and
-  third-party vectors (T001, T013).
+- local Web authentication/session implementation (T084, T085);
+- final economic/risk thresholds, selected from post-testnet paper/shadow evidence in T093.

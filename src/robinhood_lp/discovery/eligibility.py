@@ -31,8 +31,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from robinhood_lp.discovery.registry import PoolRecord
-from robinhood_lp.protocol import Address, PoolKey, RunMode
-
+from robinhood_lp.protocol import Address, RunMode
 
 # ---------------------------------------------------------------------------
 # Reason codes
@@ -235,9 +234,7 @@ def classify_pool(
 
     # 3. Zero-hook path: classify by fee + metadata coverage.
     if hook_evidence.is_zero:
-        reasons.append(
-            EligibilityReason(EligibilityReasonCode.POOL_NO_HOOK)
-        )
+        reasons.append(EligibilityReason(EligibilityReasonCode.POOL_NO_HOOK))
         is_static_fee = record.pool_key.fee <= 1_000_000 and record.pool_key.fee != 0x800000
         if not is_static_fee:
             reasons.append(

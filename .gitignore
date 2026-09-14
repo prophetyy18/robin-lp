@@ -19,7 +19,14 @@ htmlcov/
 # Real environment files (placeholders live in .env.example)
 .env
 .env.local
-.env.*.local
+.env.*
+!.env.example
+*.key
+*.pem
+*.keystore
+secrets/
+keystore/
+keystores/
 
 # Tooling scratch
 .trivy/

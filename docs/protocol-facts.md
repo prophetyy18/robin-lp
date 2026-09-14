@@ -7,8 +7,8 @@
 
 **Retrieval time:** 2026-09-13
 **Source repository:** <https://github.com/Uniswap/v4-core>
-**Source branch / commit:** `main` at retrieval time (pin a commit before
-production use; see T013 conformance vectors)
+**Pinned source commit:** `e50237c43811bd9b526eff40f26772152a42daba`
+(see the T013 provenance in `docs/oracle-manifest.md`)
 
 ## PoolKey
 
@@ -26,8 +26,9 @@ struct PoolKey {
 
 Invariants:
 
-- `currency0` < `currency1` numerically (compared as `uint160`).
-  Enforced globally by `PoolIdLibrary`; misordered keys produce a wrong PoolId.
+- `currency0` < `currency1` numerically (compared as `uint160`) is required for a
+  canonical initialized pool. `PoolIdLibrary.toId` itself only hashes the supplied tuple
+  and does not validate ordering; the framework validates before deriving/accepting it.
 - `fee` is a `uint24`. Valid range: `0 .. MAX_LP_FEE` inclusive, or the
   exact sentinel `DYNAMIC_FEE_FLAG`. Any other value reverts.
 - `tickSpacing` is a positive `int24` (see TickMath below).
@@ -72,9 +73,9 @@ Source: `src/libraries/TickMath.sol`
 | `MAX_TICK_SPACING` | `32_767` (`type(int16).max`) |
 
 `maxUsableTick(spacing) = (MAX_TICK // spacing) * spacing`.
-`minUsableTick(spacing) = (MIN_TICK // spacing) * spacing` (Sol rounds toward
-zero; floor for negative ticks must be replicated exactly — T010 will pin
-the Python implementation).
+`minUsableTick(spacing) = truncTowardZero(MIN_TICK / spacing) * spacing`, implemented
+in Python as `-((-MIN_TICK) // spacing) * spacing`. Solidity signed division truncates
+toward zero, while Python `//` floors a negative quotient; T012 tests the distinction.
 
 ## Hook address validity
 
@@ -139,7 +140,7 @@ ABI encoding rules used by the Python port:
 - `address hooks` is encoded as `uint256(uint160(address))` →
   zero-padded 32 bytes (the zero address is the canonical "no hooks").
 
-## Open items
+## Confirmed interpretation
 
 - Whether `currency0 < currency1` is compared as signed or unsigned:
   Solidity `address` is a `uint160`; comparison is unsigned. Framework

@@ -17,8 +17,8 @@ The system will eventually support:
 - backtesting
 - risk management
 - mainnet automated execution (the V1 acceptance condition; reached via
-  the G-LIVE-GATE-01 promotion gates: backtest → testnet → paper →
-  security review → human promotion)
+  the G-LIVE-GATE-01 promotion gates: backtest → testnet → post-testnet
+  paper/shadow → security review → human promotion)
 
 The first priority is research correctness and reliable data collection.
 Live execution is the V1 acceptance condition (G-LIVE-01) and is reached
@@ -62,14 +62,15 @@ The default operating mode is **PAPER**.
 
 Mainnet automated execution is the V1 acceptance condition (G-LIVE-01)
 and is reached only through the promotion gates recorded in
-`docs/product/PROJECT_GOALS.md` (backtest → testnet → paper → security
-review → human promotion; G-LIVE-GATE-01). Live code paths are *not*
+`docs/product/PROJECT_GOALS.md` (backtest → testnet → post-testnet
+paper/shadow → security review → human promotion; G-LIVE-GATE-01).
+A pre-testnet preliminary paper run validates implementation only. Live code paths are *not*
 enabled by direct opt-in and are not automatically deployed after
 implementing code.
 
 The signing material required for live execution is held in a separate
 signer process (G-SIGNER-01), not in the main V1 process. The signer
-is introduced by Phase 9 (T090) and is out of scope for Phase 0–7.
+is introduced by Phase 9 (T090) and is out of scope for Phase 0–8.
 
 Never expose, print, commit, or copy:
 
@@ -79,9 +80,11 @@ Never expose, print, commit, or copy:
 - wallet credentials
 - production environment files
 
-Secrets must come from environment variables. The signer (when it
-exists) reads its key material from environment variables only and
-never logs or echoes its contents.
+Service secrets such as RPC credentials must come from environment or deployment-secret
+injection. The signer is the sole exception: it reads an encrypted Web3 Keystore file and
+accepts the decryption password only from a non-echoing interactive terminal prompt. The
+password and plaintext private key must never come from environment variables, config,
+CLI arguments, Web, logs, or persistent storage; plaintext exists only in signer memory.
 
 ## Architecture Principles
 
