@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robinhood-lp.local/schemas/developer-result.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "outcome", "summary", "commands", "residual_risks"],
+  "properties": {
+    "task_id": {"type": "string", "pattern": "^T[0-9]{3}$"},
+    "outcome": {"enum": ["CANDIDATE_READY", "SPEC_BLOCKED", "BLOCKED"]},
+    "summary": {"type": "string"},
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "result"],
+        "properties": {
+          "command": {"type": "string"},
+          "result": {"type": "string"}
+        }
+      }
+    },
+    "residual_risks": {"type": "array", "items": {"type": "string"}},
+    "blocking_question": {"type": ["string", "null"]}
+  }
+}

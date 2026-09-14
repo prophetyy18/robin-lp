@@ -6,7 +6,7 @@ This package is intentionally minimal at Phase 0. It exists to:
 - expose a single importable module path for downstream tests;
 - provide a CLI entry point that prints the package version.
 
-Subpackages and modules are added by Phase 1+ tasks (see ``docs/architecture.md``
+Subpackages and modules are added by Phase 1+ tasks (see ``docs/spec/architecture/ARCHITECTURE.md``
 section 2.2 for the planned module-to-layer mapping).
 """
 

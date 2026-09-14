@@ -47,7 +47,7 @@ CURRENT_SCHEMA_VERSION: int = 1
 #: recorded in every record's ``decode_version`` field so a future
 #: decoder can detect artifacts drift without reading the JSON.
 #: Value matches the pinned v4-core commit prefix recorded in
-#: ``docs/oracle-manifest.md``.
+#: ``docs/implement/evidence/ORACLE_MANIFEST.md``.
 CURRENT_DECODE_VERSION: int = 1
 
 

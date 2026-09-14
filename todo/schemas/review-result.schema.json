@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robinhood-lp.local/schemas/review-result.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_id",
+    "base_commit",
+    "candidate_commit",
+    "verdict",
+    "checks",
+    "must_not_violations",
+    "unknowns",
+    "required_changes"
+  ],
+  "properties": {
+    "task_id": {"type": "string", "pattern": "^T[0-9]{3}$"},
+    "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "candidate_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "verdict": {"enum": ["PASS", "FAIL", "BLOCKED"]},
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "evidence", "finding"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "status": {"enum": ["PASS", "FAIL", "UNKNOWN"]},
+          "evidence": {"type": "array", "items": {"type": "string"}},
+          "finding": {"type": "string"}
+        }
+      }
+    },
+    "must_not_violations": {"type": "array", "items": {"type": "string"}},
+    "unknowns": {"type": "array", "items": {"type": "string"}},
+    "required_changes": {"type": "array", "items": {"type": "string"}},
+    "residual_risks": {"type": "array", "items": {"type": "string"}}
+  }
+}

@@ -16,7 +16,7 @@ its own prior outputs.
 The pinned commits live in `lib/v4-core/` and `lib/v4-periphery/` after
 `forge install`; they are **not committed** (see `.gitignore`). To
 regenerate vectors, re-install with the exact commit pinned in
-`docs/oracle-manifest.md`.
+`docs/implement/evidence/ORACLE_MANIFEST.md`.
 
 ## Layout
 
@@ -51,7 +51,7 @@ the Python port has byte-exact pinned values to compare against.
 
 ## Provenance manifest
 
-The `docs/oracle-manifest.md` file records, for each generated vector
+The `docs/implement/evidence/ORACLE_MANIFEST.md` file records, for each generated vector
 set, the source repository and the exact commit that produced it.
 When the oracle or its dependencies are upgraded, the manifest is
 updated and the vector JSON files are regenerated in the same change

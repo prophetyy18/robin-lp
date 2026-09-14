@@ -8,7 +8,7 @@
 #
 # Manual invocation: Actions tab → "Intentional CI failure" → Run workflow.
 #
-# See docs/ci/intentional-failure.md for the procedure and results.
+# See docs/implement/ci/intentional-failure.md for the procedure and results.
 
 name: Intentional CI failure
 
@@ -116,7 +116,7 @@ jobs:
           git revert --no-edit HEAD
           git push origin "$PROOF_BRANCH"
 
-      - name: Append result row to docs/ci/intentional-failure.md
+      - name: Append result row to docs/implement/ci/intentional-failure.md
         shell: bash -l {0}
         run: |
           DATE=$(date -u +%Y-%m-%d)
@@ -124,7 +124,7 @@ jobs:
           RUN_ID="${{ github.run_id }}"
           printf '\n| %s | %s | %s | yes | (verify in Actions run %s) | record-only |\n' \
             "$DATE" "$PROOF_BRANCH" "$KIND" "$RUN_ID" \
-            >> docs/ci/intentional-failure.md
-          git add docs/ci/intentional-failure.md
+            >> docs/implement/ci/intentional-failure.md
+          git add docs/implement/ci/intentional-failure.md
           git commit -m "ci(evidence): record result of intentional $KIND run" || true
           git push origin "$PROOF_BRANCH" || true

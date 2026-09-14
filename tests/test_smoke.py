@@ -2,7 +2,7 @@
 
 These tests exist only to prove the package can be imported and the CLI
 entry point runs in a clean environment. Real test coverage is added by
-later tasks (T010+, see ``docs/architecture.md``).
+later tasks (T010+, see ``docs/spec/architecture/ARCHITECTURE.md``).
 """
 
 from __future__ import annotations

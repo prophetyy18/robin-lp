@@ -1,6 +1,6 @@
 """Support-level classification (T002 / T023 / ADR-005).
 
-Five levels, matching ``TODO.md`` §3 and ``docs/product/ASSET_ADMISSION.md``.
+Five levels, matching ``todo/README.md`` §3 and ``docs/spec/product/ASSET_ADMISSION.md``.
 The order is intentionally from "lowest evidence required" to
 "highest evidence required":
 

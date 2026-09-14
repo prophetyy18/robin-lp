@@ -7,13 +7,14 @@
 - 只交付 V1。不要自行增加 V2、多链、多活动池、多用户或策略市场。
 - V1 最终目标包括 Robinhood Chain mainnet 自动执行。回测、testnet 和 paper 是
   证据门槛，不是最终交付的替代品。
+- 文档分为 Intent → Spec → Implement 三层，定义见 `docs/README.md`。
 - 文档冲突时按以下顺序处理：
-  1. `docs/product/PROJECT_GOALS.md`
-  2. `docs/product/ASSET_ADMISSION.md`、`docs/product/WEB_CONSOLE.md`、`docs/specs/`
-  3. `TODO.md`
-  4. `docs/threat-model.md`
-  5. `docs/architecture.md` 和 `docs/adr/`
-  6. 代码和测试
+  1. `docs/intent/PROJECT_GOALS.md`
+  2. `docs/spec/product/`、`docs/spec/strategy/`、`docs/spec/operations/`、
+     `docs/spec/security/`
+  3. `todo/` 中当前任务合同
+  4. `docs/spec/architecture/` 和 `docs/spec/protocol/`
+  5. `docs/implement/`、代码和测试
 - 低优先级内容与高优先级内容冲突时，以高优先级内容为准并报告冲突。不要悄悄
   选择对实现更方便的版本。
 - 不要把尚未确认的想法写成需求。产品选择不明确且会改变行为时，停止并提问。
@@ -21,15 +22,34 @@
 ## 2. 执行 TODO
 
 - 一次只执行一个编号任务。
-- 开始前阅读本文件、`CLAUDE.md`、项目目标、该任务全文、任务引用和所有将修改的
-  文件。
+- `todo/config.yaml` 是任务进度的唯一机器可读来源；任务 Markdown 不保存 checkbox。
+- 开始前阅读本文件、`CLAUDE.md`、项目目标、`todo/README.md`、该任务全文、任务引用
+  和所有将修改的文件。
 - 开始前确认所有依赖任务已经完成，且阶段 Entry 条件满足。没有满足就不要编码。
 - 开始前用简短文字列出：Outcome、Dependencies、Deliverables、Acceptance、Must not。
 - 只实现当前任务。不要顺手实现后续任务，不要做无关重构。
-- `TODO.md` 中的 Outcome、Deliverables、Acceptance 和 Must not 都是任务合同，
+- 当前任务中的 Outcome、Deliverables、Acceptance 和 Must not 都是任务合同，
   不能只完成其中一部分。
-- 只有全部验收通过后才能把任务改为 `[x]`。缺少凭据而跳过的集成测试不算通过。
+- 只有独立审查全部通过后，工作流控制器才能把任务改为 `APPROVED`。缺少凭据而
+  跳过的集成测试不算通过。
 - 不要因为代码已经提交、测试数量增加或主要路径能运行就宣称任务完成。
+
+### 2.1 角色和交接边界
+
+- Planner 只澄清 Intent、Spec 和任务合同，不实现业务代码，也不伪造验收证据。
+- Developer 每次以全新上下文在独立 worktree 中只实现一个 `READY` 任务。不得修改
+  Intent、Spec、任务合同、审查记录、审查 Agent 或批准状态；规格不足时返回
+  `SPEC_BLOCKED`。
+- Reviewer 每次以全新上下文在 candidate commit 的 detached worktree 中审查。它可以
+  运行验证命令，但不得修改、修复、提交或推送任何内容。
+- Manager 可以解释状态、选择合法的下一步和处理歧义，但不能替代独立 Reviewer
+  批准任务。
+- Agent 之间只以任务合同、base commit、candidate commit 和结构化报告交接。未提交
+  工作区、聊天结论和“已经完成”的自述不是交接证据。
+- `tools.workflow` 只执行 worktree、SHA、路径保护、结构化输出和状态转换等机械门禁；
+  它不判断产品需求或代码语义。
+- 审查失败后必须启动新的 Developer；修复产生新的 candidate commit 后，再启动新的
+  Reviewer。不得复用导致结论偏置的旧上下文。
 
 ## 3. V1 固定边界
 
@@ -79,7 +99,7 @@
 ## 6. 代码边界
 
 - 保持 protocol、RPC、storage、reconstruction、features、strategy、risk、execution、
-  presentation 分层。依赖方向以 `docs/architecture.md` 为准。
+  presentation 分层。依赖方向以 `docs/spec/architecture/ARCHITECTURE.md` 为准。
 - strategy 不访问 RPC、数据库、signer 或执行器，不修改账本，也不批准自己的风险。
 - execution 不决定策略，不能绕过中央风险检查。
 - 链上数量、tick、价格编码、liquidity 和会计路径使用整数。只在明确的展示或统计
@@ -107,5 +127,5 @@
 
 - 说明完成了什么、修改了哪些文件、运行了哪些命令及结果。
 - 列出未满足的验收、跳过的测试、假设、外部事实版本和残余风险。
-- 如果任务没有完成，保持 TODO 未勾选，并准确说明阻塞项。
+- 如果任务没有完成，保持非 `APPROVED` 状态，并准确说明阻塞项。
 - 不使用“应该没问题”“基本完成”或“理论上通过”代替证据。

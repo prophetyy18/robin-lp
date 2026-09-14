@@ -9,7 +9,7 @@ change set until the operator regenerates the JSON fixtures.
 
 This test does NOT shell out to Foundry (the sandbox is offline);
 it only verifies that the documented provenance matches what is
-committed alongside the test (the ``docs/oracle-manifest.md`` file).
+committed alongside the test (the ``docs/implement/evidence/ORACLE_MANIFEST.md`` file).
 A separate, manual ``tools/oracle/forge test -vv`` is the actual
 regeneration step; see the manifest.
 """
@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-MANIFEST = REPO_ROOT / "docs" / "oracle-manifest.md"
+MANIFEST = REPO_ROOT / "docs" / "implement" / "evidence" / "ORACLE_MANIFEST.md"
 
 
 def _read_manifest() -> str:

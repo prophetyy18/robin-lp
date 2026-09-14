@@ -1,6 +1,6 @@
 """Unit tests for the typed configuration layer (T002).
 
-V1 scope (ADR-005 / docs/product/PROJECT_GOALS.md):
+V1 scope (ADR-005 / docs/intent/PROJECT_GOALS.md):
 
 - exactly one ChainConfig
 - zero or one PoolConfig

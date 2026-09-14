@@ -39,13 +39,15 @@ Prefer simple, modular implementations.
 
 Before implementing a feature:
 
-1. Inspect the relevant existing code.
-2. Understand the current architecture.
-3. Explain the proposed change briefly.
-4. Implement the smallest reasonable solution.
-5. Add or update tests.
-6. Run the relevant tests.
-7. Report what changed and any remaining risks.
+1. Read `AGENTS.md`, `todo/config.yaml`, `todo/README.md`, and the one selected
+   task contract.
+2. Confirm the task is `READY`, all dependencies are `APPROVED`, and the phase
+   entry gate is satisfied.
+3. Inspect the relevant existing code and referenced Intent/Spec documents.
+4. Explain the proposed change briefly and implement only that task.
+5. Add or update tests and run every required verification command.
+6. Produce a candidate commit for a fresh, independent reviewer.
+7. Do not call the task complete until the workflow records `APPROVED`.
 
 Never claim code works without running the relevant test or command.
 
@@ -62,7 +64,7 @@ The default operating mode is **PAPER**.
 
 Mainnet automated execution is the V1 acceptance condition (G-LIVE-01)
 and is reached only through the promotion gates recorded in
-`docs/product/PROJECT_GOALS.md` (backtest → testnet → post-testnet
+`docs/intent/PROJECT_GOALS.md` (backtest → testnet → post-testnet
 paper/shadow → security review → human promotion; G-LIVE-GATE-01).
 A pre-testnet preliminary paper run validates implementation only. Live code paths are *not*
 enabled by direct opt-in and are not automatically deployed after

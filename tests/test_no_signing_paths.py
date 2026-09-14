@@ -1,6 +1,6 @@
 """Regression tests proving V1's main process contains no signing or broadcast surface.
 
-T004 / docs/threat-model.md §3 T-12 + G-SIGNER-01 require that:
+T004 / docs/spec/security/THREAT_MODEL.md §3 T-12 + G-SIGNER-01 require that:
 
 1. No source file under ``src/robinhood_lp/`` imports a write-capable
    RPC method, a key/seed loader, or a signing primitive.

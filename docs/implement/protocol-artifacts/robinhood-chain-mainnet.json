@@ -1,0 +1,24 @@
+{
+  "_meta": {
+    "description": "Expected Robinhood Chain mainnet V4 deployment used by T024 as the baseline for the capability probe. The chain_id, PoolManager, and StateView values come from public documentation; the bytecode hashes are left empty until the on-chain probe is run against a real endpoint and the report is committed.",
+    "source_retrieval_time": "2026-09-13",
+    "chain_name": "Robinhood Chain mainnet",
+    "expected_chain_id": 4663,
+    "source_chain_id": "https://docs.robinhood.com/chain/connecting/",
+    "source_pool_manager": "https://developers.uniswap.org/docs/protocols/v4/deployments",
+    "license": "Documentation references are public; deployment addresses are public facts on the respective chains.",
+    "verification_status": "addresses-pinned-from-docs; bytecode-hashes-pending-onchain-probe"
+  },
+  "chain_id": 4663,
+  "pool_manager_address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+  "state_view_address": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
+  "pool_manager_code_hash": null,
+  "state_view_code_hash": null,
+  "min_block_number": null,
+  "_verification_notes": [
+    "Run probe_chain_capability(adapter, ExpectedDeployment(...)) and commit the resulting ChainCapabilityReport under docs/implement/protocol-artifacts/chain-capability-report-robinhood-mainnet.json.",
+    "Populate pool_manager_code_hash and state_view_code_hash from the report's pool_manager.<endpoint>.code_hash and state_view.<endpoint>.code_hash fields.",
+    "All endpoints must agree on chain_id, PoolManager bytecode hash, and StateView bytecode hash before this artifact can be marked 'verified'.",
+    "If any endpoint reports a different chain_id or bytecode hash, the report fails and the deployment is rejected (T024 acceptance)."
+  ]
+}

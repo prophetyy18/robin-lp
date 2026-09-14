@@ -2,7 +2,7 @@
 
 Reads ``symbol()``, ``name()``, ``decimals()`` from a token contract
 with retry-on-revert and bounded timeouts. Per
-``docs/product/ASSET_ADMISSION.md`` §3 (TokenMetadata) and T011, a
+``docs/spec/product/ASSET_ADMISSION.md`` §3 (TokenMetadata) and T011, a
 token whose metadata call reverts is still representable; the
 scanner records the failure reason rather than dropping the pool.
 

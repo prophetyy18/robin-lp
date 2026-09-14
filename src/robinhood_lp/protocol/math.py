@@ -31,7 +31,7 @@ from __future__ import annotations
 from typing import Final
 
 # ---------------------------------------------------------------------------
-# Tick / sqrt-price constants (pinned — see docs/protocol-facts.md)
+# Tick / sqrt-price constants (pinned — see docs/spec/protocol/PROTOCOL_FACTS.md)
 # ---------------------------------------------------------------------------
 MIN_TICK: Final[int] = -887_272
 MAX_TICK: Final[int] = 887_272

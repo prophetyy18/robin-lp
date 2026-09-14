@@ -2,7 +2,7 @@
 
 Loads the four event topics and four function selectors used by
 the framework's adapters and decoder (T020, T022, T030). Values
-come from ``docs/protocol-artifacts/v4-core-<commit>.json`` and are
+come from ``docs/implement/protocol-artifacts/v4-core-<commit>.json`` and are
 pinned to a single source repository and commit (T021 acceptance:
 "regenerate-and-compare test detects any ABI/topic/selector
 drift").
@@ -29,7 +29,9 @@ from typing import Any, Final
 # Artifact location
 # ---------------------------------------------------------------------------
 
-ARTIFACTS_DIR: Final[Path] = Path(__file__).resolve().parents[3] / "docs" / "protocol-artifacts"
+ARTIFACTS_DIR: Final[Path] = (
+    Path(__file__).resolve().parents[3] / "docs" / "implement" / "protocol-artifacts"
+)
 
 CURRENT_ARTIFACT_FILENAME: Final[str] = "v4-core-e50237c.json"
 
@@ -51,7 +53,7 @@ def load_artifact() -> dict[str, Any]:
         raise FileNotFoundError(
             f"V4 artifact not found at {path}; "
             f"re-run 'forge test --match-contract SelectorOracle' in tools/oracle/ "
-            f"and commit the output under docs/protocol-artifacts/"
+            f"and commit the output under docs/implement/protocol-artifacts/"
         )
     payload = json.loads(path.read_text(encoding="utf-8"))
     commit = payload.get("_meta", {}).get("source_commit")

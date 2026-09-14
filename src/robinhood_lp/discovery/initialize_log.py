@@ -5,7 +5,7 @@ currency0, Currency indexed currency1, uint24 fee, int24 tickSpacing,
 IHooks hooks)`` exactly once per pool, at the block where the pool
 is first modified. The scanner decodes that log topic by topic.
 
-T022 acceptance (TODO.md T022):
+T022 acceptance (todo/README.md T022):
 
 - decoded ``PoolKey`` is bit-exactly what the canonical V4 reference
   produces;

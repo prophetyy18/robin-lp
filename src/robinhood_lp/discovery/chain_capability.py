@@ -5,7 +5,7 @@ that T022 / T023 / T070 can use to decide whether the configured
 chain deployment is real, consistent across providers, and matches
 the project's documentation.
 
-T024 acceptance (TODO.md T024):
+T024 acceptance (todo/README.md T024):
 
 - RPC-reported chain ID matches the configured one;
 - genesis block hash is recorded;

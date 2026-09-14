@@ -77,7 +77,7 @@ class EligibilityReason:
 
 #: Bits in the hook address that signal a *return-delta* callback.
 #: Per V4 Hooks.sol: bits 0..3 of the low 14 bits are *_RETURNS_DELTA
-#: flags. See docs/protocol-facts.md for the full table.
+#: flags. See docs/spec/protocol/PROTOCOL_FACTS.md for the full table.
 DELTA_FLAG_BITS: tuple[int, ...] = (
     1 << 0,  # AFTER_REMOVE_LIQUIDITY_RETURNS_DELTA
     1 << 1,  # AFTER_ADD_LIQUIDITY_RETURNS_DELTA

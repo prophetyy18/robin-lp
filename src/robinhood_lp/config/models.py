@@ -1,6 +1,6 @@
 """Typed configuration models.
 
-Hard rules (from ADR-003, ADR-005, and ``docs/protocol-facts.md``):
+Hard rules (from ADR-003, ADR-005, and ``docs/spec/protocol/PROTOCOL_FACTS.md``):
 
 - models are frozen; unknown fields are rejected;
 - chain IDs are positive integers and chain configurations are referenced by
@@ -34,7 +34,7 @@ from pydantic import (
 )
 
 # ---------------------------------------------------------------------------
-# Protocol constants (pinned — see docs/protocol-facts.md)
+# Protocol constants (pinned — see docs/spec/protocol/PROTOCOL_FACTS.md)
 # ---------------------------------------------------------------------------
 MAX_LP_FEE: Final[int] = 1_000_000
 DYNAMIC_FEE_FLAG: Final[int] = 0x800000
@@ -265,7 +265,7 @@ class ChainConfig(_StrictModel):
 
 
 class TechnicalEligibility(StrEnum):
-    """``docs/product/ASSET_ADMISSION.md`` §4.1.
+    """``docs/spec/product/ASSET_ADMISSION.md`` §4.1.
 
     The framework's ability to correctly handle the token's on-chain
     behavior. Independent from project risk and user decision.
@@ -278,7 +278,7 @@ class TechnicalEligibility(StrEnum):
 
 
 class ProjectRisk(StrEnum):
-    """``docs/product/ASSET_ADMISSION.md`` §4.2.
+    """``docs/spec/product/ASSET_ADMISSION.md`` §4.2.
 
     Honest classification of project-level risk. Carries no auto-veto
     power; the user may accept any level subject to ADM-TECH-* hard
@@ -293,7 +293,7 @@ class ProjectRisk(StrEnum):
 
 
 class UserDecision(StrEnum):
-    """``docs/product/ASSET_ADMISSION.md`` §4.3.
+    """``docs/spec/product/ASSET_ADMISSION.md`` §4.3.
 
     The user's recorded stance on the displayed project risk. Lives
     forever in the audit trail; revocation always permitted.
@@ -311,7 +311,7 @@ class TargetTokenConfig(_StrictModel):
 
     Identified by Robinhood Chain contract address; symbol is display only.
     Carries the three-track approval state from
-    ``docs/product/ASSET_ADMISSION.md`` §4: technical eligibility, project
+    ``docs/spec/product/ASSET_ADMISSION.md`` §4: technical eligibility, project
     risk, and user decision. The framework's risk gateway (T070) refuses
     live intents unless the triple is on the accepted path AND the
     ``live_eligible`` flag is True.
@@ -448,7 +448,7 @@ class RootConfig(_StrictModel):
         default_factory=list,
         description=(
             "Exactly one ChainConfig is allowed in V1 (see ADR-005 and "
-            "docs/product/PROJECT_GOALS.md)."
+            "docs/intent/PROJECT_GOALS.md)."
         ),
     )
     pools: list[PoolConfig] = Field(

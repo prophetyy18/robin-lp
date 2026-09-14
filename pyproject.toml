@@ -98,9 +98,9 @@ fail_under = 0  # Phase 0: trivial surface, no minimum yet (raised in T010+)
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
-# tools/oracle/ holds Foundry/Solidity artifacts; ruff scans
-# Python files only and ignores them via standard exclude.
-extend-exclude = ["tools"]
+# tools/oracle/ holds Foundry/Solidity artifacts. Repository workflow Python
+# remains inside Ruff's scope.
+extend-exclude = ["tools/oracle"]
 
 [tool.ruff.lint]
 # Keep the rule set explicit and narrow during Phase 0. Broaden in later tasks.
@@ -136,4 +136,4 @@ warn_unused_ignores = true
 disallow_any_explicit = false  # third-party libs often need Any at first contact
 no_implicit_optional = true
 check_untyped_defs = true
-exclude = ["tools/"]
+exclude = ["tools/oracle/"]

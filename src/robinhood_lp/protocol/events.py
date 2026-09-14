@@ -1,6 +1,6 @@
 """Block, transaction, and raw event identity (T011).
 
-Identity rules (per ``docs/protocol-facts.md`` and TODO.md T011):
+Identity rules (per ``docs/spec/protocol/PROTOCOL_FACTS.md`` and todo/README.md T011):
 
 - every observation carries its ``ChainId``; ``(chain_id, ...)`` is the
   global namespace and prevents collisions across chains;

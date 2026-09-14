@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robinhood-lp.local/schemas/todo-config.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project",
+    "product_baseline_commit",
+    "intent_revision",
+    "spec_revision",
+    "agent_runtime",
+    "active_phase",
+    "active_task",
+    "workflow_state",
+    "tasks"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "project": {"const": "robinhood-lp-v1"},
+    "product_baseline_commit": {"$ref": "#/$defs/sha"},
+    "intent_revision": {"type": "string", "minLength": 1},
+    "spec_revision": {"type": "string", "minLength": 1},
+    "agent_runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "context_window_tokens",
+        "allow_model_fallback"
+      ],
+      "properties": {
+        "provider": {"const": "MiniMax Anthropic-compatible API"},
+        "model": {"const": "MiniMax-M3[1m]"},
+        "context_window_tokens": {"const": 1000000},
+        "allow_model_fallback": {"const": false}
+      }
+    },
+    "active_phase": {"type": ["string", "null"], "pattern": "^P[0-9]{2}$"},
+    "active_task": {"type": ["string", "null"], "pattern": "^T[0-9]{3}$"},
+    "workflow_state": {"$ref": "#/$defs/state"},
+    "tasks": {
+      "type": "object",
+      "patternProperties": {
+        "^T[0-9]{3}$": {"$ref": "#/$defs/task"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "nullableSha": {
+      "anyOf": [{"$ref": "#/$defs/sha"}, {"type": "null"}]
+    },
+    "state": {
+      "enum": [
+        "PLANNED",
+        "READY",
+        "IN_DEVELOPMENT",
+        "AWAITING_REVIEW",
+        "CHANGES_REQUESTED",
+        "SPEC_BLOCKED",
+        "BLOCKED",
+        "APPROVED"
+      ]
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase",
+        "status",
+        "depends_on",
+        "task_file",
+        "attempt",
+        "base_commit",
+        "candidate_commit",
+        "approved_commit",
+        "latest_review"
+      ],
+      "properties": {
+        "phase": {"type": "string", "pattern": "^P[0-9]{2}$"},
+        "status": {"$ref": "#/$defs/state"},
+        "depends_on": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^T[0-9]{3}$"},
+          "uniqueItems": true
+        },
+        "task_file": {"type": "string", "pattern": "^todo/phases/.+/T[0-9]{3}\\.md$"},
+        "attempt": {"type": "integer", "minimum": 0},
+        "base_commit": {"$ref": "#/$defs/nullableSha"},
+        "candidate_commit": {"$ref": "#/$defs/nullableSha"},
+        "approved_commit": {"$ref": "#/$defs/nullableSha"},
+        "latest_review": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

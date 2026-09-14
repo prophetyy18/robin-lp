@@ -1,6 +1,6 @@
 """Canonical protocol identifiers (T010).
 
-Hard rules (from ``docs/protocol-facts.md``):
+Hard rules (from ``docs/spec/protocol/PROTOCOL_FACTS.md``):
 
 - all values are immutable value objects;
 - ``Address`` is exactly 20 bytes (160 bits); the zero address
@@ -26,7 +26,7 @@ from typing import Final
 from robinhood_lp.protocol.abi import compute_pool_id
 
 # ---------------------------------------------------------------------------
-# Protocol constants (pinned — see docs/protocol-facts.md)
+# Protocol constants (pinned — see docs/spec/protocol/PROTOCOL_FACTS.md)
 # ---------------------------------------------------------------------------
 MAX_LP_FEE: Final[int] = 1_000_000
 DYNAMIC_FEE_FLAG: Final[int] = 0x800000
@@ -122,7 +122,7 @@ class Address:
 class Currency:
     """A V4 ``Currency``: an EVM address used to identify a pool token.
 
-    Per ``docs/protocol-facts.md`` and ``Currency.sol``, ``Currency`` is
+    Per ``docs/spec/protocol/PROTOCOL_FACTS.md`` and ``Currency.sol``, ``Currency`` is
     structurally identical to ``Address``; the zero address represents
     native currency. ``Currency`` is a distinct type so that
     ``PoolKey.currency0 < PoolKey.currency1`` is checked at the type

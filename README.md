@@ -8,7 +8,7 @@ Initial research target: concentrated-liquidity LP strategies such as
 
 > ⚠️ **Default mode: PAPER.** Mainnet automated execution is the V1
 > acceptance condition (G-LIVE-01) and is reached only through the
-> promotion gates in [`docs/product/PROJECT_GOALS.md`](docs/product/PROJECT_GOALS.md)
+> promotion gates in [`docs/intent/PROJECT_GOALS.md`](docs/intent/PROJECT_GOALS.md)
 > (backtest → testnet → post-testnet paper/shadow → security review →
 > human promotion). A preliminary paper run may happen earlier to validate the
 > implementation, but it provides no live-promotion evidence.
@@ -28,11 +28,12 @@ The system supports, in order of priority:
    the documented promotion gates, not by direct opt-in)
 
 Research correctness and reliable data collection come first; mainnet
-execution is gated by `docs/product/PROJECT_GOALS.md` and
-`docs/product/ASSET_ADMISSION.md`.
+execution is gated by `docs/intent/PROJECT_GOALS.md` and
+`docs/spec/product/ASSET_ADMISSION.md`.
 
 Plan-level goal-to-task coverage is indexed in
-[`docs/product/TRACEABILITY.md`](docs/product/TRACEABILITY.md).
+[`docs/implement/TRACEABILITY.md`](docs/implement/TRACEABILITY.md). The executable
+task plan and current progress live under [`todo/`](todo/README.md).
 
 ## Requirements
 
@@ -95,7 +96,8 @@ Measured data, not assumptions.
 
 ## Repository conventions
 
-- Coding agents must read [`AGENTS.md`](./AGENTS.md) and `CLAUDE.md` before selecting a task.
+- Coding agents must read [`AGENTS.md`](./AGENTS.md), `CLAUDE.md`, and
+  [`todo/config.yaml`](todo/config.yaml) before selecting a task.
 - Smallest reasonable change per commit.
 - Tests accompany every feature; never claim something works without
   running them.

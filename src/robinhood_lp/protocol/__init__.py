@@ -1,7 +1,7 @@
 """Canonical Uniswap V4 protocol identifiers (T010).
 
 This package is the protocol/domain layer per
-``docs/architecture.md`` §2.1: it owns ``ChainId``, ``Address``,
+``docs/spec/architecture/ARCHITECTURE.md`` §2.1: it owns ``ChainId``, ``Address``,
 ``Currency``, ``PoolKey``, and ``PoolId``. It has zero RPC, storage,
 network, time, or random dependencies and is importable in unit tests
 without any chain connection.
