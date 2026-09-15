@@ -12,7 +12,7 @@
   },
   "active_phase": "P01",
   "active_task": "T011",
-  "workflow_state": "READY",
+  "workflow_state": "TRIAGE_REQUIRED",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -92,13 +92,13 @@
     },
     "T011": {
       "phase": "P01",
-      "status": "READY",
+      "status": "TRIAGE_REQUIRED",
       "depends_on": [
         "T010"
       ],
       "task_file": "todo/phases/P01-protocol-foundation/T011.md",
-      "attempt": 0,
-      "base_commit": null,
+      "attempt": 1,
+      "base_commit": "bf335be833102e1e26bfe2637bdb99a2a067dadd",
       "candidate_commit": null,
       "approved_commit": null,
       "latest_review": null
