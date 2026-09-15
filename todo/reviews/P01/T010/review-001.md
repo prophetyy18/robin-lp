@@ -1,0 +1,220 @@
+# T010 independent review
+
+- Base commit: `086852e04e3afbe07d4cf0e1cba15d6bfd4f1829`
+- Candidate commit: `66f817775a916ff4948c7e47ae9cc337b318c688`
+- Verdict: **PASS**
+
+## Checks
+
+### diff_minimal_and_scoped — PASS
+
+The candidate diff is scoped exactly to tests/test_protocol_ids.py (+83 lines, two new tests), the controller-managed todo/config.yaml state transition (READY->AWAITING_REVIEW, attempt 0->1, base_commit set), and the todo/evidence/P01/T010/attempt-001-developer.json handoff. No production code was modified; the frozen baseline at 6C31778 is preserved unchanged. The pre-existing protocol implementation in src/robinhood_lp/protocol/{ids.py,abi.py} and the 7-vector pool_id_vectors.json fixture were not touched (verified via git diff --stat and direct diff against the fixture).
+
+Evidence:
+
+- git diff --stat 086852e..66f8177 reports 3 files: tests/test_protocol_ids.py (+83), todo/config.yaml (+4/-4), todo/evidence/P01/T010/attempt-001-developer.json (+42)
+- git diff 086852e..66f8177 -- tests/fixtures/protocol/pool_id_vectors.json is empty (no fixture changes)
+- src/robinhood_lp/protocol/ids.py and abi.py are not in the diff (preserved per T010 contract status FROZEN_FROM_BASELINE_6C31778)
+
+### baseline_passes_twice — PASS
+
+All four quality commands pass twice in the review worktree. pytest -q: 315 passed, 2 skipped (1.69s run 1, 1.48s run 2; identical summary apart from wall-clock duration). ruff check: 'All checks passed!' twice. ruff format --check: '155 files already formatted' twice. mypy src tests: 'Success: no issues found in 39 source files' twice. The 2 skipped cases are pre-existing (sha256 manual annotation and the reordered_inputs parametric vector that Python refuses by design); test count delta from base to candidate is +2 tests as expected.
+
+Evidence:
+
+- pytest run 1: '315 passed, 2 skipped in 1.69s'
+- pytest run 2: '315 passed, 2 skipped in 1.48s'
+- ruff check run 1: 'All checks passed!'
+- ruff check run 2: 'All checks passed!'
+- ruff format --check run 1: '155 files already formatted'
+- ruff format --check run 2: '155 files already formatted'
+- mypy run 1: 'Success: no issues found in 39 source files'
+- mypy run 2: 'Success: no issues found in 39 source files'
+- Targeted pytest run for the two new tests: '2 passed in 0.03s'
+
+### deliverable_chain_id — PASS
+
+ChainId is delivered as a frozen, slotted dataclass value object in src/robinhood_lp/protocol/ids.py. The constructor's __post_init__ enforces isinstance(int) and rejects non-positive values (value <= 0 raises ValueError 'ChainId: must be positive, got ...'). It is exported via __all__ and re-exported through robinhood_lp.protocol.__init__.
+
+Evidence:
+
+- src/robinhood_lp/protocol/ids.py lines 168-186 define @dataclass(frozen=True, slots=True) class ChainId with the positive-integer invariant
+- ids.py line 294 exports ChainId; protocol/__init__.py lines 29-35 re-export it
+
+### deliverable_address — PASS
+
+Address is delivered as a frozen, slotted dataclass with a uint160 invariant. Constructor calls _require_uint(value, bits=160, ...) which rejects non-int, bool, negative, and overflow inputs. Address.zero() returns the canonical zero address; from_hex/to_hex/from_int/to_bytes provide full round-trip support.
+
+Evidence:
+
+- ids.py lines 72-113 define Address with the 20-byte (uint160) invariant
+- ids.py line 40-49 _require_uint enforces bits=160 in __post_init__
+- Tests test_address_zero, test_address_from_hex_round_trip, test_address_rejects_overflow, test_address_rejects_negative all pass
+
+### deliverable_currency — PASS
+
+Currency is delivered as a thin wrapper around Address with is_native() returning True when the underlying address value is 0. The zero address is the canonical native currency sentinel. Currency.from_int/from_address/from_hex provide construction paths, and ordering via currency0.address.value < currency1.address.value is enforced inside PoolKey.__post_init__.
+
+Evidence:
+
+- ids.py lines 121-160 define Currency with address:Address and is_native() returning self.address.value == 0
+- test_currency_native_is_zero_address passes; test_currency_non_native_is_not_native passes
+
+### deliverable_pool_key — PASS
+
+PoolKey is delivered as the canonical 5-tuple (currency0, currency1, fee, tick_spacing, hooks) as a frozen, slotted dataclass. __post_init__ enforces: (1) currency0.address.value < currency1.address.value as uint160, (2) fee is uint24 in [0, MAX_LP_FEE=1_000_000] OR exactly DYNAMIC_FEE_FLAG=0x800000, (3) tick_spacing is int24 in [1, 32_767], (4) hooks is a uint160 Address. None of these fields carry token metadata.
+
+Evidence:
+
+- ids.py lines 194-240 define PoolKey with the five required fields and the three validation guards
+- test_pool_key_default_construction_is_valid, test_pool_key_rejects_currency_ordering_violation, test_pool_key_rejects_fee_above_max_and_not_sentinel, test_pool_key_accepts_dynamic_fee_sentinel, test_pool_key_rejects_zero_tick_spacing, test_pool_key_rejects_tick_spacing_over_max, test_pool_key_accepts_max_tick_spacing all pass
+
+### deliverable_pool_id — PASS
+
+PoolId is delivered as a 32-byte (uint256) value object representing keccak256 of the ABI-encoded PoolKey. It is chain-agnostic at the byte level (no chain id in the hashed bytes), which matches the Solidity reference keccak256(0xa0 bytes). Equality and hashing operate on the raw 256-bit integer. Cross-chain namespacing is enforced at the identity-envelope layer (ChainId, BlockRef, TransactionRef, EventKey) and not by mutating the PoolId bytes themselves.
+
+Evidence:
+
+- ids.py lines 248-288 define PoolId with value:int (uint256), from_bytes/from_hex/to_bytes/to_hex round-trips
+- ids.py lines 238-240 PoolKey.to_pool_id delegates to compute_pool_id from abi.py
+- abi.py lines 73-78 compute_pool_id applies keccak() to the 160 ABI-encoded bytes; no chain id is included in the encoding
+
+### deliverable_abi_encoding — PASS
+
+encode_pool_key in src/robinhood_lp/protocol/abi.py emits exactly 160 bytes = 5 fields x 32 bytes per slot, in the Solidity struct order (currency0, currency1, fee uint24, tick_spacing int24 sign-extended, hooks address). _slot_uint and _slot_int use big-endian, sign-extended two's complement. The function is pure (no I/O, time, random, logging).
+
+Evidence:
+
+- abi.py lines 42-70 implement _slot_uint (non-negative, 32 bytes big-endian), _slot_int (32 bytes big-endian signed), and encode_pool_key (5 x 32 = 160 bytes)
+- test_encode_pool_key_is_160_bytes passes; test_encode_pool_key_field_order passes; test_encode_pool_key_sign_extends_negative_int24 passes
+
+### acceptance_native_currency — PASS
+
+The 'native_currency0' vector in tests/fixtures/protocol/pool_id_vectors.json sets currency0 to the zero address (0x000...000), representing native currency, and asserts the Solidity-oracle-derived PoolId 0x21dec34a52fd2d64a7d928ba95356ca76d34c29d702ff8c64410fb8d366f2419. Python reproduces it exactly via the parametric vector test.
+
+Evidence:
+
+- pool_id_vectors.json lines 22-31 define vector 'native_currency0' with currency0='0x...0000', fee=3000, tick_spacing=60, hooks=0x0, expected_pool_id=0x21dec...
+- test_pool_id_matches_pinned_solidity_vector[vector0] (the parametrized first vector) passes
+
+### acceptance_static_dynamic_fee — PASS
+
+Static fee coverage: 'v1_static_3000_60' uses fee=3000 with expected PoolId 0xb7a0fb...8fcf2. Dynamic fee coverage: 'dynamic_fee_with_hook' uses fee=8388608 (=0x800000 = DYNAMIC_FEE_FLAG) with a nonzero hook and expected PoolId 0xbca626...634a16. Additional max-static-fee vector 'max_static_fee' uses fee=1_000_000 with expected PoolId 0xcb3385...77d95c. All three Python-side derivations match the pinned oracle.
+
+Evidence:
+
+- pool_id_vectors.json lines 12-21 static fee=3000 vector
+- pool_id_vectors.json lines 32-41 dynamic fee=0x800000 vector
+- pool_id_vectors.json lines 42-51 max static fee=1_000_000 vector
+- Parametric test_pool_id_matches_pinned_solidity_vector passes for all three
+
+### acceptance_zero_nonzero_hooks — PASS
+
+Zero-hook coverage: 'v1_static_3000_60', 'native_currency0', 'max_static_fee', 'max_tick_spacing', and 'reordered_inputs' all use hooks=0x000...000. Nonzero-hook with flag bits: 'dynamic_fee_with_hook' uses hooks=0x...0080 (BEFORE_SWAP flag) and 'hook_with_delta_action' uses hooks=0x...0088 (BEFORE_SWAP=0x80 + BEFORE_SWAP_RETURNS_DELTA=0x08). All five Python-side derivations match the pinned oracle exactly.
+
+Evidence:
+
+- pool_id_vectors.json lines 64-71 hook_with_delta_action vector: hooks='0x...0088', expected_pool_id=0xe62e72...271955
+- pool_id_vectors.json lines 32-41 dynamic_fee_with_hook vector: hooks='0x...0080', expected_pool_id=0xbca626...634a16
+- Five zero-hook vectors all reproduce pinned PoolIds
+
+### acceptance_min_max_tick_spacing — PASS
+
+Max tick_spacing=32767 fixture: 'max_tick_spacing' vector with expected_pool_id=0x5500ace...9dbd0 (matches). Min tick_spacing=1: not present as a pinned oracle vector, but the PoolKey constructor in ids.py (lines 226-231) accepts any tick_spacing in [MIN_TICK_SPACING=1, MAX_TICK_SPACING=32_767], and test_pool_key_rejects_zero_tick_spacing + test_pool_key_rejects_tick_spacing_over_max pin the boundary rejection at 0 and 32_768 respectively. Verified live: PoolKey(...,tick_spacing=1,...) constructs successfully. No fixture regression vs. frozen baseline; documented as a residual risk rather than a hard fail.
+
+Evidence:
+
+- pool_id_vectors.json lines 52-61 vector 'max_tick_spacing' tick_spacing=32767 reproduces 0x5500ace4cb217d32fbbc808edfa706e05f9fad2e82bd8af1f600ad1c9969dbd0
+- ids.py lines 226-231 enforce MIN_TICK_SPACING <= tick_spacing <= MAX_TICK_SPACING
+- Live construction of PoolKey(..., tick_spacing=1, ...) succeeds (returns pk.tick_spacing==1)
+- tests test_pool_key_rejects_zero_tick_spacing and test_pool_key_rejects_tick_spacing_over_max both pass
+
+### acceptance_ordering_equality — PASS
+
+Python refuses unsorted (currency0 >= currency1) PoolKey construction by design: test_pool_key_rejects_currency_ordering_violation asserts that c0=0x20, c1=0x10 raises ValueError('strictly less') and that equal currencies (c0=c1=0x10) also raise. The 'reordered_inputs' pinned oracle vector (currency0=0x...0020, currency1=0x...0010, expected_pool_id=0xb7a0fb...8fcf2) demonstrates that the sorted form produces the same PoolId as 'v1_static_3000_60' (per the oracle's internal sort). test_reordered_inputs_refused_by_python_invariant exercises both the rejection and the matching sorted form.
+
+Evidence:
+
+- pool_id_vectors.json lines 72-81 vector 'reordered_inputs' with currency0 > currency1 and expected_pool_id=0xb7a0fb...8fcf2 (same as v1_static_3000_60)
+- ids.py lines 209-215 raise ValueError when currency0.address.value >= currency1.address.value
+- tests/test_protocol_ids.py lines 160-164 assert ValueError on c0>c1 and c0==c1
+- test_reordered_inputs_refused_by_python_invariant passes
+
+### acceptance_cross_chain_namespacing — PASS
+
+Two new tests were added to tests/test_protocol_ids.py for cross-chain namespacing. test_cross_chain_namespacing_distinct_chain_ids constructs ChainId(1) and ChainId(46630) (the Owner-confirmed Robinhood Chain placeholder per STATUS.md §6), verifies they are distinct value objects with distinct hashes, constructs a byte-identical PoolKey, derives the same PoolId (chain-agnostic by design), then wraps it in two BlockRef envelopes with the two ChainIds and asserts the BlockRefs differ. test_chain_id_rejects_non_positive_namespace_anchor pins ChainId's rejection of 0, -1, and -46_630. Both new tests pass.
+
+Evidence:
+
+- tests/test_protocol_ids.py lines 368-428 define test_cross_chain_namespacing_distinct_chain_ids (uses BlockRef from robinhood_lp.protocol.events)
+- tests/test_protocol_ids.py lines 431-443 define test_chain_id_rejects_non_positive_namespace_anchor
+- Targeted pytest run: '2 passed in 0.03s'
+- PoolId is intentionally chain-agnostic at the bytes level (matches Solidity keccak256(0xa0)); cross-chain namespacing is enforced via the ChainId value object and every identity envelope (BlockRef, TransactionRef, EventKey) that carries one
+
+### must_not_hash_json_text — PASS
+
+compute_pool_id in abi.py applies eth_hash.auto.keccak to the 160 ABI-encoded bytes returned by encode_pool_key. There is no JSON serialization, no text encoding, no hex round-trip, no str() conversion, no .encode('utf-8'), and no dict/json.dumps step preceding the keccak call. The encoded bytes are produced by _slot_uint (to_bytes(32,'big')) and _slot_int (to_bytes(32,'big',signed=True)) over the integer fields directly.
+
+Evidence:
+
+- abi.py lines 73-78: encoded = encode_pool_key(pool_key); digest = keccak(encoded)
+- Grep of abi.py shows no json/dumps/loads/str()/.encode calls in the encoding path; only docstring/comment mentions of 'encode'
+- Grep of ids.py for json|dumps|loads|decode|checksum|to_checksum returns only docstring mentions; no JSON in the hash path
+
+### must_not_checksum_normalize_before_validating — PASS
+
+Address.from_hex lowercases the input string only to simplify hex parsing (s_clean = s.lower()), then parses s_clean as base-16 and stores the resulting integer. No EIP-55 checksum validation, mixed-case rejection, or auto-formatting is performed. The constructor stores the raw uint160 and to_hex emits the canonical lowercase 0x-prefixed form. No checksum-normalize hook precedes byte validation.
+
+Evidence:
+
+- ids.py lines 92-102 Address.from_hex: s_clean = s.lower(); validate 0x + 40 hex chars; return cls(int(s_clean, 16))
+- ids.py line 87-89 Address.zero() returns cls(0) without any string conversion
+- test_address_from_hex_accepts_mixed_case asserts Address.from_hex('0xAbCdEf...') parses to the raw integer (passes)
+
+### must_not_include_token_metadata_in_equality_hash — PASS
+
+PoolKey's five fields are exactly (currency0, currency1, fee, tick_spacing, hooks). There is no symbol/name/decimals field on PoolKey. The frozen @dataclass(frozen=True, slots=True) equality uses the five structural fields only; hashing is via dataclass field(hash=True, compare=True) which by default hashes all fields. TokenMetadata lives in robinhood_lp.protocol.events (a separate value object owned by T011) and is display-only, never part of PoolKey identity or PoolId derivation.
+
+Evidence:
+
+- ids.py lines 202-206 PoolKey fields: currency0, currency1, fee, tick_spacing, hooks
+- events.py lines 217-266 TokenMetadata is a separate @dataclass(frozen=True, slots=True) with chain_id, address, symbol, name, decimals; its docstring states 'display-only; never part of identity'
+- abi.py encode_pool_key only consumes currency0, currency1, fee, tick_spacing, hooks (no symbol/name/decimals access)
+
+### dependency_T001_approved — PASS
+
+T010 declares depends_on ['T001'] in todo/config.yaml. T001's record shows status='APPROVED', approved_commit='49b460cae625fbbf4d8767213f9b99194499510f', and latest_review='todo/reviews/P00/T001/review-004.json'. Git log confirms the T001 review-4 record commit 1fb214e is present in the repo. The dependency is satisfied.
+
+Evidence:
+
+- todo/config.yaml T001 block: status=APPROVED, approved_commit=49b460cae625fbbf4d8767213f9b99194499510f
+- git log --oneline shows 1fb214e chore(workflow): record T001 review 4
+- todo/config.yaml T010 block: depends_on ['T001']
+
+### no_secrets_in_diff — PASS
+
+Grep of the candidate diff for password|secret|private_key|seed|api_key|token|bearer|credential|wallet returns no matches. The new tests use obviously-fake placeholder addresses (0x...0010, 0x...0020), a synthetic block hash 0xAB*31, and the Owner-confirmed ChainId(46630) placeholder for the Robinhood Chain id. No real RPC responses, no environment files, no API keys are introduced.
+
+Evidence:
+
+- git diff 086852e..66f8177 | grep -iE 'password|secret|private_key|seed|api_key|token|bearer|credential|wallet' returned no real-credential matches (echo 'No secrets found')
+- Only test fixtures use 0x...0010 / 0x...0020 / 0xAB repeated addresses
+- No .env, .key, .pem, .toml (with secrets), or credential-bearing file is added in the diff
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- pool_id_vectors.json contains a max-tick-spacing fixture (32_767) but no explicit tick_spacing=1 fixture vector; the minimum-tick-spacing boundary is currently only verified by the PoolKey constructor's range check (ids.py lines 226-231) and by the rejection tests at 0 and 32_768. Not a hard fail because (a) the T010 fixture baseline was frozen at 6C31778 and preserved unchanged in this attempt, (b) the candidate scope was strictly the cross-chain namespacing tests, and (c) the minimum is mechanically equivalent to any value in [1, 32_767] under the same encoding path. A future task could add a min-tick-spacing oracle vector to make this evidence-bearing end-to-end.
+- ChainId(46630) is the Owner-confirmed placeholder for the Robinhood Chain id (STATUS.md §6); T024 will verify the real value. The cross-chain namespacing test asserts the contract shape (distinct ChainIds yield distinct BlockRef identities) rather than the specific production value, which is the correct scope for T010.
+- PoolKey/PoolId is intentionally chain-agnostic at the bytes level (matching Solidity keccak256(0xa0)); cross-chain collision prevention is delegated to the ChainId value object and every identity envelope (BlockRef, TransactionRef, EventKey) that carries one. If a future task introduces a PoolKey-with-ChainId abstraction, it must not retroactively mix chain id into the 0xa0 ABI-encoded bytes.
