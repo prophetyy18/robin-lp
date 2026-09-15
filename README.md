@@ -106,8 +106,13 @@ command whose task ID and action you expect. Do not approve an unrelated shell,
 `sudo`, direct Git mutation, deployment, signing, or broadcast command. The
 Specialist progress and permission requests remain visible in Claude Code.
 Use `/tasks` while a specialist is running; open its transcript to inspect its
-work or send a follow-up directly. The Manager resumes the same named Planner
-when a planning discussion needs more than one turn.
+work or send a follow-up directly. For read-only Planner discussions, the Manager
+may start a fresh Planner each turn, but must include relevant Owner decisions,
+prior Planner findings, repository evidence, and the latest question in its
+delegation prompt. A new Planner does not automatically inherit the Manager's
+conversation. Formal `prepare-plan` prompts and evidence remain controller-owned.
+Planner explanations and Owner questions are in Simplified Chinese; identifiers,
+paths, and schema fields are not translated.
 
 ## Architecture
 
