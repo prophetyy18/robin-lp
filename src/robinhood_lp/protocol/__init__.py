@@ -26,6 +26,7 @@ from robinhood_lp.protocol.events import (
     TokenMetadata,
     TransactionRef,
 )
+from robinhood_lp.protocol.identity import PoolIdentity
 from robinhood_lp.protocol.ids import (
     Address,
     ChainId,
@@ -75,6 +76,7 @@ __all__ = [
     "MIN_TICK",
     "MIN_TICK_SPACING",
     "PoolId",
+    "PoolIdentity",
     "PoolKey",
     "RunMode",
     "TickMathError",

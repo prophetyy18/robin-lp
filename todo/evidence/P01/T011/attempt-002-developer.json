@@ -1,0 +1,49 @@
+{
+  "task_id": "T011",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the chain-agnostic PoolIdentity(chain_id, pool_id, pool_manager_address) value object as the post-amendment T011 contract requires. PoolIdentity is a frozen slotted dataclass in src/robinhood_lp/protocol/identity.py that stores the on-chain V4 PoolId byte-for-byte (keccak256 of the ABI-encoded PoolKey), validates the three required fields at construction (no defaults, no fallback for pool_manager_address), supports round-trip through (chain_id, pool_id, pool_manager_address), and treats equality/hash on all three fields. The type is chain-agnostic on day one: construction succeeds for ChainId(1), the Owner-confirmed placeholder ChainId(46630), and any sentinel ChainId; cross-chain collision tests use the placeholder. Re-exported from src/robinhood_lp/protocol/__init__.py. Added 14 new tests in tests/test_protocol_identity.py covering construction-without-pool_manager rejection, round-trip, equality and hash on all three fields, byte-exact preservation of the V4 keccak256 PoolId, cross-chain collision prevention at ChainId(1) vs ChainId(46630), and the chain-agnostic property. All four quality commands run twice with byte-identical output: pytest '329 passed, 2 skipped', ruff check 'All checks passed!', ruff format --check '160 files already formatted', mypy 'Success: no issues found in 41 source files'. No pre-existing tests or implementation files outside the planned scope were modified; the existing tests/test_protocol_events.py and src/robinhood_lp/protocol/{ids,abi,math,events}.py are untouched.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q",
+      "result": "329 passed, 2 skipped in 1.37s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q",
+      "result": "329 passed, 2 skipped in 1.33s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check",
+      "result": "160 files already formatted"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check",
+      "result": "160 files already formatted"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src tests",
+      "result": "Success: no issues found in 41 source files"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src tests",
+      "result": "Success: no issues found in 41 source files"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_protocol_identity.py -v",
+      "result": "14 passed in 0.06s (test_pool_identity_required_pool_manager_address, test_pool_identity_rejects_non_address_pool_manager, test_pool_identity_rejects_non_chain_id, test_pool_identity_rejects_non_pool_id, test_pool_identity_is_frozen, test_pool_identity_round_trip, test_pool_identity_repr_contains_all_three_fields, test_pool_identity_equality_by_all_three_fields, test_pool_identity_hash_by_all_three_fields, test_pool_identity_does_not_replace_pool_id, test_pool_identity_cross_chain_collision_46630, test_pool_identity_cross_chain_collision_byte_difference, test_pool_identity_chain_agnostic_type, test_pool_identity_pool_id_independent_of_chain_field)"
+    }
+  ],
+  "residual_risks": [
+    "The Owner-confirmed placeholder ChainId(46630) is used in cross-chain collision tests until T024 verifies the real Robinhood Chain chain id. The type itself is chain-agnostic and does not embed any chain-specific value, so swapping to the real chain id later is a constant change in the tests only.",
+    "PoolIdentity does not provide a convenience constructor with a default pool_manager_address, by contract. Production code MUST pass an explicit pool_manager_address; this is enforced by the dataclass field requirement and by tests/test_protocol_identity.py::test_pool_identity_required_pool_manager_address.",
+    "The editable install at /home/lpdev/miniconda3/envs/robinhood-lp/lib/python3.12/site-packages/_editable_impl_robinhood_lp.pth points to /home/lpdev/lp/src (the main checkout), not the worktree. The Developer role runs pytest with PYTHONPATH=src (the worktree's src) so that the worktree implementation is tested, matching the convention used by prior T001/T002/T003 developer attempts captured in todo/evidence/P00/.",
+    "The PoolIdentity.does_not_replace_pool_id invariant is asserted at the value-object level only (the on-chain PoolId is stored byte-for-byte). If downstream code later constructs PoolIdentity from a PoolKey without first deriving the canonical PoolId, that is a caller-side bug, not a PoolIdentity defect; the type does not accept a PoolKey directly and therefore cannot silently re-derive."
+  ]
+}
