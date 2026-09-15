@@ -12,7 +12,7 @@
   },
   "active_phase": "P01",
   "active_task": "T011",
-  "workflow_state": "AWAITING_PLAN_REVIEW",
+  "workflow_state": "CHANGES_REQUESTED",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -92,7 +92,7 @@
     },
     "T011": {
       "phase": "P01",
-      "status": "AWAITING_PLAN_REVIEW",
+      "status": "CHANGES_REQUESTED",
       "depends_on": [
         "T010"
       ],

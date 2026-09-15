@@ -1,0 +1,17 @@
+# T011 planning review
+
+- Base commit: `cdde13efcb2f464fe13b83e28dfb6599a9aab5ad`
+- Candidate commit: `a0e479378b2908ddbfd82991e135449cc9385a89`
+- Verdict: **PASS**
+
+## Summary
+
+The planning candidate faithfully encodes all five Owner directions and answers (1A, 2A, 3A, 4A, 5A) into the three FROZEN_FROM_BASELINE_6C31778 contracts (T011, T012, T013), drafts a new ADR-009 capturing the display / Decimal boundary decision with Status=Accepted and Date=2026-09-15, and adds the ADR-009 row to docs/spec/architecture/ARCHITECTURE.md section 4 immediately after the ADR-008 row. The candidate commit also carries the workflow controller's standard state wrapping (todo/config.yaml transitioning workflow_state and T011.status to AWAITING_PLAN_REVIEW) and the planner evidence handoff mirror at todo/evidence/P01/T011/attempt-001-planner.json, both consistent with the established planning-candidate commit pattern (compare b1ab97b for T001 attempt 002) and with tools/workflow/core.py:1198-1207 and 1228-1229. No path under src/, tests/, tools/oracle/, tools/workflow/, requirements.lock.txt, pyproject.toml, AGENTS.md, CLAUDE.md, todo/README.md, todo/schemas/, docs/spec/security/, docs/spec/strategy/, docs/spec/operations/, ADR-001..ADR-008, or docs/implement/ was touched.
+
+## Required changes
+
+- None.
+
+## Unknowns
+
+- None.
