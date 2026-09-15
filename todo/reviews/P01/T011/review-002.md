@@ -1,0 +1,200 @@
+# T011 independent review
+
+- Base commit: `bf335be833102e1e26bfe2637bdb99a2a067dadd`
+- Candidate commit: `ad0014b087d2b550542d26648bc671cb9400c17e`
+- Verdict: **PASS**
+
+## Checks
+
+### diff_minimal_and_scoped — PASS
+
+The candidate commit ad0014b contains exactly the expected implementation files (identity.py NEW, __init__.py MODIFIED, test_protocol_identity.py NEW), the controller-managed workflow state file (todo/config.yaml), and the developer handoff (todo/evidence/P01/T011/attempt-002-developer.json). The wider diff stat includes planning-lineage artefacts from earlier commits in the SPEC_DEFECT -> PLANNING -> plan-review path; those are not introduced by the candidate commit and were already PASS-reviewed by the plan-review step. The developer attempt itself did not touch any pre-existing source, test, oracle, or workflow code outside its declared scope.
+
+Evidence:
+
+- git show --stat ad0014b: src/robinhood_lp/protocol/__init__.py (+2), src/robinhood_lp/protocol/identity.py (+106 NEW), tests/test_protocol_identity.py (+367 NEW), todo/config.yaml (controller-managed, +/-6), todo/evidence/P01/T011/attempt-002-developer.json (+49 NEW). 5 files changed, 527 insertions(+), 3 deletions(-).
+- The cumulative git diff --stat bf335be..ad0014b additionally contains planning-lineage files (ADR-009, ARCHITECTURE.md row, T011/T012/T013 contract amendments, todo/reviews/, todo/triage/, todo/evidence/attempt-001-*.json). Those files belong to earlier commits in the lineage (a0e4793 planning candidate, 891ee66 plan review, cdde13e triage, 0007b3e triage required), not to the candidate commit ad0014b itself.
+- The planning lineage already cleared the plan-review-001 PASS gate per todo/reviews/P01/T011/plan-review-001.json and todo/reviews/P01/T011/plan-review-001.md (verdict PASS, no required_changes).
+- Pre-existing src/robinhood_lp/protocol/{ids.py,abi.py,events.py,math.py,abi_artifacts.py,run_mode.py} are untouched: git diff bf335be..ad0014b on those paths returned empty output.
+
+### baseline_passes_twice — PASS
+
+All four quality commands (pytest, ruff check, ruff format --check, mypy src tests) were executed twice in the review worktree with byte-identical final summary lines apart from pytest wall-clock time. Pytest reports the same 329 passed / 2 skipped both runs. mypy exits 0 both runs over 41 source files. Ruff and ruff format both report success both runs. No flakes observed.
+
+Evidence:
+
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q (run 1): '329 passed, 2 skipped in 1.59s'. Skips: tests/test_abi_artifacts.py:152 (sha256 manual annotation not enforced), tests/test_protocol_ids.py:289 (vector 'reordered_inputs' supplies unsorted currencies).
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q (run 2): '329 passed, 2 skipped in 1.34s'. Same 329 passed, 2 skipped; identical apart from wall-clock.
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check (run 1): 'All checks passed!'
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check (run 2): 'All checks passed!'
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check (run 1): '160 files already formatted'
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check (run 2): '160 files already formatted'
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src tests (run 1): 'Success: no issues found in 41 source files'
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src tests (run 2): 'Success: no issues found in 41 source files'
+
+### deliverable_pool_identity_module — PASS
+
+identity.py exists as a new module containing the PoolIdentity frozen-slotted dataclass with the exact three-field signature required by the amended contract (ChainId, PoolId, Address), explicit type validation in __post_init__, round-trip serialization, on-chain PoolId accessor, and a deterministic repr. The module is pure (only imports from robinhood_lp.protocol.ids).
+
+Evidence:
+
+- src/robinhood_lp/protocol/identity.py exists (106 lines, NEW).
+- Module docstring (lines 1-24) enumerates the four identity rules: V4 PoolId is keccak256 of ABI-encoded PoolKey and MUST NOT be re-derived; PoolIdentity is a record-level composite adding chain_id and pool_manager_address; all three fields required; chain-agnostic on day one.
+- Class declaration at identity.py:37-38: '@dataclass(frozen=True, slots=True) class PoolIdentity' with fields chain_id: ChainId, pool_id: PoolId, pool_manager_address: Address.
+- __post_init__ at identity.py:62-75 explicitly type-checks each field and raises TypeError on mismatch.
+- to_components() round-trip accessor at identity.py:77-84.
+- on_chain_pool_id property at identity.py:86-94 returns the stored PoolId byte-for-byte.
+- Repr at identity.py:96-101 includes chain=, pool_id=, pool_manager=.
+- __all__ at identity.py:104-106 exports 'PoolIdentity'.
+
+### deliverable_reexport — PASS
+
+PoolIdentity is re-exported from the protocol package root: import statement at __init__.py:29 and __all__ entry at __init__.py:79. No existing public re-export was removed.
+
+Evidence:
+
+- src/robinhood_lp/protocol/__init__.py:29: 'from robinhood_lp.protocol.identity import PoolIdentity'.
+- src/robinhood_lp/protocol/__init__.py:79: '"PoolIdentity",' appears in __all__ between 'PoolId' and 'PoolKey'.
+- The pre-existing public re-exports (Address, ChainId, PoolKey, PoolId, etc.) remain intact in both the import block (lines 30-36) and __all__ (lines 60-97).
+- Pytest collection from robinhood_lp.protocol import (PoolIdentity, ...) succeeds; mypy src tests exits 0 over 41 source files.
+
+### deliverable_test_protocol_identity — PASS
+
+tests/test_protocol_identity.py is a new test module with 14 tests (well above the at-least-7 minimum) covering construction validation, immutability, round-trip, repr, equality, hash, byte-exact preservation of the V4 PoolId, cross-chain collision at ChainId(46630), and chain-agnostic construction across ChainId(1), ChainId(46630), and ChainId(999_999). All 14 tests pass.
+
+Evidence:
+
+- tests/test_protocol_identity.py exists (367 lines, NEW).
+- 14 test functions defined: test_pool_identity_required_pool_manager_address, test_pool_identity_rejects_non_address_pool_manager, test_pool_identity_rejects_non_chain_id, test_pool_identity_rejects_non_pool_id, test_pool_identity_is_frozen, test_pool_identity_round_trip, test_pool_identity_repr_contains_all_three_fields, test_pool_identity_equality_by_all_three_fields, test_pool_identity_hash_by_all_three_fields, test_pool_identity_does_not_replace_pool_id, test_pool_identity_cross_chain_collision_46630, test_pool_identity_cross_chain_collision_byte_difference, test_pool_identity_chain_agnostic_type, test_pool_identity_pool_id_independent_of_chain_field.
+- PYTHONPATH=src pytest tests/test_protocol_identity.py -v: '14 passed in 0.04s' with all 14 named tests PASSED.
+
+### acceptance_required_pool_manager_address — PASS
+
+PoolIdentity cannot be constructed without pool_manager_address. Both positional and keyword omissions raise TypeError; supplying a non-Address value (e.g. a hex string) also raises TypeError because the explicit isinstance check in __post_init__ rejects it. The contract's requirement that pool_manager_address is required at construction time (no default) is satisfied at both the dataclass layer and the post-init type guard.
+
+Evidence:
+
+- test_pool_identity_required_pool_manager_address: positional call PoolIdentity(CHAIN_MAINNET, pool_id) raises TypeError; keyword call PoolIdentity(chain_id=CHAIN_MAINNET, pool_id=pool_id) raises TypeError.
+- Runtime verification: PoolIdentity(chain_id=ChainId(1), pool_id=pool_id) raises 'TypeError: PoolIdentity.__init__() missing 1 required positional argument: pool_manager_address'.
+- PoolIdentity.pool_manager_address is declared in identity.py:60 with no default; frozen dataclass without a default field raises TypeError on construction with that field omitted.
+- The post_init raises TypeError when pool_manager_address is not an Address (test_pool_identity_rejects_non_address_pool_manager).
+- All four checks are covered: positional omission, keyword omission, non-Address value rejection, and runtime confirmation.
+
+### acceptance_round_trip — PASS
+
+PoolIdentity supports round-trip through (chain_id, pool_id, pool_manager_address): .to_components() yields the canonical 3-tuple, and feeding it back into the constructor yields an equal record whose pool_id bytes are byte-identical to the original. Both equality and byte-level identity are preserved.
+
+Evidence:
+
+- test_pool_identity_round_trip constructs a PoolIdentity with (ChainId(1), pool_id, mgr), calls .to_components() to recover the 3-tuple, reconstructs a PoolIdentity from those components, and asserts equality plus byte-exact preservation of the underlying pool_id bytes and hex.
+- to_components() at identity.py:77-84 returns (chain_id, pool_id, pool_manager_address) as a tuple of the original field values (no transformation).
+- PoolIdentity.__post_init__ validates each component's type, so round-trip reconstruction rejects bad inputs symmetrically with construction.
+
+### acceptance_equality_by_all_three_fields — PASS
+
+Equality compares all three fields: two PoolIdentity records with identical (chain_id, pool_id, pool_manager_address) are equal, and changing any one of the three fields produces a non-equal record. This is true both by the auto-generated dataclass __eq__ and by the explicit test cases.
+
+Evidence:
+
+- test_pool_identity_equality_by_all_three_fields constructs a baseline PoolIdentity a and asserts (a == b) when all three fields match; then asserts not-equal for the three single-field-difference cases (chain_id, pool_manager_address, pool_id).
+- @dataclass(frozen=True, slots=True) generates __eq__ from all declared fields, so equality covers chain_id, pool_id, pool_manager_address by construction.
+
+### acceptance_hash_by_all_three_fields — PASS
+
+Hash uses all three fields: identical 3-tuples yield identical hashes, and changing any one of the three fields changes the hash. The contract clause is satisfied.
+
+Evidence:
+
+- test_pool_identity_hash_by_all_three_fields constructs a baseline record and asserts hash differs when chain_id, pool_manager_address, or pool_id is changed.
+- Frozen slotted dataclass auto-generates __hash__ from all fields, so the hash domain covers (chain_id, pool_id, pool_manager_address).
+
+### acceptance_does_not_replace_pool_id — PASS
+
+PoolIdentity stores the V4 on-chain PoolId byte-for-byte and never re-derives it. The stored pool_id.value equals the keccak256 of the ABI-encoded PoolKey (the canonical V4 PoolId), and the on_chain_pool_id accessor returns the same value object. The must-not clause is satisfied.
+
+Evidence:
+
+- test_pool_identity_does_not_replace_pool_id: pi.pool_id.value == compute_pool_id(pk) for the source PoolKey; pi.pool_id.to_bytes() == expected_pool_id.to_bytes(); pi.on_chain_pool_id == expected_pool_id.
+- Runtime check: pi.pool_id.value == compute_pool_id(pk) returns True for pk = PoolKey(currency0=0x11..11, currency1=0x22..22, fee=3000, tick_spacing=60, hooks=0x00..00). Computed pool_id=0x25431634fd7de72516ccb751020a1a9188376a983ccc5f6c1152ca04a6acffad.
+- identity.py has no logic to re-derive pool_id from chain_id or pool_manager_address; pool_id is stored as the exact PoolId value object passed at construction.
+
+### acceptance_cross_chain_collision_46630 — PASS
+
+Cross-chain collision prevention is satisfied: byte-identical pool_id and pool_manager_address on different chains produce non-equal, differently-hashed PoolIdentity records. The Owner-confirmed placeholder ChainId(46630) is used as the second chain.
+
+Evidence:
+
+- test_pool_identity_cross_chain_collision_46630: two PoolIdentity records built with identical pool_id and pool_manager_address but different chain_id (ChainId(1) vs ChainId(46630)) are not equal, their hashes differ, and their underlying pool_id bytes are byte-identical (chain is what disambiguates).
+- Runtime check confirms mainnet != placeholder and hash(mainnet) != hash(placeholder) while mainnet.pool_id.to_bytes() == placeholder.pool_id.to_bytes().
+- test_pool_identity_cross_chain_collision_byte_difference further asserts repr encodes 'chain=1,' vs 'chain=46630,' as distinct byte strings.
+
+### acceptance_chain_agnostic_type — PASS
+
+The PoolIdentity type is chain-agnostic: any positive ChainId constructs a valid record. The three test values ChainId(1), ChainId(46630), and ChainId(999_999) all succeed at construction, and the records remain distinct even when their pool_id and pool_manager_address are byte-identical.
+
+Evidence:
+
+- test_pool_identity_chain_agnostic_type: PoolIdentity(chain_id=ChainId(1), ...) and PoolIdentity(chain_id=ChainId(46630), ...) and PoolIdentity(chain_id=ChainId(999_999), ...) all construct successfully and carry identical pool_id bytes and identical pool_manager_address; the three records are pairwise distinct.
+- test_pool_identity_pool_id_independent_of_chain_field: chain_id does not affect the stored pool_id bytes.
+- Identity.py has no chain-specific constant, hard-coded chain id, or guard against arbitrary positive ChainId values.
+- ChainId.__post_init__ at ids.py:179-183 only rejects non-positive values; ChainId(1), ChainId(46630), and ChainId(999_999) all pass.
+
+### must_not_replace_pool_id — PASS
+
+PoolIdentity does not replace the V4 on-chain PoolId. The V4 PoolId remains keccak256 of the ABI-encoded PoolKey (definition unchanged in ids.py); PoolIdentity stores that exact value object and re-exposes it through on_chain_pool_id. The two types coexist, with PoolIdentity serving as a record-level composite that disambiguates across chains and PoolManager deployments.
+
+Evidence:
+
+- PoolIdentity has no method that takes a PoolKey or any other representation and derives a pool_id; pool_id is always supplied at construction time as a PoolId value object.
+- on_chain_pool_id accessor (identity.py:86-94) returns the stored PoolId byte-for-byte.
+- test_pool_identity_does_not_replace_pool_id proves the stored PoolId equals compute_pool_id(pk), i.e. the V4 keccak256(abi.encode(PoolKey)).
+- ids.py:248-289 PoolId is still the canonical V4 on-chain type; identity.py adds a record-level wrapper without altering the on-chain type.
+
+### must_not_construct_without_pool_manager_address — PASS
+
+PoolIdentity cannot be constructed without pool_manager_address. The contract clause is enforced at the dataclass layer (no default) and at the post-init type guard (isinstance Address).
+
+Evidence:
+
+- pool_manager_address is declared in identity.py:60 without a default value; the dataclass forbids omitting it.
+- test_pool_identity_required_pool_manager_address confirms both positional omission and keyword omission raise TypeError.
+- Runtime confirmation: PoolIdentity(chain_id=ChainId(1), pool_id=pool_id) raises 'TypeError: PoolIdentity.__init__() missing 1 required positional argument: pool_manager_address'.
+
+### dependency_T010_approved — PASS
+
+Dependency T010 is APPROVED (approved_commit 66f8177). The dependency gate is satisfied.
+
+Evidence:
+
+- grep -A 10 '"T010": {' /home/lpdev/lp/todo/config.yaml: '"T010": {"phase": "P01", "status": "APPROVED", ... "approved_commit": "66f817775a916ff4948c7e47ae9cc337b318c688".'
+- T011 declares 'depends_on: ["T010"]' in todo/config.yaml; T010 status is APPROVED.
+
+### no_secrets_in_diff — PASS
+
+No real credentials, private keys, seed phrases, API keys, or bearer tokens appear anywhere in the candidate commit or in the wider bf335be..ad0014b lineage. The only matches for the secret-pattern regex are documentation references (TokenMetadata type name, ADR-003 file name, T011 contract phrasing). PoolIdentity is a pure value object with no secrets handling.
+
+Evidence:
+
+- git show ad0014b | grep -iE 'password|secret|private_key|seed_phrase|api_key|bearer' returned no matches.
+- git diff bf335be..ad0014b grep for password|secret|private_key|seed|api_key|token|bearer|credential|wallet returned only documentation references: 'TokenMetadata' (the type name), 'token/native metadata' (T011 contract phrasing), and 'configuration-and-secrets' (ADR-003 file name); no private key, seed phrase, API key, or credential values.
+- Pre-existing secrets policy is preserved: identity.py has no I/O, no environment reads, no logging, no network.
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- The Owner-confirmed placeholder ChainId(46630) is used in cross-chain collision tests until T024 verifies the real Robinhood Chain chain id; the type itself is chain-agnostic so swapping to the real value later is a constant change in tests only.
+- PoolIdentity has no convenience constructor with a default pool_manager_address by contract. Production code MUST pass an explicit pool_manager_address; this is enforced by the dataclass field requirement and the test_pool_identity_required_pool_manager_address test.
+- The editable install at /home/lpdev/miniconda3/envs/robinhood-lp/lib/python3.12/site-packages/_editable_impl_robinhood_lp.pth points to /home/lpdev/lp/src (the main checkout), not the worktree. The reviewer ran tests with PYTHONPATH=src (the worktree's src) per the project convention captured in todo/evidence/P00/.
+- The PoolIdentity 'does not replace PoolId' invariant is enforced at the value-object level: the on-chain PoolId is stored byte-for-byte. If downstream code later constructs PoolIdentity from a PoolKey without first deriving the canonical PoolId, that is a caller-side bug; the type does not accept a PoolKey directly and therefore cannot silently re-derive.
+- The full diff stat bf335be..ad0014b includes planning-lineage files (ADR-009, ARCHITECTURE.md row, T011/T012/T013 amendments, todo/reviews/, todo/triage/) from earlier commits in the SPEC_DEFECT -> PLANNING -> plan-review path. Those files were already reviewed and passed at plan-review-001 and are not part of the candidate commit ad0014b itself, but they are visible in the cumulative diff.
