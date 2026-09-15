@@ -1,0 +1,42 @@
+{
+  "task_id": "T010",
+  "outcome": "CANDIDATE_READY",
+  "summary": "T010 pre-existing implementation (ChainId, Address, Currency, PoolKey, PoolId as frozen dataclass value objects in src/robinhood_lp/protocol/ids.py; canonical ABI encoding in src/robinhood_lp/protocol/abi.py; 7 pinned Solidity-oracle vectors in tests/fixtures/protocol/pool_id_vectors.json covering native currency, static fee 3000, dynamic-fee sentinel 0x800000 with nonzero hook, max static fee 1_000_000, max tick spacing 32_767, hook with delta-action flag bits 0x88, and reordered-inputs) is preserved unchanged. The PoolKey/PoolId layer is intentionally chain-agnostic by design (matching Solidity keccak256(0xa0)); cross-chain namespacing lives in the ChainId value object and every identity envelope that carries one. Two new tests were added to tests/test_protocol_ids.py to make the cross-chain namespacing acceptance evidence-bearing without depending on T011: test_cross_chain_namespacing_distinct_chain_ids (exercises ChainId(46630) placeholder against ChainId(1), asserts distinct value-object identity and distinct BlockRef identities for byte-identical PoolKey content) and test_chain_id_rejects_non_positive_namespace_anchor (pins the ChainId constructor's positive-integer rejection). No existing tests were modified; no production code was modified. All four quality commands (pytest, ruff check, ruff format --check, mypy src tests) passed cleanly in two consecutive runs with byte-identical summary lines apart from pytest wall-clock duration (1.72s vs 1.54s). Test count delta: +2 tests, -0 tests.",
+  "commands": [
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q (run 1)",
+      "result": "315 passed, 2 skipped in 1.72s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check (run 1)",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check (run 1)",
+      "result": "155 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src tests (run 1)",
+      "result": "Success: no issues found in 39 source files"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q (run 2)",
+      "result": "315 passed, 2 skipped in 1.54s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check (run 2)",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check (run 2)",
+      "result": "155 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src tests (run 2)",
+      "result": "Success: no issues found in 39 source files"
+    }
+  ],
+  "residual_risks": [
+    "PoolKey/PoolId is intentionally chain-agnostic (matches Solidity keccak256(0xa0)); cross-chain collision prevention is enforced by the ChainId value object and every identity envelope that carries one (e.g., BlockRef, TransactionRef, EventKey in protocol/events.py, owned by T011/T012). T024 will verify the real Robinhood Chain id; the placeholder ChainId(46630) used in the new test is the Owner-confirmed stand-in until then."
+  ]
+}

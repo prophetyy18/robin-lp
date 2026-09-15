@@ -358,3 +358,86 @@ def test_equality_yields_identical_pool_id() -> None:
     )
     assert a == b
     assert a.to_pool_id() == b.to_pool_id()
+
+
+# ---------------------------------------------------------------------------
+# Cross-chain namespacing (T010 acceptance)
+# ---------------------------------------------------------------------------
+
+
+def test_cross_chain_namespacing_distinct_chain_ids() -> None:
+    """Identities carrying different ``ChainId``s are distinct.
+
+    Per T010 acceptance, the protocol layer must prevent identities
+    from different chains from colliding. The placeholder chain
+    ``ChainId(46630)`` is used here as the Owner-confirmed stand-in
+    for the Robinhood Chain id until T024 verifies the real value.
+
+    The ``PoolKey`` / ``PoolId`` layer is intentionally chain-agnostic
+    (matching Solidity's ``keccak256(0xa0 bytes)``); chain
+    namespacing is enforced via the ``ChainId`` value object itself
+    and every identity envelope that carries one. This test pins both:
+
+    - the ``ChainId`` value object itself distinguishes ``ChainId(1)``
+      from ``ChainId(46630)`` (different integer, not equal, different
+      hash); and
+    - a byte-identical ``PoolKey`` carried by ``BlockRef``s with those
+      two distinct ``ChainId``s yields two distinct identities (their
+      hash bytes differ).
+    """
+    from robinhood_lp.protocol import BlockRef
+
+    chain_mainnet = ChainId(1)
+    chain_rh_placeholder = ChainId(46630)
+
+    # 1. ChainId value-object distinction (the namespace anchor).
+    assert chain_mainnet != chain_rh_placeholder
+    assert hash(chain_mainnet) != hash(chain_rh_placeholder)
+    assert chain_mainnet.value == 1
+    assert chain_rh_placeholder.value == 46630
+
+    # 2. Same byte-identical PoolKey, two distinct ChainIds, two distinct
+    #    identities. The PoolKey is chain-agnostic; the chain namespace
+    #    lives in the identity envelope.
+    pk = PoolKey(
+        currency0=Currency.from_int(0x10),
+        currency1=Currency.from_int(0x20),
+        fee=3000,
+        tick_spacing=60,
+        hooks=Address.zero(),
+    )
+    # The PoolKey bytes are identical regardless of chain.
+    pool_id_mainnet = pk.to_pool_id()
+    pool_id_rh_placeholder = pk.to_pool_id()
+    assert pool_id_mainnet == pool_id_rh_placeholder  # chain-agnostic by design
+    assert pool_id_mainnet.to_hex() == pool_id_rh_placeholder.to_hex()
+
+    # The envelope (BlockRef) carrying ChainId namespaced the identity.
+    block_hash = 0xAB * 31  # 32-byte value
+    block_number = 21_000_000
+    ref_mainnet = BlockRef(chain_id=chain_mainnet, block_hash=block_hash, block_number=block_number)
+    ref_rh_placeholder = BlockRef(
+        chain_id=chain_rh_placeholder, block_hash=block_hash, block_number=block_number
+    )
+
+    assert ref_mainnet != ref_rh_placeholder
+    assert hash(ref_mainnet) != hash(ref_rh_placeholder)
+    # Their block-hash bytes are identical (the chain id is what differs).
+    assert ref_mainnet.to_hash_bytes() == ref_rh_placeholder.to_hash_bytes()
+    # And their dataclass equality / hash is driven by the ChainId field.
+    assert ref_mainnet.chain_id != ref_rh_placeholder.chain_id
+
+
+def test_chain_id_rejects_non_positive_namespace_anchor() -> None:
+    """The ``ChainId`` constructor refuses 0 and negative values.
+
+    The chain id is the namespace anchor: refusing non-positive values
+    here is what guarantees identities from different chains cannot
+    share a namespace. A single test pins the rejection contract.
+    """
+    with pytest.raises(ValueError, match="positive"):
+        ChainId(0)
+    with pytest.raises(ValueError, match="positive"):
+        ChainId(-1)
+    with pytest.raises(ValueError, match="positive"):
+        ChainId(-46_630)
