@@ -12,7 +12,7 @@
   },
   "active_phase": "P01",
   "active_task": "T012",
-  "workflow_state": "AWAITING_REVIEW",
+  "workflow_state": "APPROVED",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -105,16 +105,16 @@
     },
     "T012": {
       "phase": "P01",
-      "status": "AWAITING_REVIEW",
+      "status": "APPROVED",
       "depends_on": [
         "T010"
       ],
       "task_file": "todo/phases/P01-protocol-foundation/T012.md",
       "attempt": 1,
       "base_commit": "cdf3191e66784e773d1ab66724230d2d2f3268a8",
-      "candidate_commit": null,
-      "approved_commit": null,
-      "latest_review": null
+      "candidate_commit": "4eb7de51415b0e73488fff90ecde4dbbb763a5c2",
+      "approved_commit": "4eb7de51415b0e73488fff90ecde4dbbb763a5c2",
+      "latest_review": "todo/reviews/P01/T012/review-001.json"
     },
     "T013": {
       "phase": "P01",
