@@ -1,0 +1,131 @@
+{
+  "task_id": "T021",
+  "base_commit": "06e7b48dfaaa4b8f46cd06e26a88a553dc8b210a",
+  "candidate_commit": "ec391edc338f4f74e47a83f91678e2720b292267",
+  "verdict": "PASS",
+  "checks": [
+    {
+      "id": "artifact_sha256_matches_declared",
+      "status": "PASS",
+      "evidence": [
+        "docs/implement/protocol-artifacts/v4-core-e50237c.json declares sha256=b5a50257328a824f67259f4f190d2451383aada7aafc8180f6887ee5cfb9b881",
+        "Re-canonicalized body (sha256 field zeroed, json.dumps sort_keys=True, indent=2, +'\\n') yields SHA-256 b5a50257328a824f67259f4f190d2451383aada7aafc8180f6887ee5cfb9b881",
+        "tests/test_abi_artifacts.py::test_artifact_file_sha256_matches_declared asserts (not skip) — observed PASS"
+      ],
+      "finding": "Declared sha256 matches the SHA-256 of the canonical body; the assertion is hard (no pytest.skip)."
+    },
+    {
+      "id": "initialize_event_topic0_matches_keccak256_of_8field_signature",
+      "status": "PASS",
+      "evidence": [
+        "Artifact: Initialize signature = 'Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)' with topic0=0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438",
+        "Independent keccak256(signature) computed via eth_hash.auto.keccak = 0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438 (match)",
+        "V4 IPoolManager.sol at tools/oracle/lib/v4-core/src/interfaces/IPoolManager.sol:event Initialize declares the 8-arg signature (id, currency0, currency1, fee, tickSpacing, hooks, sqrtPriceX96, tick)",
+        "tests/test_abi_artifacts.py::test_event_topic_matches_keccak256_of_signature[Initialize] PASSED"
+      ],
+      "finding": "8-field Initialize signature and topic0 are consistent with the pinned v4-core commit; live V4 ABI preserved per owner direction (not reverted to 7-field)."
+    },
+    {
+      "id": "selector_oracle_compiles_and_emits_canonical_bytes",
+      "status": "PASS",
+      "evidence": [
+        "forge install Uniswap/v4-core@e50237c43811bd9b526eff40f26772152a42daba Uniswap/v4-periphery@dce236d4e2057422d0791d9a973a58765eb46f65 foundry-rs/forge-std@v1.9.7 (user-level ~/.foundry/bin/forge, v1.8.1) installs pinned sources under tools/oracle/lib/",
+        "tools/oracle/foundry.toml gains skip = ['test/MathOracle.t.sol', 'test/PoolIdOracle.t.sol'] so build/test remain scoped to SelectorOracle.t.sol",
+        "cd tools/oracle && forge test --match-path 'test/SelectorOracle.t.sol' --json -vv → 19/19 tests SUCCESS (4 event topic + 4 PoolManager selector + 11 StateView selector)",
+        "forge JSON decoded logs cross-checked against artifact: 4 PoolManager selectors (initialize=0x6276cbbe/1651952574; modifyLiquidity=0x5a6bcfda/1517015002; swap=0xf3cd914c/4090335564; donate=0x234266d7/591554263) and all 11 StateView selectors (getSlot0=0xc815641c/3356845084; getTickInfo=0x7c40f1fe/2084631038; getTickLiquidity=0xcaedab54/3404573524; getTickFeeGrowthOutside=0x8a2bb9e6/2318121446; getFeeGrowthGlobals=0x9ec538c8/2663725256; getLiquidity=0xfa6793d5/4201092053; getTickBitmap=0x1c7ccb4c/477940556; getPositionInfo_owner=0xdacf1d2f/3671006511; getPositionInfo_id=0x97fd7b42/2549971778; getPositionLiquidity=0xf0928f29/4036136745; getFeeGrowthInside=0x53e9c1fb/1407828475) — every value matches the artifact."
+      ],
+      "finding": "SelectorOracle.sol and SelectorOracle.t.sol compile cleanly with the pinned v4-core/v4-periphery commits; emitted bytes equal the artifact for every event and function."
+    },
+    {
+      "id": "regenerate_and_compare_byte_match",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output regenerates the artifact from forge JSON and byte-compares (canonical-json) against the checked-in file after stripping _meta.sha256",
+        "With the production artifact: test PASSED (1 of 34 abi-artifact tests, total 34/34 PASS in tests/test_abi_artifacts.py)",
+        "Forge-missing probe: HOME=/tmp/empty-home PATH=/tmp/no-forge → pytest.fail fires 'Failed: `forge` not found; tried '/tmp/empty-home/.foundry/bin/forge'. Install Foundry (https://getfoundry.sh) and re-run pytest.' (no pytest.skip)",
+        "Artifact-drift probe (simulated via /tmp/artifact-modified.json with last hex of Initialize topic0 flipped 8→9): re-running the test's regeneration+byte-compare logic shows 'Drifted top-level keys: [events]'; regenerated topic0=0xdd46...438, checked-in topic0=0xdd46...439 → pytest.fail fires with the 'Drifted top-level keys: [events]' message — fail-closed verified",
+        "grep pytest.skip /tests/test_abi_artifacts.py → 0 hits (only docstring/comment mentions of 'no pytest.skip')"
+      ],
+      "finding": "test_artifact_byte_matches_regenerated_oracle_output is a real fail-closed byte-compare — verified both directions (forge missing and artifact byte-flip)."
+    },
+    {
+      "id": "sha256_hard_assertion_not_skip",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_abi_artifacts.py::test_artifact_sha256_field_is_well_formed_hex uses assert (line 232-234)",
+        "tests/test_abi_artifacts.py::test_artifact_file_sha256_matches_declared uses assert for the body-hash comparison (line 260); no pytest.skip path",
+        "Both tests PASSED against the production artifact"
+      ],
+      "finding": "SHA-256 verification is enforced via assert; missing or mismatched digest fails the test rather than warn."
+    },
+    {
+      "id": "stateview_abi_present",
+      "status": "PASS",
+      "evidence": [
+        "Artifact functions section is nested: functions.PoolManager (4 entries) + functions.StateView (11 entries)",
+        "src/robinhood_lp/protocol/abi_artifacts.py::FUNCTION_SELECTORS re-shaped to dict[contract_name, dict[fn_name, bytes]] (commit diff lines 91-106)",
+        "tests/test_function_contracts_match_expected_set, test_function_contract_names_match_module, test_poolmanager_function_names_match_expected_set, test_stateview_function_names_match_expected_set, and the parametrized test_function_selector_is_four_bytes[StateView-*] all PASSED (15 selector-length parametrizations total)"
+      ],
+      "finding": "StateView ABI coverage is present alongside PoolManager; the module exports a contract-keyed selector map."
+    },
+    {
+      "id": "metadata_fields_with_citations",
+      "status": "PASS",
+      "evidence": [
+        "_meta.compiler: 'solc ^0.8.24 (PoolManager.sol declares pragma solidity 0.8.26; IStateView.sol declares pragma solidity ^0.8.0; the framework compiles under solc 0.8.26 set in tools/oracle/foundry.toml)'",
+        "_meta.oracle includes 'forge 1.8.1 (commit 982849d314 2026-08-28T17:46:00Z; user-level install under ~/.foundry/bin)' (package version)",
+        "_meta.license_pool_manager = 'BUSL-1.1 — verified against tools/oracle/lib/v4-core/licenses/BUSL_LICENSE at commit e50237c...; PoolManager.sol declares SPDX-License-Identifier: BUSL-1.1' (PoolManager.sol SPDX confirmed via grep)",
+        "_meta.license_state_view = 'MIT — verified against tools/oracle/lib/v4-periphery/LICENSE at commit dce236d4...; IStateView.sol declares SPDX-License-Identifier: MIT' (IStateView.sol SPDX confirmed via grep)",
+        "_meta.license_verification_paths is a non-empty list of 5 paths (3 local, 2 upstream URLs)",
+        "_meta.source_retrieval_time = '2026-09-15'; _meta.source_retrieval_method = 'forge install --no-git --shallow ...'",
+        "tests/test_artifact_records_compiler_and_oracle, test_artifact_records_source_retrieval_timestamp, test_artifact_records_license_with_citation all PASSED"
+      ],
+      "finding": "Compiler, forge package version (commit + date), license (with BUSL-1.1 and MIT citations to both local and upstream pinned-commit paths), and source-retrieval timestamp are present in the artifact."
+    },
+    {
+      "id": "scope_preserved",
+      "status": "PASS",
+      "evidence": [
+        "git diff 06e7b48..ec391ed -- tests/test_initialize_scanner.py → empty (T022 deliverable preserved, 7-field signature still hard-coded there as expected)",
+        "git diff 06e7b48..ec391ed -- src/robinhood_lp/discovery/initialize_log.py → empty (T022 deliverable preserved; line 45 still consumes EVENT_TOPICS['Initialize'] from the artifact, i.e. 8-field topic)",
+        "git diff 06e7b48..ec391ed -- tools/oracle/test/MathOracle.t.sol → empty (T012 preserved)",
+        "git diff 06e7b48..ec391ed -- tools/oracle/test/PoolIdOracle.t.sol → empty (T010 preserved)",
+        "The 8-field Initialize signature in docs/implement/protocol-artifacts/v4-core-e50237c.json was NOT reverted (signature still 'Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)' with topic0=0xdd46...438)",
+        "files changed: docs/implement/protocol-artifacts/v4-core-e50237c.json (+143/-), src/robinhood_lp/protocol/abi_artifacts.py (+15/-), tests/test_abi_artifacts.py (+449/-), tools/oracle/foundry.toml (+1/-), tools/oracle/src/SelectorOracle.sol (new), tools/oracle/test/SelectorOracle.t.sol (new), todo/config.yaml (status update), todo/evidence/P02/T021/attempt-001-developer.json (new handoff)"
+      ],
+      "finding": "Candidate commit is strictly scoped to T021 deliverables; the developer did not revert the 8-field Initialize ABI, did not touch T012's MathOracle.t.sol, T010's PoolIdOracle.t.sol, or T022's initialize_log.py / test_initialize_scanner.py — exactly as the owner directed."
+    },
+    {
+      "id": "developer_handoff_schema",
+      "status": "PASS",
+      "evidence": [
+        "todo/evidence/P02/T021/attempt-001-developer.json validates against todo/schemas/developer-result.schema.json via jsonschema (PASS)",
+        "outcome = 'CANDIDATE_READY'",
+        "No 'triage_request' key present — outcome=CANDIDATE_READY is consistent with no triage_request",
+        "commands[].result includes SHA-256 of full stdout+stderr for each quality gate run; residual_risks explicitly enumerates the 15 out-of-scope T022 test failures"
+      ],
+      "finding": "Developer handoff schema-validates and is consistent."
+    },
+    {
+      "id": "quality_gates_byte_identical_twice",
+      "status": "PASS",
+      "evidence": [
+        "pytest -q run 1 / run 2: both report '15 failed, 349 passed, 6 skipped in ~2.13s'; substantive counts byte-identical (full stdout SHA-256 differs only because pyproject.toml [tool.pytest.ini_options].addopts includes --showlocals which embeds Python object memory addresses + wall-clock timing — matches developer's note)",
+        "ruff check run 1 / run 2: SHA-256(stdout)=82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18 both runs, exit=0",
+        "ruff format --check run 1 / run 2: SHA-256(stdout)=35ff24d8a92c0ac97b235b057e7a009fcd264bc97ab856d529326a06c0fee756 both runs, exit=0",
+        "mypy src tests run 1 / run 2: SHA-256(stdout)=a97cee1ee1bdb5e2d1ca7098f7b33a6c6a21263225643192fdeb78654687ed89 both runs, exit=0 ('Success: no issues found in 46 source files')",
+        "All four SHA-256s match the developer's reported values byte-for-byte"
+      ],
+      "finding": "Four quality gates ran twice with byte-identical substantive evidence (or counts, where pytest --showlocals makes raw output non-reproducible)."
+    }
+  ],
+  "must_not_violations": [],
+  "unknowns": [],
+  "required_changes": [],
+  "residual_risks": [
+    "OUT_OF_SCOPE_T022: 15 tests/test_initialize_scanner.py tests fail in both pytest runs because the test file hard-codes the 7-field Initialize signature 'Initialize(bytes32,address,address,uint24,int24,address)' with topic0=3fd553db44f207b1f41348cfc4d251860814af9eadc470e8e7895e4d120511f4, while the T021-pinned artifact uses the live V4 8-field signature with topic0=0xdd46...438 (also consumed by src/robinhood_lp/discovery/initialize_log.py via EVENT_TOPICS['Initialize']). The candidate commit deliberately does NOT modify tests/test_initialize_scanner.py or src/robinhood_lp/discovery/initialize_log.py — these are T022 deliverables and must be aligned in T022 attempt 1. Per owner direction these failures are NOT a T021 defect and must not block this verdict.",
+    "PYTHONPATH=src is required to run the test suite because the conda env has an editable install of robinhood_lp pinned to /home/lpdev/lp/src (per /home/lpdev/miniconda3/envs/robinhood-lp/lib/python3.12/site-packages/_editable_impl_robinhood_lp.pth) which would otherwise shadow the worktree's src/robinhood_lp/. Matches T020 review evidence; not introduced by this candidate.",
+    "foundry 1.8.1 does not recognise the suggested `test_pattern = 'test/SelectorOracle.t.sol'` config key; the equivalent that does work in foundry 1.8.1 is the `skip` array added to foundry.toml. The Python test additionally pins the run via explicit --skip test/MathOracle.t.sol --skip 'test/**' (build) and --match-path test/SelectorOracle.t.sol (test), so the byte-comparison stays fail-closed even if a future change widens the foundry.toml skip list.",
+    "The artifact references `python -m robinhood_lp.tools.regenerate_artifact` (and tools/oracle/lib/v4-core/licenses/MIT_LICENSE) but no `src/robinhood_lp/tools/` module currently exists in the repo. This is documentation-level only — tests use the inline helpers in tests/test_abi_artifacts.py, so the missing helper is not a functional defect of T021. The developer's regeneration_command and license_verification_paths are forward-looking (they will become valid once the helper module lands) and the license path is verified present locally for the BUSL citation that the test uses."
+  ]
+}
