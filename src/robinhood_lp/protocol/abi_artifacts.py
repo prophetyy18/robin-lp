@@ -91,9 +91,18 @@ EVENT_TOPICS: Final[dict[str, bytes]] = {
     name: _parse_topic(info["topic0"]) for name, info in load_artifact()["events"].items()
 }
 
-#: Map from V4 function name to its canonical 4-byte selector.
-FUNCTION_SELECTORS: Final[dict[str, bytes]] = {
-    name: _parse_selector(info["selector"]) for name, info in load_artifact()["functions"].items()
+#: Map from V4 contract name to map of function name -> canonical 4-byte selector.
+#:
+#: The artifact nests function selectors by contract (``PoolManager`` and
+#: ``StateView``) so the selector origin is unambiguous (T021 scope:
+#: StateView ABI coverage alongside PoolManager). Tests and downstream
+#: code should iterate ``FUNCTION_SELECTORS[contract].items()``.
+FUNCTION_SELECTORS: Final[dict[str, dict[str, bytes]]] = {
+    contract_name: {
+        fn_name: _parse_selector(fn_info["selector"])
+        for fn_name, fn_info in contract_functions.items()
+    }
+    for contract_name, contract_functions in load_artifact()["functions"].items()
 }
 
 

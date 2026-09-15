@@ -1,53 +1,128 @@
 {
   "_meta": {
-    "description": "Pinned V4 PoolManager artifacts used by the framework. Only the ABI entries the framework actually consumes are stored; see T021 acceptance.",
-    "source_repository": "https://github.com/Uniswap/v4-core",
+    "compiler": "solc ^0.8.24 (PoolManager.sol declares pragma solidity 0.8.26; IStateView.sol declares pragma solidity ^0.8.0; the framework compiles under solc 0.8.26 set in tools/oracle/foundry.toml)",
+    "description": "Pinned V4 PoolManager + StateView artifacts consumed by the framework. Only ABI entries actually used by T022 / T024 / T042 / T051 are stored (T021 acceptance: 'only actually used ABI entries are stored'). Topics and selectors are produced by the Foundry SelectorOracle under tools/oracle/src/SelectorOracle.sol and byte-compared by tests/test_abi_artifacts.py against the values below; any drift in the upstream ABI or our pinned v4-core / v4-periphery commits must be reflected here in the same change set, or the regenerate-and-compare test fails closed.",
+    "license_pool_manager": "BUSL-1.1 \u2014 verified against tools/oracle/lib/v4-core/licenses/BUSL_LICENSE at commit e50237c43811bd9b526eff40f26772152a42daba; PoolManager.sol declares SPDX-License-Identifier: BUSL-1.1",
+    "license_state_view": "MIT \u2014 verified against tools/oracle/lib/v4-periphery/LICENSE at commit dce236d4e2057422d0791d9a973a58765eb46f65; IStateView.sol declares SPDX-License-Identifier: MIT",
+    "license_verification_paths": [
+      "tools/oracle/lib/v4-core/licenses/BUSL_LICENSE",
+      "tools/oracle/lib/v4-core/licenses/MIT_LICENSE",
+      "tools/oracle/lib/v4-periphery/LICENSE",
+      "https://github.com/Uniswap/v4-core/blob/e50237c43811bd9b526eff40f26772152a42daba/licenses/BUSL_LICENSE",
+      "https://github.com/Uniswap/v4-periphery/blob/dce236d4e2057422d0791d9a973a58765eb46f65/LICENSE"
+    ],
+    "oracle": "Foundry SelectorOracle under tools/oracle/src/SelectorOracle.sol; forge 1.8.1 (commit 982849d314 2026-08-28T17:46:00Z; user-level install under ~/.foundry/bin); regenerated with `forge test --match-contract SelectorOracleTest --json-file /tmp/forge-result.json -vv`",
+    "regenerate_artifact_cli": "python -m robinhood_lp.tools.regenerate_artifact",
+    "regeneration_command": "cd tools/oracle && forge test --match-contract SelectorOracleTest --json-file /tmp/forge-result.json -vv && python -m robinhood_lp.tools.regenerate_artifact /tmp/forge-result.json docs/implement/protocol-artifacts/v4-core-e50237c.json",
+    "sha256": "b5a50257328a824f67259f4f190d2451383aada7aafc8180f6887ee5cfb9b881",
     "source_commit": "e50237c43811bd9b526eff40f26772152a42daba",
-    "source_path": "src/interfaces/IPoolManager.sol",
-    "license": "MIT (Uniswap v4-core is MIT-licensed; see upstream)",
-    "compiler": "solc 0.8.26",
-    "oracle": "Foundry + Solidity 0.8.26; values cross-checked against tools/oracle/src/SelectorOracle.sol",
-    "sha256": "manual-annotation; see tests/test_abi_artifacts.py for the verification protocol",
-    "regeneration_command": "cd tools/oracle && forge test --match-contract SelectorOracle -vv"
+    "source_commit_pool_manager": "e50237c43811bd9b526eff40f26772152a42daba",
+    "source_commit_state_view": "dce236d4e2057422d0791d9a973a58765eb46f65",
+    "source_path_pool_manager_event": "src/interfaces/IPoolManager.sol",
+    "source_path_pool_manager_function": "src/interfaces/IPoolManager.sol",
+    "source_path_state_view": "src/interfaces/IStateView.sol",
+    "source_repository_pool_manager": "https://github.com/Uniswap/v4-core",
+    "source_repository_state_view": "https://github.com/Uniswap/v4-periphery",
+    "source_retrieval_method": "forge install --no-git --shallow Uniswap/v4-core@e50237c43811bd9b526eff40f26772152a42daba Uniswap/v4-periphery@dce236d4e2057422d0791d9a973a58765eb46f65 foundry-rs/forge-std@v1.9.7 inside tools/oracle/ (no .gitmodule \u2014 submodules live under tools/oracle/lib/ and are .gitignore'd)",
+    "source_retrieval_time": "2026-09-15"
   },
   "events": {
+    "Donate": {
+      "signature": "Donate(bytes32,address,uint256,uint256)",
+      "topic0": "0x29ef05caaff9404b7cb6d1c0e9bbae9eaa7ab2541feba1a9c4248594c08156cb"
+    },
     "Initialize": {
-      "signature": "Initialize(bytes32,address,address,uint24,int24,address)",
-      "topic0": "3fd553db44f207b1f41348cfc4d251860814af9eadc470e8e7895e4d120511f4"
+      "signature": "Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)",
+      "topic0": "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"
     },
     "ModifyLiquidity": {
       "signature": "ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)",
-      "topic0": "f208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec"
+      "topic0": "0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec"
     },
     "Swap": {
       "signature": "Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)",
-      "topic0": "40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f"
-    },
-    "Donate": {
-      "signature": "Donate(bytes32,address,uint256,uint256)",
-      "topic0": "29ef05caaff9404b7cb6d1c0e9bbae9eaa7ab2541feba1a9c4248594c08156cb"
+      "topic0": "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f"
     }
   },
   "functions": {
-    "initialize": {
-      "signature": "initialize((address,address,uint24,int24,address),uint160)",
-      "selector": "0x6276cbbe",
-      "selector_decimal": 1651952574
+    "PoolManager": {
+      "donate": {
+        "selector": "0x234266d7",
+        "selector_decimal": 591554263,
+        "signature": "donate((address,address,uint24,int24,address),uint256,uint256,bytes)"
+      },
+      "initialize": {
+        "selector": "0x6276cbbe",
+        "selector_decimal": 1651952574,
+        "signature": "initialize((address,address,uint24,int24,address),uint160)"
+      },
+      "modifyLiquidity": {
+        "selector": "0x5a6bcfda",
+        "selector_decimal": 1517015002,
+        "signature": "modifyLiquidity((address,address,uint24,int24,address),(int24,int24,int256,bytes32),bytes)"
+      },
+      "swap": {
+        "selector": "0xf3cd914c",
+        "selector_decimal": 4090335564,
+        "signature": "swap((address,address,uint24,int24,address),(bool,uint128,uint160,bytes),bytes)"
+      }
     },
-    "modifyLiquidity": {
-      "signature": "modifyLiquidity((address,address,uint24,int24,address),(int24,int24,int256,bytes32),bytes)",
-      "selector": "0x5a6bcfda",
-      "selector_decimal": 1517015002
-    },
-    "swap": {
-      "signature": "swap((address,address,uint24,int24,address),(bool,uint128,uint160,bytes),bytes)",
-      "selector": "0xf3cd914c",
-      "selector_decimal": 4090335564
-    },
-    "donate": {
-      "signature": "donate((address,address,uint24,int24,address),uint256,uint256,bytes)",
-      "selector": "0x234266d7",
-      "selector_decimal": 591554263
+    "StateView": {
+      "getFeeGrowthGlobals": {
+        "selector": "0x9ec538c8",
+        "selector_decimal": 2663725256,
+        "signature": "getFeeGrowthGlobals(bytes32)"
+      },
+      "getFeeGrowthInside": {
+        "selector": "0x53e9c1fb",
+        "selector_decimal": 1407828475,
+        "signature": "getFeeGrowthInside(bytes32,int24,int24)"
+      },
+      "getLiquidity": {
+        "selector": "0xfa6793d5",
+        "selector_decimal": 4201092053,
+        "signature": "getLiquidity(bytes32)"
+      },
+      "getPositionInfo_id": {
+        "selector": "0x97fd7b42",
+        "selector_decimal": 2549971778,
+        "signature": "getPositionInfo(bytes32,bytes32)"
+      },
+      "getPositionInfo_owner": {
+        "selector": "0xdacf1d2f",
+        "selector_decimal": 3671006511,
+        "signature": "getPositionInfo(bytes32,address,int24,int24,bytes32)"
+      },
+      "getPositionLiquidity": {
+        "selector": "0xf0928f29",
+        "selector_decimal": 4036136745,
+        "signature": "getPositionLiquidity(bytes32,bytes32)"
+      },
+      "getSlot0": {
+        "selector": "0xc815641c",
+        "selector_decimal": 3356845084,
+        "signature": "getSlot0(bytes32)"
+      },
+      "getTickBitmap": {
+        "selector": "0x1c7ccb4c",
+        "selector_decimal": 477940556,
+        "signature": "getTickBitmap(bytes32,int16)"
+      },
+      "getTickFeeGrowthOutside": {
+        "selector": "0x8a2bb9e6",
+        "selector_decimal": 2318121446,
+        "signature": "getTickFeeGrowthOutside(bytes32,int24)"
+      },
+      "getTickInfo": {
+        "selector": "0x7c40f1fe",
+        "selector_decimal": 2084631038,
+        "signature": "getTickInfo(bytes32,int24)"
+      },
+      "getTickLiquidity": {
+        "selector": "0xcaedab54",
+        "selector_decimal": 3404573524,
+        "signature": "getTickLiquidity(bytes32,int24)"
+      }
     }
   }
 }
