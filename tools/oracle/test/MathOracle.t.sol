@@ -52,7 +52,7 @@ contract MathOracleTest is Test {
     }
 
     // -------------------------------------------------------------------
-    // SqrtPriceMath: amount0 / amount1 from liquidity (round down)
+    // SqrtPriceMath: amount0 / amount1 from liquidity (roundUp selectable)
     // -------------------------------------------------------------------
 
     function test_SqrtPriceMath_amount_deltas() public {
@@ -61,32 +61,52 @@ contract MathOracleTest is Test {
         uint160 pa = TickMath.getSqrtPriceAtTick(-100);
         uint160 pb = TickMath.getSqrtPriceAtTick(100);
 
-        _emitAmount0Delta("amount0_liq_1e18_range_pm100", pa, pb, 1e18);
-        _emitAmount0Delta("amount0_liq_1e6_range_pm100",  pa, pb, 1e6);
-        _emitAmount1Delta("amount1_liq_1e18_range_pm100", pa, pb, 1e18);
-        _emitAmount1Delta("amount1_liq_1e6_range_pm100",  pa, pb, 1e6);
+        _emitAmount0Delta("amount0_liq_1e18_range_pm100", pa, pb, 1e18, false);
+        _emitAmount0Delta("amount0_liq_1e18_range_pm100_round_up", pa, pb, 1e18, true);
+        _emitAmount0Delta("amount0_liq_1e6_range_pm100",  pa, pb, 1e6, false);
+        _emitAmount0Delta("amount0_liq_1e6_range_pm100_round_up",  pa, pb, 1e6, true);
+        _emitAmount1Delta("amount1_liq_1e18_range_pm100", pa, pb, 1e18, false);
+        _emitAmount1Delta("amount1_liq_1e18_range_pm100_round_up", pa, pb, 1e18, true);
+        _emitAmount1Delta("amount1_liq_1e6_range_pm100",  pa, pb, 1e6, false);
+        _emitAmount1Delta("amount1_liq_1e6_range_pm100_round_up",  pa, pb, 1e6, true);
 
         // One-sided: amount0 only when current price equals lower bound.
         uint160 p = TickMath.getSqrtPriceAtTick(0);
-        _emitAmount0Delta("amount0_liq_1e18_range_0_to_100", p, pb, 1e18);
-        _emitAmount1Delta("amount1_liq_1e18_range_neg100_to_0", pa, p, 1e18);
+        _emitAmount0Delta("amount0_liq_1e18_range_0_to_100", p, pb, 1e18, false);
+        _emitAmount0Delta("amount0_liq_1e18_range_0_to_100_round_up", p, pb, 1e18, true);
+        _emitAmount1Delta("amount1_liq_1e18_range_neg100_to_0", pa, p, 1e18, false);
+        _emitAmount1Delta("amount1_liq_1e18_range_neg100_to_0_round_up", pa, p, 1e18, true);
     }
 
-    function _emitAmount0Delta(string memory name, uint160 pa, uint160 pb, uint128 liquidity) internal {
-        uint256 a0 = oracle.amount0Delta(pa, pb, liquidity);
+    function _emitAmount0Delta(
+        string memory name,
+        uint160 pa,
+        uint160 pb,
+        uint128 liquidity,
+        bool roundUp
+    ) internal {
+        uint256 a0 = oracle.amount0Delta(pa, pb, liquidity, roundUp);
         emit log_named_string("name", string.concat("a0/", name));
         emit log_named_uint("pa", pa);
         emit log_named_uint("pb", pb);
         emit log_named_uint("liquidity", uint256(liquidity));
+        emit log_named_bool("round_up", roundUp);
         emit log_named_uint("amount0", a0);
     }
 
-    function _emitAmount1Delta(string memory name, uint160 pa, uint160 pb, uint128 liquidity) internal {
-        uint256 a1 = oracle.amount1Delta(pa, pb, liquidity);
+    function _emitAmount1Delta(
+        string memory name,
+        uint160 pa,
+        uint160 pb,
+        uint128 liquidity,
+        bool roundUp
+    ) internal {
+        uint256 a1 = oracle.amount1Delta(pa, pb, liquidity, roundUp);
         emit log_named_string("name", string.concat("a1/", name));
         emit log_named_uint("pa", pa);
         emit log_named_uint("pb", pb);
         emit log_named_uint("liquidity", uint256(liquidity));
+        emit log_named_bool("round_up", roundUp);
         emit log_named_uint("amount1", a1);
     }
 
@@ -104,12 +124,12 @@ contract MathOracleTest is Test {
         // Round-trip: amounts_for_liquidity -> liquidity_for_amounts.
         // These vectors verify the Solidity implementation is its own
         // inverse within integer rounding error.
-        uint256 a0_1e18 = oracle.amount0Delta(pa, pb, 1e18);
-        uint256 a1_1e18 = oracle.amount1Delta(pa, pb, 1e18);
+        uint256 a0_1e18 = oracle.amount0Delta(pa, pb, 1e18, false);
+        uint256 a1_1e18 = oracle.amount1Delta(pa, pb, 1e18, false);
         _emitLiquidityForAmounts("round_trip_from_1e18", p, pa, pb, a0_1e18, a1_1e18);
 
-        uint256 a0_1e6 = oracle.amount0Delta(pa, pb, 1e6);
-        uint256 a1_1e6 = oracle.amount1Delta(pa, pb, 1e6);
+        uint256 a0_1e6 = oracle.amount0Delta(pa, pb, 1e6, false);
+        uint256 a1_1e6 = oracle.amount1Delta(pa, pb, 1e6, false);
         _emitLiquidityForAmounts("round_trip_from_1e6", p, pa, pb, a0_1e6, a1_1e6);
     }
 

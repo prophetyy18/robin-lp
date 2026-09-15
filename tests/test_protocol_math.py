@@ -168,10 +168,11 @@ def test_amount_deltas_match_oracle(vector: dict[str, Any]) -> None:
     pa = _u(vector["sqrt_price_a_x96"])
     pb = _u(vector["sqrt_price_b_x96"])
     liq = _u(vector["liquidity"])
+    round_up = vector.get("round_up", False)
     if "amount0" in vector:
-        assert get_amount0_delta(pa, pb, liq) == _u(vector["amount0"])
+        assert get_amount0_delta(pa, pb, liq, round_up=round_up) == _u(vector["amount0"])
     elif "amount1" in vector:
-        assert get_amount1_delta(pa, pb, liq) == _u(vector["amount1"])
+        assert get_amount1_delta(pa, pb, liq, round_up=round_up) == _u(vector["amount1"])
     else:
         pytest.fail(f"vector {vector['name']!r} has neither amount0 nor amount1")
 

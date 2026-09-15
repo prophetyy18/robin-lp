@@ -22,23 +22,25 @@ contract MathOracle {
     }
 
     // -------------------------------------------------------------------
-    // SqrtPriceMath: amount0 / amount1 from liquidity (rounding down)
+    // SqrtPriceMath: amount0 / amount1 from liquidity (roundUp selectable)
     // -------------------------------------------------------------------
 
     function amount0Delta(
         uint160 sqrtPriceAX96,
         uint160 sqrtPriceBX96,
-        uint128 liquidity
+        uint128 liquidity,
+        bool roundUp
     ) external pure returns (uint256) {
-        return SqrtPriceMath.getAmount0Delta(sqrtPriceAX96, sqrtPriceBX96, liquidity, false);
+        return SqrtPriceMath.getAmount0Delta(sqrtPriceAX96, sqrtPriceBX96, liquidity, roundUp);
     }
 
     function amount1Delta(
         uint160 sqrtPriceAX96,
         uint160 sqrtPriceBX96,
-        uint128 liquidity
+        uint128 liquidity,
+        bool roundUp
     ) external pure returns (uint256) {
-        return SqrtPriceMath.getAmount1Delta(sqrtPriceAX96, sqrtPriceBX96, liquidity, false);
+        return SqrtPriceMath.getAmount1Delta(sqrtPriceAX96, sqrtPriceBX96, liquidity, roundUp);
     }
 
     // -------------------------------------------------------------------

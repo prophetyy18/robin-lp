@@ -52,8 +52,6 @@ from robinhood_lp.protocol.math import (
     get_tick_at_sqrt_price,
     max_usable_tick,
     min_usable_tick,
-    price_to_sqrt_price_x96,
-    sqrt_price_x96_to_price,
 )
 from robinhood_lp.protocol.run_mode import RunMode
 
@@ -92,8 +90,6 @@ __all__ = [
     "min_usable_tick",
     "pool_id_to_bytes",
     "pool_id_to_int",
-    "price_to_sqrt_price_x96",
-    "sqrt_price_x96_to_price",
 ]
 
 __version__: str = "0.0.0"

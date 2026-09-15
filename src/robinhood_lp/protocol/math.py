@@ -21,9 +21,15 @@ Rounding and bounds (carried verbatim from V4):
 - All intermediate values stay within uint256 / int256 by Solidity's
   bit layout; Python's arbitrary-precision ints replicate the
   exact same arithmetic without overflow.
-- ``getAmount0Delta`` / ``getAmount1Delta`` use ``roundUp=false`` here
-  (the canonical Pool ledger uses floor); the oracle vector file
-  records the floor value.
+- ``getAmount0Delta`` / ``getAmount1Delta`` accept ``round_up`` and
+  select between Solidity's floor and ceiling branches. The V4
+  reference is ``SqrtPriceMath.sol``; the pinned oracle in
+  ``tools/oracle/`` emits one vector per rounding direction per
+  function.
+
+The display/Decimal boundary lives in
+``src/robinhood_lp/presentation/prices.py`` (ADR-009). The protocol
+package itself is float-free; do not add float conversions here.
 """
 
 from __future__ import annotations
@@ -305,10 +311,23 @@ def _require_sorted_pa_pb(pa: int, pb: int) -> tuple[int, int]:
     return pa, pb
 
 
-def get_amount0_delta(sqrt_price_a_x96: int, sqrt_price_b_x96: int, liquidity: int) -> int:
-    """Compute ``amount0`` for a liquidity position, rounded *down*.
+def get_amount0_delta(
+    sqrt_price_a_x96: int,
+    sqrt_price_b_x96: int,
+    liquidity: int,
+    *,
+    round_up: bool = False,
+) -> int:
+    """Compute ``amount0`` for a liquidity position.
 
-    Mirrors ``SqrtPriceMath.sol::getAmount0Delta(p_a, p_b, liquidity, roundUp=false)``.
+    Mirrors ``SqrtPriceMath.sol::getAmount0Delta(p_a, p_b, liquidity, roundUp)``.
+
+    When ``round_up`` is ``False`` (default) the result is the
+    Solidity floor value; when ``True`` the result is the ceiling.
+    The caller never has to add 1 to a floor result to obtain the
+    ceiling: pass ``round_up=True`` instead.
+
+    Domain (V4 uint160/uint128): ``pa < pb``, ``0 <= liquidity < 2**128``.
     """
     pa, pb = _require_sorted_pa_pb(sqrt_price_a_x96, sqrt_price_b_x96)
     if liquidity < 0:
@@ -316,20 +335,37 @@ def get_amount0_delta(sqrt_price_a_x96: int, sqrt_price_b_x96: int, liquidity: i
     if liquidity >= (1 << 128):
         raise ValueError(f"liquidity must fit in uint128, got {liquidity}")
 
-    # amount0 = L * (pb - pa) * Q96 / (pa * pb), rounded down.
+    # amount0 = L * (pb - pa) * Q96 / (pa * pb)
     # Multiply first to avoid losing precision; the intermediate
     # fits in 512 bits in Python (arbitrary precision).
     numerator1 = liquidity << 96  # Q128 -> Q? * 2^96
     numerator2 = pb - pa
-    # Use floor division; matches SqrtPriceMath.getAmount0Delta with roundUp=false.
-    amount0 = (numerator1 * numerator2) // (pa * pb)
+    denominator = pa * pb
+    if round_up:
+        # Solidity's mulDivRoundingUp: numerator + denominator - 1 before floor division.
+        amount0 = (numerator1 * numerator2 + denominator - 1) // denominator
+    else:
+        amount0 = (numerator1 * numerator2) // denominator
     return amount0
 
 
-def get_amount1_delta(sqrt_price_a_x96: int, sqrt_price_b_x96: int, liquidity: int) -> int:
-    """Compute ``amount1`` for a liquidity position, rounded *down*.
+def get_amount1_delta(
+    sqrt_price_a_x96: int,
+    sqrt_price_b_x96: int,
+    liquidity: int,
+    *,
+    round_up: bool = False,
+) -> int:
+    """Compute ``amount1`` for a liquidity position.
 
-    Mirrors ``SqrtPriceMath.sol::getAmount1Delta(p_a, p_b, liquidity, roundUp=false)``.
+    Mirrors ``SqrtPriceMath.sol::getAmount1Delta(p_a, p_b, liquidity, roundUp)``.
+
+    When ``round_up`` is ``False`` (default) the result is the
+    Solidity floor value; when ``True`` the result is the ceiling.
+    The caller never has to add 1 to a floor result to obtain the
+    ceiling: pass ``round_up=True`` instead.
+
+    Domain (V4 uint160/uint128): ``pa < pb``, ``0 <= liquidity < 2**128``.
     """
     pa, pb = _require_sorted_pa_pb(sqrt_price_a_x96, sqrt_price_b_x96)
     if liquidity < 0:
@@ -337,9 +373,12 @@ def get_amount1_delta(sqrt_price_a_x96: int, sqrt_price_b_x96: int, liquidity: i
     if liquidity >= (1 << 128):
         raise ValueError(f"liquidity must fit in uint128, got {liquidity}")
 
-    # amount1 = L * (pb - pa) / Q96, rounded down.
-    amount1 = (liquidity * (pb - pa)) >> 96
-    return amount1
+    # amount1 = L * (pb - pa) / Q96
+    # Solidity does mulDiv(liquidity, pb - pa, Q96) and (when roundUp)
+    # mulDivRoundingUp(liquidity, pb - pa, Q96). The Python equivalent
+    # is the Q96 floor shift plus, on round_up, the pre-shift carry.
+    product = liquidity * (pb - pa)
+    return (product + (1 << 96) - 1) >> 96 if round_up else product >> 96
 
 
 # ---------------------------------------------------------------------------
@@ -400,25 +439,12 @@ def _liquidity_for_amount1(sqrt_price_x96: int, pa: int, pb: int, amount1: int) 
 
 
 # ---------------------------------------------------------------------------
-# Display helpers (boundary only; ADR-004)
+# Display boundary (ADR-009)
 # ---------------------------------------------------------------------------
-
-
-def sqrt_price_x96_to_price(sqrt_price_x96: int) -> float:
-    """Convert a sqrtPriceX96 to a *display* price (price of currency1
-    in units of currency0). Float; for display only.
-
-    The integer boundary value is what other modules should use; this
-    helper exists for CLI / report output and is never used inside
-    protocol/replay/strategy code.
-    """
-    return (sqrt_price_x96 / (1 << 96)) ** 2
-
-
-def price_to_sqrt_price_x96(price: float) -> int:
-    """Inverse of :func:`sqrt_price_x96_to_price`. Float input,
-    uint160 output. Display-only."""
-    return int((price**0.5) * (1 << 96))
+# The protocol package is float-free. The single ``Decimal``-typed display
+# helper lives in :mod:`robinhood_lp.presentation.prices` and is the only
+# module in V1 permitted to convert between the integer protocol domain
+# and the ``Decimal`` display domain.
 
 
 __all__ = [
@@ -439,6 +465,4 @@ __all__ = [
     "get_tick_at_sqrt_price",
     "max_usable_tick",
     "min_usable_tick",
-    "price_to_sqrt_price_x96",
-    "sqrt_price_x96_to_price",
 ]

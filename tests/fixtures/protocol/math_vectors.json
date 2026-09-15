@@ -38,42 +38,96 @@
       "sqrt_price_a_x96": "78833030112140176575862854579",
       "sqrt_price_b_x96": "79625275426524748796330556128",
       "liquidity": "1000000000000000000",
+      "round_up": false,
       "amount0": "9999541693800299"
+    },
+    {
+      "name": "amount0_liq_1e18_range_pm100_round_up",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "liquidity": "1000000000000000000",
+      "round_up": true,
+      "amount0": "9999541693800300"
     },
     {
       "name": "amount0_liq_1e6_range_pm100",
       "sqrt_price_a_x96": "78833030112140176575862854579",
       "sqrt_price_b_x96": "79625275426524748796330556128",
       "liquidity": "1000000",
+      "round_up": false,
       "amount0": "9999"
+    },
+    {
+      "name": "amount0_liq_1e6_range_pm100_round_up",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "liquidity": "1000000",
+      "round_up": true,
+      "amount0": "10000"
     },
     {
       "name": "amount1_liq_1e18_range_pm100",
       "sqrt_price_a_x96": "78833030112140176575862854579",
       "sqrt_price_b_x96": "79625275426524748796330556128",
       "liquidity": "1000000000000000000",
+      "round_up": false,
       "amount1": "9999541693800299"
+    },
+    {
+      "name": "amount1_liq_1e18_range_pm100_round_up",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "liquidity": "1000000000000000000",
+      "round_up": true,
+      "amount1": "9999541693800300"
     },
     {
       "name": "amount1_liq_1e6_range_pm100",
       "sqrt_price_a_x96": "78833030112140176575862854579",
       "sqrt_price_b_x96": "79625275426524748796330556128",
       "liquidity": "1000000",
+      "round_up": false,
       "amount1": "9999"
+    },
+    {
+      "name": "amount1_liq_1e6_range_pm100_round_up",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "liquidity": "1000000",
+      "round_up": true,
+      "amount1": "10000"
     },
     {
       "name": "amount0_liq_1e18_range_0_to_100",
       "sqrt_price_a_x96": "79228162514264337593543950336",
       "sqrt_price_b_x96": "79625275426524748796330556128",
       "liquidity": "1000000000000000000",
+      "round_up": false,
       "amount0": "4987272070749096"
+    },
+    {
+      "name": "amount0_liq_1e18_range_0_to_100_round_up",
+      "sqrt_price_a_x96": "79228162514264337593543950336",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "liquidity": "1000000000000000000",
+      "round_up": true,
+      "amount0": "4987272070749097"
     },
     {
       "name": "amount1_liq_1e18_range_neg100_to_0",
       "sqrt_price_a_x96": "78833030112140176575862854579",
       "sqrt_price_b_x96": "79228162514264337593543950336",
       "liquidity": "1000000000000000000",
+      "round_up": false,
       "amount1": "4987272070749096"
+    },
+    {
+      "name": "amount1_liq_1e18_range_neg100_to_0_round_up",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79228162514264337593543950336",
+      "liquidity": "1000000000000000000",
+      "round_up": true,
+      "amount1": "4987272070749097"
     }
   ],
   "liquidity_for_amounts": [
