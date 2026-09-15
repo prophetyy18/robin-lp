@@ -171,6 +171,7 @@ superseding decisions are new ADRs that explicitly reference the prior one.
 | ADR-006 | Dependency direction between layers | accepted |
 | ADR-007 | Continuous integration provider | accepted |
 | ADR-008 | Binding document precedence | accepted |
+| ADR-009 | Display / Decimal boundary | Owner (Direction 1) | 2026-09-15 |
 
 ## 5. Open decisions (not blocking research)
 
