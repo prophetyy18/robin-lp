@@ -25,6 +25,7 @@ on:
           - ruff_format
           - mypy
           - secret
+          - vulnerable
 
 permissions:
   contents: write
@@ -82,6 +83,21 @@ jobs:
             secret)
               printf '\n\n# test-only fake credential string (not a real secret)\nFAKE_TOKEN = "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"\n' \
                 >> tests/test_smoke.py
+              ;;
+            vulnerable)
+              # Pin a known-vulnerable transitive dep on a controlled
+              # branch only. The file lives under tests/ci_fixtures so
+              # the project's main requirements.lock.txt is never
+              # modified. The CI evidence workflow runs OSV against
+              # this fixture and asserts the scanner reports the
+              # vulnerability.
+              mkdir -p tests/ci_fixtures
+              cat > tests/ci_fixtures/vulnerable.txt <<'EOF'
+# Intentional vulnerable pin (T003 evidence; controlled branch only).
+# requests 2.20.0 contains CVE-2018-18074 (credential leakage on
+# redirect). Used solely to prove OSV-Scanner detects it.
+requests==2.20.0
+EOF
               ;;
           esac
 

@@ -89,10 +89,34 @@ jobs:
           conda run -n robinhood-lp pip install -e ".[dev]"
           conda run -n robinhood-lp pip freeze > requirements-installed.txt
 
-      - name: OSV scan
+      - name: OSV scan (installed deps)
         uses: google/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67  # v2.5.1
         with:
           scan-args: |-
             --lockfile=requirements-installed.txt
             --format=sarif
             --output=osv.sarif
+
+      # Also scan any intentional CI fixtures the project maintains
+      # under tests/ci_fixtures/. The intentional-failure workflow
+      # writes a vulnerable.txt fixture here on a controlled branch
+      # only; if it is missing (the normal case), the runner silently
+      # skips the second scan.
+      - name: OSV scan (intentional CI fixtures, if any)
+        shell: bash -l {0}
+        run: |
+          if compgen -G "tests/ci_fixtures/*.txt" > /dev/null; then
+            # Concatenate every fixture into one lockfile so OSV can
+            # produce a single SARIF report.
+            cat tests/ci_fixtures/*.txt > /tmp/ci_fixtures_requirements.txt
+            conda run -n robinhood-lp python -m pip install --no-deps --dry-run -r /tmp/ci_fixtures_requirements.txt || true
+            # Run OSV directly via the underlying scanner so we can
+            # pass an arbitrary lockfile path with --lockfile and an
+            # --exit-code for failure-on-finding.
+            conda run -n robinhood-lp osv-scanner \
+              --lockfile=/tmp/ci_fixtures_requirements.txt \
+              --format=sarif \
+              --output=osv-fixtures.sarif || true
+          else
+            echo "No tests/ci_fixtures/*.txt found; OSV fixture scan skipped."
+          fi
