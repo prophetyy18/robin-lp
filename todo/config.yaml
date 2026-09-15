@@ -11,8 +11,8 @@
     "allow_model_fallback": false
   },
   "active_phase": "P02",
-  "active_task": "T020",
-  "workflow_state": "APPROVED",
+  "active_task": "T021",
+  "workflow_state": "READY",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -145,7 +145,7 @@
     },
     "T021": {
       "phase": "P02",
-      "status": "PLANNED",
+      "status": "READY",
       "depends_on": [
         "T001"
       ],
