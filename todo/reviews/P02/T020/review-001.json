@@ -1,0 +1,312 @@
+{
+  "task_id": "T020",
+  "base_commit": "feef295e6a167b42039be7e39a8f0678175926ce",
+  "candidate_commit": "9ec6783c18567c7998ed166e8a5855aefc95af1c",
+  "verdict": "PASS",
+  "checks": [
+    {
+      "id": "candidate_commit_isolation",
+      "status": "PASS",
+      "finding": "git diff --name-only feef295..9ec6783 enumerates exactly two paths: todo/config.yaml and todo/evidence/P02/T020/attempt-001-developer.json. Both are controller-managed bookkeeping (state transition to AWAITING_REVIEW, attempt=1, base_commit set, plus the developer evidence handoff written by the workflow's finish-develop gate). No protected Intent, Spec, task contract, or workflow-tooling file changed (the controller's protected-snapshot diff at finish-develop would have failed the run if any had). The implementation in src/robinhood_lp/rpc/adapter.py and tests/test_rpc_adapter.py is unchanged from the base commit feef295 because the Developer correctly relied on the workflow's pre-existing-unverified-implementation migration rule: 'For each PLANNED task whose contract already has a pre-existing implementation, the Manager activates that task normally... The Developer Agent receives the current main HEAD as its base commit, reads and cites the pre-existing code, and may reuse or extend it rather than rewrite it from scratch.' The candidate worktree therefore carries the implementation forward by inheritance, and the Reviewer inspected the full worktree (HEAD = 9ec6783) against the contract.",
+      "evidence": [
+        "git diff --name-only feef295..9ec6783 -> ['todo/config.yaml', 'todo/evidence/P02/T020/attempt-001-developer.json']",
+        "git diff --stat feef295..9ec6783 -> '2 files changed, 45 insertions(+), 4 deletions(-)'",
+        "git log --oneline feef295..9ec6783 -> single commit '9ec6783 feat(t020): candidate attempt 1'",
+        "git log --oneline -- src/robinhood_lp/rpc/adapter.py tests/test_rpc_adapter.py | head -3 shows commit 7b093a3 'feat(phase-2): T020 bounded read-only RPC adapter' predates feef295 and is intact on the candidate's history",
+        "git status --porcelain in the review worktree is empty (clean tree at candidate SHA)"
+      ]
+    },
+    {
+      "id": "diff_minimal_and_scoped",
+      "status": "PASS",
+      "finding": "The diff is minimal (2 files, 45 insertions) and scoped to controller-managed state. todo/config.yaml changes are limited to active_task=READY->AWAITING_REVIEW, T020 status=READY->AWAITING_REVIEW, attempt=0->1, base_commit=null->feef295, candidate_commit=null (will be filled on APPROVED). The evidence file is the Developer's structured handoff. No implementation files were touched in this attempt; the candidate worktree carries forward the pre-existing src/robinhood_lp/rpc/adapter.py and tests/test_rpc_adapter.py that satisfy the contract.",
+      "evidence": [
+        "Full git diff feef295..9ec6783: todo/config.yaml transitions workflow_state and T020 status/attempt/base_commit; todo/evidence/P02/T020/attempt-001-developer.json is the 41-line evidence payload",
+        "src/ tree in the candidate worktree byte-identical to src/ tree at feef295 (git diff feef295..9ec6783 -- src is empty)",
+        "tests/ tree in the candidate worktree byte-identical to tests/ tree at feef295 (git diff feef295..9ec6783 -- tests is empty)"
+      ]
+    },
+    {
+      "id": "baseline_passes_twice",
+      "status": "PASS",
+      "finding": "Full pytest, ruff check, ruff format --check, and mypy all pass on two consecutive runs against the candidate worktree. pytest reports '346 passed, 7 skipped in 1.65s' (run 1) and '346 passed, 7 skipped in 1.65s' (run 2). Skips are pre-existing and contract-compliant: 1 abi-annotation skip in tests/test_abi_artifacts.py:152; 3 forge-missing skips in tests/test_oracle_drift.py (Foundry not on PATH in this sandbox); 2 gpg-verification skips in tests/test_oracle_review_provenance.py:232 and :245 (gpg reserved for a later task); 1 pre-existing tests/test_protocol_ids.py:289 skip on the 'reordered_inputs' vector. ruff check reports 'All checks passed!'; ruff format --check reports '168 files already formatted'; mypy src tests reports 'Success: no issues found in 46 source files'. Test collection count is 353 (run 1) and 353 (run 2), unchanged from base. None of the skips mask a T020 acceptance path: tests/test_rpc_adapter.py and tests/test_chain_capability.py pass in full (36/36).",
+      "evidence": [
+        "run 1: PYTHONPATH=src python -m pytest -q -> '346 passed, 7 skipped in 1.65s'",
+        "run 2: PYTHONPATH=src python -m pytest -q -> '346 passed, 7 skipped in 1.65s'",
+        "PYTHONPATH=src python -m pytest tests/test_rpc_adapter.py tests/test_chain_capability.py -v -> '36 passed in 0.13s' (28 RPC adapter + 8 chain capability)",
+        "python -m ruff check -> 'All checks passed!'",
+        "python -m ruff format --check -> '168 files already formatted'",
+        "PYTHONPATH=src python -m mypy src tests -> 'Success: no issues found in 46 source files'",
+        "PYTHONPATH=src python -m pytest --collect-only -q -> '353 tests collected in 0.20s'"
+      ]
+    },
+    {
+      "id": "deliverable_bounded_eth_getLogs",
+      "status": "PASS",
+      "finding": "src/robinhood_lp/rpc/adapter.py eth_get_logs (line 364-407) is the bounded eth_getLogs entry point. It takes (from_block, to_block, address, topics), validates from_block <= to_block, builds the params object with explicit fromBlock/toBlock/address/topics on every call (so no remote filter state is reused), then drives _call_with_failover. On _RangeTooLarge it splits the range via _RangeSplitter and recurses by pushing the two halves onto an explicit stack (line 379-401). The adapter surfaces 'cannot be split further at [lo, hi]' as RpcRetryExhausted when the splitter cannot halve further. Each split increments metrics.range_splits. Duplicate / out-of-order responses are deduplicated and sorted by (blockNumber, transactionIndex, logIndex) in _dedupe_and_sort_logs (line 649-681). Tests test_logs_are_sorted_and_duplicates_dropped, test_log_entry_with_missing_fields_is_rejected, test_single_block_oversize_raises_clear_error, test_range_split_eventually_returns_all_logs all pass.",
+      "evidence": [
+        "src/robinhood_lp/rpc/adapter.py line 364-407: eth_get_logs builds params with explicit fromBlock/toBlock, catches _RangeTooLarge, splits via _RangeSplitter, accumulates, returns _dedupe_and_sort_logs",
+        "src/robinhood_lp/rpc/adapter.py line 257-283: _RangeSplitter.split returns (mid, to_block) for halving; None when to_block == from_block (single-block collapse)",
+        "src/robinhood_lp/rpc/adapter.py line 649-681: _dedupe_and_sort_logs dedupes and sorts by (blockNumber, transactionIndex, logIndex)",
+        "tests/test_rpc_adapter.py:331-356 test_logs_are_sorted_and_duplicates_dropped / test_log_entry_with_missing_fields_is_rejected",
+        "tests/test_rpc_adapter.py:401-436 test_single_block_oversize_raises_clear_error / test_range_split_eventually_returns_all_logs"
+      ]
+    },
+    {
+      "id": "deliverable_block_header_receipt",
+      "status": "PASS",
+      "finding": "Three explicit wrappers cover block/header/receipt reads. eth_get_block_by_number (line 349-362) calls eth_getBlockByNumber with [to_hex(block_number), hydrated], returns the hydrated block+header object (hydrated=True) or header-only object (hydrated=False). eth_get_transaction_receipt (line 420-428) calls eth_getTransactionReceipt with [tx_hash], returns the receipt object or None. eth_block_number (line 345-347) returns the head block number via eth_blockNumber. Tests test_block_number_round_trip, test_eth_call_is_block_pinned, test_get_code_returns_hex, test_get_transaction_receipt_returns_object, test_eth_call_non_hex_result_is_rejected all pass.",
+      "evidence": [
+        "src/robinhood_lp/rpc/adapter.py line 345-347: eth_block_number via 'eth_blockNumber'",
+        "src/robinhood_lp/rpc/adapter.py line 349-362: eth_get_block_by_number with [to_hex(block_number), hydrated]",
+        "src/robinhood_lp/rpc/adapter.py line 420-428: eth_get_transaction_receipt with [tx_hash]",
+        "tests/test_rpc_adapter.py:124-135 test_block_number_round_trip; :579-591 test_get_code_returns_hex / test_get_transaction_receipt_returns_object"
+      ]
+    },
+    {
+      "id": "deliverable_block_pinned_eth_call",
+      "status": "PASS",
+      "finding": "eth_call (line 409-418) takes (to, data, block_number), builds params=[{to, data}, to_hex(block_number)] so the call object and the explicit block tag travel together. The hex result is validated by _ensure_hex_string (line 641-646) which rejects non-strings and strings lacking the 0x prefix with RpcProtocolError. Tests test_eth_call_is_block_pinned (asserts sent payload is {'method':'eth_call','params':[{to,data},'0x2a']}) and test_eth_call_non_hex_result_is_rejected both pass.",
+      "evidence": [
+        "src/robinhood_lp/rpc/adapter.py line 409-418: eth_call builds [call_object, block_tag] params and returns _ensure_hex_string",
+        "src/robinhood_lp/rpc/adapter.py line 641-646: _ensure_hex_string validates 0x-prefix",
+        "tests/test_rpc_adapter.py:555-571 test_eth_call_is_block_pinned / test_eth_call_non_hex_result_is_rejected"
+      ]
+    },
+    {
+      "id": "deliverable_timeouts",
+      "status": "PASS",
+      "finding": "Per-request timeout is configurable via RpcConfig.request_timeout_seconds (default 30.0) and enforced in _call_single via asyncio.wait_for(transport, timeout=request_timeout_seconds) (line 526-529). TimeoutError is caught and re-raised as TransportError with a message naming the timeout value, so the retry loop classifies it as a transient transport failure. RpcConfig rejects non-positive timeouts (test_config_rejects_negative_timeout). The default httpx transport (line 700) also installs an httpx.AsyncClient(timeout=30.0) so end-to-end TCP timeouts surface in the same place.",
+      "evidence": [
+        "src/robinhood_lp/rpc/adapter.py line 211: request_timeout_seconds default 30.0; line 226-227 rejects non-positive",
+        "src/robinhood_lp/rpc/adapter.py line 526-533: asyncio.wait_for + TimeoutError -> TransportError",
+        "src/robinhood_lp/rpc/adapter.py line 700: httpx.AsyncClient(timeout=30.0)",
+        "tests/test_rpc_adapter.py:191-200 test_asyncio_timeout_is_retried; :514-519 test_config_rejects_negative_timeout"
+      ]
+    },
+    {
+      "id": "deliverable_classified_retries_with_jitter",
+      "status": "PASS",
+      "finding": "_call_with_retry (line 471-512) implements classified retries with full-jitter exponential backoff. Retry classes: TransportError and _TransientResponseError (line 572 _TRANSIENT_RPC_CODES = {-32603}) are retried; RpcProtocolError and non-transient RpcResponseError (any code not in {-32603}) are not retried. _RangeTooLarge is re-raised to the caller. NON_RETRYABLE_METHODS (line 73-82, containing eth_call, eth_chainId, eth_getCode) bypasses the retry loop entirely. Backoff is exponential doubling (initial_backoff_seconds -> max_backoff_seconds) with full jitter (self._rng.uniform(0, backoff)) added on top (line 502-505). Tests test_429_is_retried_then_succeeds, test_5xx_is_retried_then_succeeds, test_asyncio_timeout_is_retried, test_malformed_json_does_not_retry, test_response_with_both_error_and_result_does_not_retry, test_non_transient_rpc_error_does_not_retry, test_eth_call_is_not_retried_on_5xx all pass.",
+      "evidence": [
+        "src/robinhood_lp/rpc/adapter.py line 471-512: _call_with_retry loop; TransportError and _TransientResponseError retried; RpcProtocolError and non-transient RpcResponseError raised",
+        "src/robinhood_lp/rpc/adapter.py line 73-82: NON_RETRYABLE_METHODS = {eth_call, eth_chainId, eth_getCode}",
+        "src/robinhood_lp/rpc/adapter.py line 572: _TRANSIENT_RPC_CODES = {-32603}",
+        "src/robinhood_lp/rpc/adapter.py line 502-505: exponential backoff with full jitter",
+        "tests/test_rpc_adapter.py:162-200 retried-on-transient; :267-294 not-retried-on-malformed; :302-312 not-retried-on-eth_call"
+      ]
+    },
+    {
+      "id": "deliverable_endpoint_failover",
+      "status": "PASS",
+      "finding": "RpcConfig.active_endpoints (line 237-248) returns active endpoints in stable failover order sorted by weight (lower weight first; ties keep declaration order). RpcEndpoint.__post_init__ (line 140-148) translates weight<0 into disabled=True. RpcConfig rejects an all-disabled endpoint list (test_config_rejects_all_endpoints_disabled). _call_with_failover (line 436-469) iterates the sorted endpoint list; on _RetryableEndpointFailure (raised by _call_with_retry when the retry budget is exhausted) the metrics.failovers counter is incremented, an INFO log is emitted naming only ep.name (no URL), and the loop continues. If every endpoint raises _RetryableEndpointFailure the outer loop raises RpcRetryExhausted naming the method and the last exception. Non-retryable RpcError on an endpoint is re-raised immediately (failover would not fix a malformed call). Tests test_retry_exhausted_fails_over_to_next_endpoint and test_all_endpoints_fail_raises_retry_exhausted pass.",
+      "evidence": [
+        "src/robinhood_lp/rpc/adapter.py line 125-148: RpcEndpoint dataclass with weight/disabled",
+        "src/robinhood_lp/rpc/adapter.py line 237-248: RpcConfig.active_endpoints sorted by weight",
+        "src/robinhood_lp/rpc/adapter.py line 436-469: _call_with_failover loop with metrics.failovers increment and INFO log",
+        "tests/test_rpc_adapter.py:203-259 failover/exhaustion tests; :479-498 disabled-endpoint tests"
+      ]
+    },
+    {
+      "id": "deliverable_adaptive_range_splitting",
+      "status": "PASS",
+      "finding": "_RangeSplitter (line 257-283) halves the range; mid = (from_block + to_block) // 2; if mid collapses onto from_block the splitter returns None (single-block oversize floor). Each split increments metrics.range_splits. _call_single detects 'range too large' messages via _is_range_too_large (line 575-593, conservative multi-phrase match) and raises _RangeTooLarge so eth_get_logs can split. Tests test_single_block_oversize_raises_clear_error and test_range_split_eventually_returns_all_logs exercise the floor-collapse and successful-split paths.",
+      "evidence": [
+        "src/robinhood_lp/rpc/adapter.py line 257-283: _RangeSplitter.split returns (mid, to_block) or None on floor collapse",
+        "src/robinhood_lp/rpc/adapter.py line 575-593: _is_range_too_large multi-phrase detector",
+        "src/robinhood_lp/rpc/adapter.py line 549-554: raises _RangeTooLarge in _call_single on detected message",
+        "tests/test_rpc_adapter.py:401-436 single-block oversize and range split"
+      ]
+    },
+    {
+      "id": "deliverable_capability_probe",
+      "status": "PASS",
+      "finding": "capability_probe (line 328-343) iterates active endpoints, calls _call_single(ep, 'eth_chainId', []) per endpoint, and builds a per-endpoint dict with 'name' and either 'chain_id' or 'error' (catching RpcError). The probe does not abort on a per-endpoint failure; it records the error and continues. Tests test_capability_probe_surfaces_per_endpoint_results and test_capability_probe_does_not_failover_on_error pass. The capability probe's eth_blockNumber mention in the docstring (line 331) is stale — the implementation only fetches eth_chainId; eth_blockNumber is fetched separately by T024's chain capability reporter when it needs the latest block. This is a documentation-only nuance flagged by the Developer as a residual risk; tests assert chain_id and error keys only, and the docstring does not name a deliverable.",
+      "evidence": [
+        "src/robinhood_lp/rpc/adapter.py line 328-343: capability_probe loop catches RpcError per endpoint",
+        "tests/test_rpc_adapter.py:364-393 / :527-547 capability probe tests",
+        "tests/test_chain_capability.py:98-131 / :202-228 chain capability reporter uses _call_with_failover end-to-end across two endpoints"
+      ]
+    },
+    {
+      "id": "deliverable_redacted_metrics",
+      "status": "PASS",
+      "finding": "RpcMetrics (line 152-174) carries counts only: requests, successes, failures, retries, failovers, range_splits. summary() returns the six counters as a dict; no URL or credential substrings can leak through. _redact_url (line 187-198) strips user:password@ via the _CREDENTIAL_RE regex and urlunsplit, returning a URL with only scheme + host[:port] + path + query + fragment. Every transport-failure log path uses endpoint.name (never endpoint.url) — _call_with_failover logs endpoint.name (line 454), and the capability_probe dict keys are ep.name. Tests test_endpoint_credentials_never_appear_in_logs constructs an endpoint with URL 'https://alice:hunter2@primary.example/rpc', triggers TransportError('500'), asserts no log message contains 'alice' or 'hunter2'. The test passes.",
+      "evidence": [
+        "src/robinhood_lp/rpc/adapter.py line 152-174: RpcMetrics counters",
+        "src/robinhood_lp/rpc/adapter.py line 187-198: _redact_url strips user:password",
+        "src/robinhood_lp/rpc/adapter.py line 452-458: failover log uses endpoint.name, not URL",
+        "tests/test_rpc_adapter.py:444-471 test_endpoint_credentials_never_appear_in_logs"
+      ]
+    },
+    {
+      "id": "acceptance_mocked_tests_cover_429_5xx_timeout",
+      "status": "PASS",
+      "finding": "Three scripted-transport tests cover 429, 5xx, and asyncio.TimeoutError retry paths. test_429_is_retried_then_succeeds scripts [TransportError('429 ...'), _resp('0x10')] and asserts eth_block_number() == 16 with retries==1. test_5xx_is_retried_then_succeeds scripts [TransportError('503'), TransportError('502'), _resp('0x1')] and asserts retries==2. test_asyncio_timeout_is_retried scripts [TimeoutError(), _resp('0x2')] and asserts retries==1. All three pass. The default httpx transport at line 707-714 also raises TransportError on 429 and on 5xx, so the contract is enforced both for the injected-transport path (tests) and the real-transport path (default).",
+      "evidence": [
+        "tests/test_rpc_adapter.py:162-200 429/5xx/timeout tests",
+        "src/robinhood_lp/rpc/adapter.py line 707-714: default httpx transport raises TransportError on 429/5xx"
+      ]
+    },
+    {
+      "id": "acceptance_mocked_tests_cover_malformed_partial_responses",
+      "status": "PASS",
+      "finding": "Three scripted-transport tests cover malformed/partial response paths and assert retries==0. test_malformed_json_does_not_retry scripts a non-dict string response and asserts RpcProtocolError with retries==0. test_response_with_both_error_and_result_does_not_retry scripts a dict containing both 'result' and 'error' and asserts RpcProtocolError with retries==0. test_non_transient_rpc_error_does_not_retry scripts 10 _err(-32600, 'invalid params') responses and asserts RpcResponseError with retries==0. _call_single rejects non-dict responses (line 539), dicts with both fields (line 541-542), and dicts whose error.code is not in _TRANSIENT_RPC_CODES (line 555-557). All three tests pass.",
+      "evidence": [
+        "tests/test_rpc_adapter.py:267-294 malformed/partial tests",
+        "src/robinhood_lp/rpc/adapter.py line 539-557: response validation in _call_single"
+      ]
+    },
+    {
+      "id": "acceptance_mocked_tests_cover_duplicate_out_of_order_logs",
+      "status": "PASS",
+      "finding": "test_logs_are_sorted_and_duplicates_dropped scripts a page containing five entries with (block,tx,log) keys [(2,0,1),(1,0,0),(2,0,1),(3,5,0),(1,0,0)] and asserts the adapter returns exactly three logs in sorted order [(1,0,0),(2,0,1),(3,5,0)]. test_log_entry_with_missing_fields_is_rejected scripts a page containing one entry missing transactionIndex and logIndex and asserts RpcProtocolError. Both tests pass. The dedupe+sort happens in _dedupe_and_sort_logs (line 649-681) keyed on (blockNumber, transactionIndex, logIndex).",
+      "evidence": [
+        "tests/test_rpc_adapter.py:331-356 duplicate/out-of-order + missing-fields tests",
+        "src/robinhood_lp/rpc/adapter.py line 649-681: _dedupe_and_sort_logs"
+      ]
+    },
+    {
+      "id": "acceptance_mocked_tests_cover_inconsistent_heads",
+      "status": "PASS",
+      "finding": "test_capability_probe_surfaces_per_endpoint_results scripts primary returning chain_id '0x1' and backup raising TransportError('timeout') on eth_chainId; the probe returns {'primary': {'name':'primary','chain_id':'0x1'}, 'backup': {'name':'backup','error':'TransportError'}} — backup carries an 'error' key and no 'chain_id'. test_capability_probe_does_not_failover_on_error scripts primary raising TransportError('503') and backup returning chain_id '0x42'; the probe returns {'primary':{...,'error':'TransportError'},'backup':{...,'chain_id':'0x42'}} — primary's failure does not abort the probe. Both pass. The T024 chain-capability reporter (which consumes T020) adds 8 end-to-end tests covering happy path, wrong chain id, bytecode mismatch, inconsistent providers, JSON serialisability, and min_block_number violation (test_chain_capability.py:98-318), all passing.",
+      "evidence": [
+        "tests/test_rpc_adapter.py:364-393 / :527-547 capability probe tests",
+        "tests/test_chain_capability.py:98-318 (8 tests)"
+      ]
+    },
+    {
+      "id": "acceptance_mocked_tests_cover_single_block_oversize_failure",
+      "status": "PASS",
+      "finding": "test_single_block_oversize_raises_clear_error scripts a single _err(-32005, 'query returned more than 10000 results') repeated 10 times with max_block_range_per_request=1, then eth_get_logs(from_block=100, to_block=100, ...) and asserts RpcRetryExhausted with message matching r'cannot be split further at'. The splitter returns None when mid collapses onto from_block (single-block floor), and eth_get_logs surfaces that as RpcRetryExhausted naming the range (adapter.py line 394-397). The test passes.",
+      "evidence": [
+        "tests/test_rpc_adapter.py:401-413 test_single_block_oversize_raises_clear_error",
+        "src/robinhood_lp/rpc/adapter.py line 274-281: _RangeSplitter.split returns None on floor collapse",
+        "src/robinhood_lp/rpc/adapter.py line 392-397: eth_get_logs raises RpcRetryExhausted with 'cannot be split further at [lo, hi]'"
+      ]
+    },
+    {
+      "id": "acceptance_mocked_tests_cover_retry_exhaustion",
+      "status": "PASS",
+      "finding": "test_retry_exhausted_fails_over_to_next_endpoint scripts primary with three TransportError('500') and backup with one _resp('0x7'); retry_limit=2; the adapter returns 7 with failovers==1, primary attempts==3 (initial + 2 retries), backup attempts==1. test_all_endpoints_fail_raises_retry_exhausted scripts primary and backup with ten TransportError('500') each; retry_limit=1; the adapter raises RpcRetryExhausted. Both pass. The retry-exhaustion flow: _call_with_retry raises _RetryableEndpointFailure when attempt >= retry_limit (line 498-499 + 512); _call_with_failover catches it, increments metrics.failovers, and tries the next endpoint (line 450-459); if every endpoint exhausts the outer loop raises RpcRetryExhausted naming the method (line 465-468).",
+      "evidence": [
+        "tests/test_rpc_adapter.py:203-259 retry-exhausted / failover / all-fail tests",
+        "src/robinhood_lp/rpc/adapter.py line 498-512 retry exhaustion and _RetryableEndpointFailure",
+        "src/robinhood_lp/rpc/adapter.py line 450-468 failover and RpcRetryExhausted"
+      ]
+    },
+    {
+      "id": "acceptance_mocked_tests_cover_no_retry_of_non_idempotent_or_invalid",
+      "status": "PASS",
+      "finding": "test_eth_call_is_not_retried_on_5xx scripts ten TransportError('500') responses and asserts TransportError with requests==1 (no retries). The non-retryable classification is enforced two ways: (1) eth_call is in NON_RETRYABLE_METHODS (adapter.py line 78) so _call_with_retry short-circuits to _call_single with no retry loop (line 484-485); (2) NON_RETRYABLE_METHODS also covers eth_chainId and eth_getCode. For invalid calls (RpcResponseError with non-transient code, RpcProtocolError, malformed responses), _call_with_retry's `except RpcError: raise` branch (line 507-510) propagates without retry. Tests test_malformed_json_does_not_retry, test_response_with_both_error_and_result_does_not_retry, test_non_transient_rpc_error_does_not_retry, and test_eth_call_is_not_retried_on_5xx collectively cover the 'invalid' path; test_eth_call_is_not_retried_on_5xx covers the 'non-idempotent' path.",
+      "evidence": [
+        "tests/test_rpc_adapter.py:302-312 test_eth_call_is_not_retried_on_5xx",
+        "src/robinhood_lp/rpc/adapter.py line 73-82 NON_RETRYABLE_METHODS",
+        "src/robinhood_lp/rpc/adapter.py line 484-485 short-circuit for non-retryable",
+        "src/robinhood_lp/rpc/adapter.py line 507-510 'except RpcError: raise' for invalid"
+      ]
+    },
+    {
+      "id": "must_not_expose_generic_arbitrary_RPC",
+      "status": "PASS",
+      "finding": "ALLOWED_METHODS (adapter.py line 57-68) is a frozenset of exactly eight methods: eth_blockNumber, eth_getBlockByNumber, eth_getBlockByHash, eth_getLogs, eth_getTransactionReceipt, eth_call, eth_chainId, eth_getCode. _call_with_failover (line 443-444) and _call_single (line 516-517) both raise RpcMethodNotAllowedError before any transport I/O for any method outside the allow-list. test_method_not_allowed_is_rejected exercises 'eth_sendRawTransaction' and asserts RpcMethodNotAllowedError. No arbitrary-RPC escape hatch is exported; __all__ in src/robinhood_lp/rpc/__init__.py contains only the bounded surface.",
+      "evidence": [
+        "src/robinhood_lp/rpc/adapter.py line 57-68 ALLOWED_METHODS = frozenset({eth_blockNumber, eth_getBlockByNumber, eth_getBlockByHash, eth_getLogs, eth_getTransactionReceipt, eth_call, eth_chainId, eth_getCode})",
+        "src/robinhood_lp/rpc/adapter.py line 443-444 / 516-517: allow-list check before transport",
+        "src/robinhood_lp/rpc/__init__.py: only bounded exports",
+        "tests/test_rpc_adapter.py:138-144 test_method_not_allowed_is_rejected"
+      ]
+    },
+    {
+      "id": "must_not_remote_filter_state_for_durability",
+      "status": "PASS",
+      "finding": "Every eth_getLogs request constructs a fresh filter object with explicit fromBlock/toBlock/address/topics on every call (adapter.py line 382-389). The adapter holds no long-lived filter id, makes no eth_newFilter / eth_getFilterChanges call, and exposes no surface for filter-based reads. ALLOWED_METHODS does not include any filter-management method.",
+      "evidence": [
+        "src/robinhood_lp/rpc/adapter.py line 382-389: params = [{'fromBlock': to_hex(lo), 'toBlock': to_hex(hi), 'address': address, 'topics': topics}] constructed per call",
+        "ALLOWED_METHODS excludes eth_newFilter, eth_getFilterChanges, eth_getFilterLogs, eth_uninstallFilter"
+      ]
+    },
+    {
+      "id": "must_not_retry_forever",
+      "status": "PASS",
+      "finding": "The retry budget is bounded by RpcConfig.retry_limit (default 4). _call_with_retry loops 'for attempt in range(self._config.retry_limit + 1)' (adapter.py line 489), so the maximum number of attempts per endpoint is retry_limit + 1. When the budget is exhausted it raises _RetryableEndpointFailure and the outer failover loop tries the next endpoint; after the last endpoint also exhausts, the loop raises RpcRetryExhausted (line 465-469). There is no retry loop that can spin indefinitely. RpcConfig.__post_init__ rejects negative retry_limit (line 228-229).",
+      "evidence": [
+        "src/robinhood_lp/rpc/adapter.py line 489: 'for attempt in range(self._config.retry_limit + 1)'",
+        "src/robinhood_lp/rpc/adapter.py line 228-229: retry_limit must be non-negative",
+        "src/robinhood_lp/rpc/adapter.py line 465-469: RpcRetryExhausted after every endpoint exhausts"
+      ]
+    },
+    {
+      "id": "must_not_log_endpoint_credentials",
+      "status": "PASS",
+      "finding": "_redact_url (adapter.py line 187-198) strips user:password@ from any URL before it could be logged. RpcMetrics carries counts only (line 152-174); no URL field. Every log path uses endpoint.name (line 454 failover log; line 337 capability probe entry name), not endpoint.url. test_endpoint_credentials_never_appear_in_logs (tests/test_rpc_adapter.py:444-471) constructs an endpoint with URL 'https://alice:hunter2@primary.example/rpc', forces a TransportError('500') retry exhaustion, captures caplog at INFO level on the 'robinhood_lp.rpc.adapter' logger, and asserts no recorded message contains 'alice' or 'hunter2'. The test passes.",
+      "evidence": [
+        "src/robinhood_lp/rpc/adapter.py line 187-198: _redact_url strips user:password@",
+        "src/robinhood_lp/rpc/adapter.py line 152-174: RpcMetrics is count-only",
+        "tests/test_rpc_adapter.py:444-471 test_endpoint_credentials_never_appear_in_logs"
+      ]
+    },
+    {
+      "id": "dependency_T002_approved",
+      "status": "PASS",
+      "finding": "T002 status is APPROVED in /home/lpdev/lp-worktrees/review-t020-attempt-001/todo/config.yaml (line 42-53: status 'APPROVED', approved_commit '762775949b9f348ef53839ae50cba00bdebf9731', latest_review 'todo/reviews/P00/T002/review-002.json'). T020 depends on T002 per the contract.",
+      "evidence": [
+        "Read of todo/config.yaml shows T002.status == 'APPROVED' with approved_commit set"
+      ]
+    },
+    {
+      "id": "dependency_T011_approved",
+      "status": "PASS",
+      "finding": "T011 status is APPROVED in /home/lpdev/lp-worktrees/review-t020-attempt-001/todo/config.yaml (line 96-104: status 'APPROVED', approved_commit 'ad0014b087d2b550542d26648bc671cb9400c17e', latest_review 'todo/reviews/P01/T011/review-002.json'). T020 depends on T011 per the contract.",
+      "evidence": [
+        "Read of todo/config.yaml shows T011.status == 'APPROVED' with approved_commit set"
+      ]
+    },
+    {
+      "id": "contract_status_implementation_gaps_closed",
+      "status": "PASS",
+      "finding": "The T020 contract's 'Implementation status' note lists exactly two open items: 'dependency and current full-quality verification remain open'. (1) dependency: T002 and T011 are both APPROVED in todo/config.yaml (see checks 'dependency_T002_approved' and 'dependency_T011_approved'). (2) full-quality verification: the candidate worktree at 9ec6783 passes pytest -q (346 passed, 7 skipped in two consecutive runs), ruff check (All checks passed!), ruff format --check (168 files already formatted), and mypy src tests (Success: no issues found in 46 source files) — all in two consecutive runs as required by AGENTS.md §7. Both items are closed against the candidate worktree.",
+      "evidence": [
+        "todo/phases/P02-chain-access-and-discovery/T020.md 'Implementation status' note names the two open items",
+        "check 'baseline_passes_twice' records the two-run pytest/ruff/mypy/format results",
+        "checks 'dependency_T002_approved' / 'dependency_T011_approved' record APPROVED status"
+      ]
+    },
+    {
+      "id": "no_secrets_in_diff",
+      "status": "PASS",
+      "finding": "git diff feef295..9ec6783 | grep -iE 'password|secret|private_key|seed_phrase|api_key|bearer|credential|wallet' returned NO_SECRET_HITS. The diff contains only todo/config.yaml (workflow state) and todo/evidence/P02/T020/attempt-001-developer.json (developer evidence narrative). No credential substrings, .env files, keystore files, or wallet artifacts were introduced.",
+      "evidence": [
+        "git diff feef295..9ec6783 | grep -iE 'password|secret|private_key|seed_phrase|api_key|bearer|credential|wallet' -> no matches",
+        "Only two paths in the diff; both are workflow-bookkeeping"
+      ]
+    },
+    {
+      "id": "downstream_consumer_T024_works",
+      "status": "PASS",
+      "finding": "T024 (chain capability reporter) consumes the T020 adapter end-to-end across two endpoints via _call_with_failover. tests/test_chain_capability.py exercises happy path, wrong chain id, bytecode mismatch, inconsistent providers, JSON serialisability, and min_block_number violation (8 tests, all passing). This is the only downstream consumer of T020 currently in tree and confirms the public surface (RpcAdapter, RpcConfig, RpcEndpoint, eth_block_number, eth_get_block_by_number, eth_get_code, eth_chainId via capability_probe, eth_getLogs is unused here) is sufficient for its caller.",
+      "evidence": [
+        "tests/test_chain_capability.py:98-318 — 8 tests pass against the T020 adapter",
+        "src/robinhood_lp/discovery/chain_capability.py imports from robinhood_lp.rpc"
+      ]
+    },
+    {
+      "id": "reviewer_worktree_clean",
+      "status": "PASS",
+      "finding": "git status --porcelain in /home/lpdev/lp-worktrees/review-t020-attempt-001 is empty (the review worktree is detached at candidate commit 9ec6783 with no uncommitted, staged, or untracked changes). HEAD equals 9ec6783c18567c7998ed166e8a5855aefc95af1c which matches the candidate_commit the workflow controller passed to prepare_review.",
+      "evidence": [
+        "git status --porcelain -> empty output",
+        "git rev-parse HEAD -> '9ec6783c18567c7998ed166e8a5855aefc95af1c'"
+      ]
+    }
+  ],
+  "must_not_violations": [],
+  "unknowns": [],
+  "required_changes": [],
+  "residual_risks": [
+    "The candidate commit 9ec6783 contains only controller-managed bookkeeping (todo/config.yaml AWAITING_REVIEW transition + todo/evidence/P02/T020/attempt-001-developer.json). No implementation file changed in this attempt. The contract's deliverables are satisfied by the pre-existing src/robinhood_lp/rpc/adapter.py and tests/test_rpc_adapter.py carried forward from base feef295 (originating in commit 7b093a3 'feat(phase-2): T020 bounded read-only RPC adapter'). The workflow's 'Migration rule for pre-existing unverified implementation' (todo/WORKFLOW.md §'Pre-existing unverified implementation') explicitly permits this: 'Review per task. For each PLANNED task whose contract already has a pre-existing implementation, the Manager activates that task normally... The Developer Agent receives the current main HEAD as its base commit, reads and cites the pre-existing code, and may reuse or extend it rather than rewrite it from scratch.' This Reviewer's verdict is the 'APPROVED' gate the migration rule requires: 'Claim after approval. A task is not delivered until the independent Reviewer returns APPROVED for the Developer candidate commit.' The PASS is conditional on the candidate worktree containing the contract-satisfying implementation; every check above inspects the candidate worktree (HEAD = 9ec6783) directly.",
+    "capability_probe's docstring (src/robinhood_lp/rpc/adapter.py line 331) says it probes 'eth_chainId and eth_blockNumber' but only fetches eth_chainId. The implementation matches its tests (test_capability_probe_surfaces_per_endpoint_results / test_capability_probe_does_not_failover_on_error assert only chain_id and error keys). This is a documentation-only drift; eth_blockNumber is fetched separately by the T024 chain capability reporter when needed. Not a contract gap. A future attempt may tighten the docstring to match the implementation.",
+    "eth_getBlockByHash is in ALLOWED_METHODS but no typed wrapper is exposed; callers reach it via the lower-level _call_with_failover (the only current caller is chain_capability.py, which does not actually call eth_getBlockByHash today). The contract lists 'block/header/receipt' as deliverables and eth_getBlockByNumber + eth_getTransactionReceipt cover block and receipt; eth_getBlockByHash in the allow-list is forward-looking. Not a contract gap.",
+    "The implementation uses httpx rather than web3.py. ADR-001 'Web3 client & concurrency model' chose web3.py over aiohttp; the implementation deviated by using a thin httpx-backed JSON-RPC client and documents the rationale in the adapter module docstring ('web3.py carries a Provider abstraction that hides the retry and failover logic this module implements directly...'). The T020 contract does not name the transport library and the layered-model rule (ADR-006 / docs/spec/architecture/ARCHITECTURE.md §2.1) constrains the rpc-adapter layer to depend only on robinhood_lp.protocol, which the implementation honours. The deviation is a Spec/ADR drift, not a contract gap; if the owner wants the implementation to match ADR-001's transport choice, a triage request can capture that as a SPEC_DEFECT on a future attempt without re-opening T020."
+  ]
+}
