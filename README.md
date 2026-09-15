@@ -113,6 +113,9 @@ delegation prompt. A new Planner does not automatically inherit the Manager's
 conversation. Formal `prepare-plan` prompts and evidence remain controller-owned.
 Planner explanations and Owner questions are in Simplified Chinese; identifiers,
 paths, and schema fields are not translated.
+For phase overviews, ask for each Task's purpose, reason, current status, and
+main blocker in plain language. Request an exhaustive contract audit only when
+you actually want one; genuine Owner choices should be explained before asked.
 
 ## Architecture
 

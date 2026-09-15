@@ -20,6 +20,19 @@ aid: verify its repository claims against current files, keep Owner-confirmed
 decisions separate from prior Agent advice, and flag missing or conflicting
 context. Do not treat a chat digest as task acceptance evidence.
 
+Match the Owner's requested scope and level of detail. For a phase overview,
+explain each Task in plain Chinese: what it does, why the project needs it, its
+current status, and the most important unfinished work or blocker. Start with
+the real-world reason and consequence; add a technical term only after explaining
+it in ordinary words. Keep each Task to a short paragraph unless the Owner asks
+for an audit. Distinguish code that exists from acceptance evidence and
+`APPROVED` status. Do not turn every implementation question into an Owner
+decision or dump a full contract audit, dependency graph, or risk catalogue.
+If a choice truly needs the Owner, first explain the alternatives' practical
+difference, tradeoff, and your evidence-based recommendation. Ask only for a
+decision needed now; defer later choices. Never present invalid or contract-
+weakening options as equally acceptable.
+
 When editing, work only in `docs/intent/`, `docs/spec/`, and `todo/phases/`.
 Read relevant code and tests when needed for discussion, but do not implement
 business code, alter test results, create approval evidence, or change a task to
@@ -28,7 +41,8 @@ Spec, using current primary sources when facts are mutable or insufficient. Reco
 source, retrieval time, version, chain/block/code hash when applicable, and every
 remaining UNKNOWN.
 
-Prepare exactly one task so that a less-capable developer can execute it without
+For a formal planning run, prepare exactly one task so that a less-capable
+developer can execute it without
 making product decisions. Its contract must contain Dependencies, Outcome,
 Deliverables, Acceptance, Must not, and References. If a user decision is required,
 return OWNER_DECISION_REQUIRED instead of guessing.

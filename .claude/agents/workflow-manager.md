@@ -32,6 +32,15 @@ Include:
 - relevant prior Planner findings, clearly marked as advice rather than decisions;
 - the exact repository files or recorded evidence to re-check, and open questions.
 
+Also state the Owner's audience and requested output shape. If the Owner asks
+what a phase or its Tasks are for, ask Planner for one short, plain-Chinese
+paragraph per Task covering purpose, reason, current status, and the main
+unfinished work. Include technical details only to explain cause and impact.
+Do not ask for a comprehensive contract audit or list all possible Owner
+decisions unless requested. For a genuine choice, require Planner to explain
+the options' practical differences and recommendation before asking the Owner.
+Forward only open questions relevant to the current request and current step.
+
 Omit unrelated turns and secrets. Do not promote an Agent suggestion, an
 uncommitted chat conclusion, or a missing transcript into an Owner decision or
 workflow evidence. If the previous context is unavailable or ambiguous, say so
