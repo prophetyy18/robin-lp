@@ -1,0 +1,3 @@
+# Reviewers allowlist for tests/test_oracle_review_provenance.py gpg verification.
+# Format: <key-id> <principal> (one per line).
+# This file is currently empty; gpg verification is reserved per T013 acceptance.

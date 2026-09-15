@@ -55,7 +55,8 @@ upgrade and must be paired with regenerated JSON fixtures.
 ```bash
 export PATH="$PATH:$HOME/.foundry/bin"
 cd tools/oracle
-forge install Uniswap/v4-core Uniswap/v4-periphery --no-commit
+forge install --no-commit --commit e50237c43811bd9b526eff40f26772152a42daba Uniswap/v4-core \
+              --commit dce236d4e2057422d0791d9a973a58765eb46f65 Uniswap/v4-periphery
 git -C lib/v4-core        log -1 --format="%H %s"
 git -C lib/v4-periphery    log -1 --format="%H %s"
 git -C lib/v4-periphery/lib/v4-core log -1 --format="%H %s"
@@ -74,6 +75,44 @@ pinned vectors byte-by-byte. If a Solidity change in the oracle
 produces different outputs, the corresponding JSON fixture must be
 regenerated in the same change set; until then, the Python tests
 fail.
+
+In addition, `tests/test_oracle_drift.py` shells out to
+`forge test --json -vv` against the pinned submodules and byte-
+compares the parsed forge output against the committed JSON
+fixtures. When forge is not on PATH (e.g. the T013 sandbox) the test
+emits `pytest.skip` with an actionable message; it is **not** a
+passing test.
+
+## Manual review
+
+Every edge class in `tests/fixtures/protocol/{pool_id_vectors.json,
+math_vectors.json}` carries a per-edge-class entry in
+`_meta.reviews`. Each entry records the reviewer identity, the
+canonicalized subset of vectors the reviewer claims to have
+inspected (`content_sha256`), the ISO-8601 timestamp, and either a
+resolvable git SHA (`signature_method: git-author-commit`) or a GPG
+key reference (`signature_method: gpg`).
+
+This attempt recorded review metadata using `signature_method: gpg`
+(path B in the T013 prompt). The candidate Developer cannot satisfy
+the anti-self-attestation rule via `git-author-commit` from this
+sandbox; gpg verification is reserved per the contract, and the
+reviewer identity is recorded for forward compatibility when gpg
+verification is enabled. The empty allowlist at
+`tools/reviewers/allowed_signers` is the documented slot for the
+gpg key ids that a future attempt may populate.
+
+Verifiers:
+
+- `tests/test_oracle_review_provenance.py` — verifies that every
+  edge class has at least one review entry, that every
+  `git-author-commit` entry resolves to a real commit with matching
+  author email and trailers (`Reviewed-Edge-Class`,
+  `Reviewed-Vectors`, `Reviewed-SHA256`), and that the allowlist file
+  exists.
+- `tools/reviewers/allowed_signers` — the empty allowlist; format
+  `<key-id> <principal>` (one per line). gpg verification is
+  reserved and the file is intentionally empty in this attempt.
 
 ## Foundry project files
 
