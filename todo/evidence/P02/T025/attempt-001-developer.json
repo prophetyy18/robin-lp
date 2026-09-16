@@ -1,0 +1,58 @@
+{
+  "task_id": "T025",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the two-track asset admission module (T025) and its P02 closeout report. The module consumes the T022 PoolRegistry, T023 EligibilityDecision per pool, and T024 ChainCapabilityReport and emits a per-(chain, PoolKey) PoolAdmissionRecord with Track A (technical admission, deterministic from T022+T023+T024 evidence) and Track B (operator admission, pending_owner by default until an explicit OperatorDecision arrives). Track A is fail-closed with precedence: capability_report_missing -> bytecode_drift -> proxy_detected -> hook_bytecode_unavailable -> eligibility_level=rejected -> admitted. The P02 closeout report computes the three P02 README exit-gate conditions: two_provider_agreement (from ChainCapabilityReport.cross_endpoint), deployment_report_passed (from ChainCapabilityReport.passed and empty errors), every_pool_has_support_reason (every PoolRecord has a non-empty T023 EligibilityDecision.reasons list). Track B does NOT directly promote live; the live_block field is always None in this attempt (G-LIVE-GATE-01 territory, out of scope for T025). The OperatorDecision dataclass is supplied by callers — T025 does NOT mint synthetic Owner decisions. Files added: src/robinhood_lp/discovery/asset_admission.py (+627 lines), tests/test_asset_admission.py (+863 lines, 20 tests). Files modified: src/robinhood_lp/discovery/__init__.py (+36 lines, export wiring only) and the controller-managed todo/config.yaml bookkeeping (active_task + T025 status + attempt counter). All forbidden paths are byte-identical to the approved base (docs/intent/, docs/spec/, tools/oracle/, tools/workflow/, todo/phases/, the four forbidden test modules, src/robinhood_lp/protocol/, src/robinhood_lp/rpc/, src/robinhood_lp/discovery/{initialize_log,registry,chain_capability,eligibility}.py, docs/implement/protocol-artifacts/, docs/implement/chain-capability-report-robinhood-testnet.json).",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_asset_admission.py -v",
+      "result": "20 passed in 0.12s; byte-identical across two consecutive runs (SHA-256 = 256bd8629a69c29dac6e35b8b683a6b67ecf1fa217a9421d49467b1bd298b13c)."
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q",
+      "result": "1 failed, 421 passed, 6 skipped (the 1 failure is the pre-existing T012-era tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output forge blocker; identical to the T023 baseline 1 failed/401 passed/6 skipped + 20 new passes). Test count line is byte-identical across two consecutive runs; only elapsed-time suffix and forge stderr timestamps differ (forge build noise per T022/T023 reviewer evidence). All four prerequisite test files pass: test_initialize_scanner.py 22 passed, test_eligibility.py 39 passed, test_chain_capability.py 17 passed, test_abi_artifacts.py 1 failed / 33 passed (matches the T023 baseline documented count)."
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check",
+      "result": "All checks passed! byte-identical across two consecutive runs."
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check",
+      "result": "181 files already formatted. byte-identical across two consecutive runs."
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src tests",
+      "result": "Success: no issues found in 48 source files. byte-identical across two consecutive runs."
+    },
+    {
+      "command": "git diff --stat HEAD (forbidden-paths subset)",
+      "result": "empty for docs/intent/, docs/spec/, tools/oracle/, tools/workflow/, todo/phases/, tests/test_initialize_scanner.py, tests/test_abi_artifacts.py, tests/test_chain_capability.py, tests/test_eligibility.py, src/robinhood_lp/protocol/, src/robinhood_lp/rpc/, src/robinhood_lp/discovery/{initialize_log,registry,chain_capability,eligibility}.py, docs/implement/protocol-artifacts/, docs/implement/chain-capability-report-robinhood-testnet.json. Full diff stat: src/robinhood_lp/discovery/__init__.py (+36) and todo/config.yaml (+3/-3 controller bookkeeping). New untracked: src/robinhood_lp/discovery/asset_admission.py (+627) and tests/test_asset_admission.py (+863)."
+    },
+    {
+      "command": "grep -iE 'password|secret|private_key|seed_phrase|api_key|bearer|credential|wallet' on candidate diff and new files",
+      "result": "0 hits. The candidate diff and the new files contain no secret material. Track A references the supplied artifact SHA-256 and deployment tx hash as plain hex strings (already published in docs/implement/protocol-artifacts/), not as secrets."
+    },
+    {
+      "command": "grep -n 'float' src/robinhood_lp/discovery/",
+      "result": "Only the existing src/robinhood_lp/discovery/initialize_log.py:144 docstring text 'check purely integer — no float conversions per ADR-009.' (unchanged from base). The new asset_admission.py module has zero float references; ADR-009 integer path is preserved."
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -c \"from robinhood_lp.discovery import PoolAdmissionRecord, OperatorDecision, P02CloseoutReport, build_pool_admission, build_p02_closeout_report\"",
+      "result": "OK. New module exports are reachable from the discovery package."
+    },
+    {
+      "command": "jsonschema validation against /home/lpdev/lp/todo/schemas/developer-result.schema.json",
+      "result": "PASS (outcome=CANDIDATE_READY with no triage_request; all required keys present and only schema-allowed properties used)."
+    }
+  ],
+  "residual_risks": [
+    "Out-of-scope failure: tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails because tools/oracle/lib/{v4-core,v4-periphery} are not installed in this worktree (forge-std/Test.sol import fails). This failure is reproducible on the approved base commit e20954f with identical stderr, is the only pre-existing failure attributable to the T015/T023 baseline, and is confirmed out of scope for T025 by the T022/T023/T024 reviewer evidence (CRITICAL-baseline-check pass). It does not block T025 acceptance. test_abi_artifacts.py shows 1 failed / 33 passed — matches the T023 baseline.",
+    "T025 introduces the OperatorDecision dataclass but does NOT define the OwnerDecision workflow route itself. Track B remains pending_owner by default; the OwnerDecision artifact format and the workflow route that produces it are separate concerns (T041 / T070 territory). Track B does NOT directly promote live; the live_block field is always None in T025.",
+    "The asset_admission module consumes T023 EligibilityReasonCode.PROXY_DETECTED rather than re-detecting the EIP-1167 minimal-proxy pattern itself. This is deliberate — T025 is the audit-trail layer (per docs/spec/product/ASSET_ADMISSION.md §4); evidence-fetch and re-classification belong to T022-T024. If T023 adds new rejection reason codes in a future revision, the Track A precedence list in asset_admission._compute_track_a must be revised in the same attempt to preserve audit-trail accuracy.",
+    "The asset_admission module does NOT itself fetch bytecode or probe chain capabilities; it consumes the pinned T022 registry, T023 decisions, and T024 capability report as inputs. This is intentional and matches the ADR-006 storage-layer boundary.",
+    "P02 closeout report's generated_at field uses datetime.now(UTC); the to_dict output is byte-identical across runs only when generated_at is pinned (verified by test_closeout_report_to_dict_is_deterministic_excluding_timestamp). The intended use is one report per P02 closeout event; callers that need to compare reports across runs should pin or normalise the timestamp.",
+    "DEFAULT_DECODE_RULE_VERSION is a string constant capturing the T022/T023/T024 binding; future T022/T023/T024 revisions must update this constant in the same attempt to keep the audit trail accurate. The constant is recorded on every PoolAdmissionRecord so the audit trail is self-describing.",
+    "Two consecutive pytest -q runs produce identical test counts (1 failed, 421 passed, 6 skipped) but the captured log differs by forge stderr timestamps and the elapsed-time suffix. This matches the T022/T023 reviewer evidence ('forge stderr timestamps and timing noise do not affect test counts') and is acceptable per the T023 reviewer's byte-identity evaluation.",
+    "All forbidden paths are byte-identical to the approved base. The only changed files are the new src/robinhood_lp/discovery/asset_admission.py, the new tests/test_asset_admission.py, the discovery __init__.py export wiring, and the controller-managed todo/config.yaml bookkeeping (active_task + T025 status + attempt counter). git diff -- HEAD against the forbidden-paths subset is empty."
+  ],
+  "blocking_question": null
+}
