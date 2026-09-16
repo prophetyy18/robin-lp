@@ -7,7 +7,21 @@ Covers the T030 acceptance matrix:
   ``unknown_fields``;
 - integer-valued fields are stored as int (no float);
 - token metadata is never required (each record is constructible
-  without symbol/name/decimals).
+  without symbol/name/decimals);
+- v1 -> v2 migration preserves v1 records and backfills the new
+  acquisition / removed / transaction_index fields with safe
+  defaults;
+- the same chain event fetched from different endpoints produces
+  the same normalized content hash while the two acquisition
+  envelopes are retained separately;
+- same-height fork logs remain distinct because the EventKey
+  identity (T011) keys on ``block_hash``;
+- deterministic ordering by ``(block_number, transaction_index,
+  log_index)``;
+- ``ProtocolFeeUpdated(bytes32,uint24)`` round-trips with exact
+  uint24 semantics;
+- the endpoint alias is structurally prevented from carrying
+  credential-bearing URL content.
 
 All records are constructed with raw JSON-RPC style data and
 verified to round-trip byte-exactly through ``canonical_bytes``.
@@ -17,19 +31,32 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from robinhood_lp.protocol import Address, ChainId, Currency, PoolId, PoolKey
+import pytest
+
+from robinhood_lp.protocol import (
+    Address,
+    ChainId,
+    Currency,
+    EventKey,
+    PoolId,
+    PoolKey,
+)
 from robinhood_lp.storage.schema import (
     CURRENT_DECODE_VERSION,
     CURRENT_SCHEMA_VERSION,
+    AcquisitionProvenance,
     BlockContext,
     DonateLogRecord,
     InitializeLogRecord,
     ModifyLiquidityLogRecord,
+    ProtocolFeeUpdatedLogRecord,
     ReceiptContext,
     SwapLogRecord,
     TransactionContext,
     canonical_bytes,
     from_canonical_bytes,
+    migrate_to_current,
+    normalized_content_hash,
 )
 
 CHAIN = ChainId(4663)
@@ -212,6 +239,7 @@ def test_initialize_log_record_round_trip() -> None:
         block_number=100,
         block_hash=0xAA,
         transaction_hash=0xBB,
+        transaction_index=4,
         log_index=0,
         address=Address.from_hex("0x" + "44" * 20),
         raw_topics=raw_topics,
@@ -238,6 +266,7 @@ def test_modify_liquidity_log_record_round_trip() -> None:
         block_number=100,
         block_hash=0xAA,
         transaction_hash=0xBB,
+        transaction_index=5,
         log_index=1,
         address=Address.from_hex("0x" + "44" * 20),
         sender=Address.from_hex("0x" + "11" * 20),
@@ -261,6 +290,7 @@ def test_swap_log_record_round_trip() -> None:
         block_number=100,
         block_hash=0xAA,
         transaction_hash=0xBB,
+        transaction_index=6,
         log_index=2,
         address=Address.from_hex("0x" + "44" * 20),
         sender=Address.from_hex("0x" + "11" * 20),
@@ -289,6 +319,7 @@ def test_donate_log_record_round_trip() -> None:
         block_number=100,
         block_hash=0xAA,
         transaction_hash=0xBB,
+        transaction_index=7,
         log_index=3,
         address=Address.from_hex("0x" + "44" * 20),
         sender=Address.from_hex("0x" + "11" * 20),
@@ -373,6 +404,7 @@ def test_round_trip_preserves_every_field_for_every_record_type() -> None:
                 block_number=1,
                 block_hash=2,
                 transaction_hash=3,
+                transaction_index=0,
                 log_index=0,
                 address=Address.zero(),
                 raw_topics=[b"\x00" * 32],
@@ -389,6 +421,7 @@ def test_round_trip_preserves_every_field_for_every_record_type() -> None:
                 block_number=1,
                 block_hash=2,
                 transaction_hash=3,
+                transaction_index=0,
                 log_index=0,
                 address=Address.zero(),
                 sender=Address.zero(),
@@ -408,6 +441,7 @@ def test_round_trip_preserves_every_field_for_every_record_type() -> None:
                 block_number=1,
                 block_hash=2,
                 transaction_hash=3,
+                transaction_index=0,
                 log_index=0,
                 address=Address.zero(),
                 sender=Address.zero(),
@@ -429,6 +463,7 @@ def test_round_trip_preserves_every_field_for_every_record_type() -> None:
                 block_number=1,
                 block_hash=2,
                 transaction_hash=3,
+                transaction_index=0,
                 log_index=0,
                 address=Address.zero(),
                 sender=Address.zero(),
@@ -500,6 +535,7 @@ def test_records_carry_no_float() -> None:
         block_number=1,
         block_hash=2,
         transaction_hash=3,
+        transaction_index=0,
         log_index=0,
         address=Address.zero(),
         sender=Address.zero(),
@@ -529,6 +565,7 @@ def test_token_metadata_is_not_required_for_event_records() -> None:
         block_number=1,
         block_hash=2,
         transaction_hash=3,
+        transaction_index=0,
         log_index=0,
         address=Address.zero(),
     )
@@ -544,6 +581,7 @@ def test_canonical_bytes_are_stable() -> None:
         block_number=1,
         block_hash=2,
         transaction_hash=3,
+        transaction_index=0,
         log_index=0,
         address=Address.zero(),
         sender=Address.zero(),
@@ -564,6 +602,7 @@ def test_canonical_bytes_change_when_a_field_changes() -> None:
         block_number=1,
         block_hash=2,
         transaction_hash=3,
+        transaction_index=0,
         log_index=0,
         address=Address.zero(),
         sender=Address.zero(),
@@ -575,3 +614,692 @@ def test_canonical_bytes_change_when_a_field_changes() -> None:
     a = ModifyLiquidityLogRecord(**base)  # type: ignore[arg-type]
     b = ModifyLiquidityLogRecord(**{**base, "tick_lower": -1})  # type: ignore[arg-type]
     assert canonical_bytes(a) != canonical_bytes(b)
+
+
+# ---------------------------------------------------------------------------
+# T030 amendment additions
+# ---------------------------------------------------------------------------
+
+
+def test_protocol_fee_updated_log_record_round_trip() -> None:
+    """The inherited ``ProtocolFeeUpdated(bytes32,uint24)`` event
+    (IProtocolFees) is required by ADR-010 §"Required data boundary"
+    so the framework records LP-owned protocol fees separately from
+    the combined swap fee carried by the Swap event.
+    """
+    pid = _pool_id_bytes()
+    raw_topics = [b"\x00" * 32, pid.to_bytes()]
+    raw_data = (0x000ABC).to_bytes(32, "big")
+    record = ProtocolFeeUpdatedLogRecord(
+        chain_id=CHAIN,
+        pool_id=pid,
+        block_number=200,
+        block_hash=0xCC,
+        transaction_hash=0xDD,
+        transaction_index=8,
+        log_index=4,
+        address=Address.from_hex("0x" + "44" * 20),
+        protocol_fee=0x000ABC,
+        raw_topics=raw_topics,
+        raw_data=raw_data,
+    )
+    blob = canonical_bytes(record)
+    parsed = from_canonical_bytes(blob)
+    assert parsed["protocol_fee"] == 0x000ABC
+    assert isinstance(parsed["protocol_fee"], int)
+    # Exact uint24 width enforcement.
+    with pytest.raises(ValueError, match="protocol_fee"):
+        ProtocolFeeUpdatedLogRecord(
+            chain_id=CHAIN,
+            pool_id=pid,
+            block_number=200,
+            block_hash=0xCC,
+            transaction_hash=0xDD,
+            transaction_index=8,
+            log_index=4,
+            address=Address.from_hex("0x" + "44" * 20),
+            protocol_fee=1 << 24,  # exceeds 24 bits
+        )
+    with pytest.raises(ValueError, match="protocol_fee"):
+        ProtocolFeeUpdatedLogRecord(
+            chain_id=CHAIN,
+            pool_id=pid,
+            block_number=200,
+            block_hash=0xCC,
+            transaction_hash=0xDD,
+            transaction_index=8,
+            log_index=4,
+            address=Address.from_hex("0x" + "44" * 20),
+            protocol_fee=-1,
+        )
+
+
+def test_acquisition_provenance_validates_alias() -> None:
+    """T030 must-not: 'Request provenance never contains a credential-
+    bearing URL'. An alias containing ``://``, ``@``, ``?``, path
+    separators, or whitespace is rejected.
+    """
+    with pytest.raises(ValueError, match="alias"):
+        AcquisitionProvenance(endpoint_alias="https://x.example.com")
+    with pytest.raises(ValueError, match="alias"):
+        AcquisitionProvenance(endpoint_alias="alice@example.com")
+    with pytest.raises(ValueError, match="alias"):
+        AcquisitionProvenance(endpoint_alias="rpc?apiKey=secret")
+    with pytest.raises(ValueError, match="alias"):
+        AcquisitionProvenance(endpoint_alias="path/with/slashes")
+    with pytest.raises(ValueError, match="alias"):
+        AcquisitionProvenance(endpoint_alias="has space")
+    # A short opaque token is accepted.
+    ap = AcquisitionProvenance(
+        endpoint_alias="robinhood_public",
+        retrieval_time="2026-09-16T00:00:00+00:00",
+        request_from_block=1_000_000,
+        request_to_block=1_000_999,
+        http_batch_size=10,
+        http_batch_position=3,
+        request_attempt=1,
+    )
+    assert ap.endpoint_alias == "robinhood_public"
+    assert ap.request_from_block == 1_000_000
+    assert ap.http_batch_position == 3
+
+
+def test_acquisition_provenance_validates_request_interval_order() -> None:
+    """The request interval must satisfy
+    ``request_from_block <= request_to_block``."""
+    with pytest.raises(ValueError, match="request_from_block"):
+        AcquisitionProvenance(
+            endpoint_alias="alchemy_free",
+            request_from_block=100,
+            request_to_block=99,
+        )
+
+
+def test_acquisition_provenance_validates_batch_position() -> None:
+    """http_batch_position must be strictly less than http_batch_size."""
+    with pytest.raises(ValueError, match="http_batch_position"):
+        AcquisitionProvenance(
+            endpoint_alias="alchemy_free",
+            http_batch_size=3,
+            http_batch_position=3,
+        )
+
+
+def test_event_key_identity_matches_t011() -> None:
+    """The log record's ``event_key()`` returns a T011
+    ``EventKey(chain_id, block_hash, tx_hash, log_index)``. Two
+    records of the same chain event produce the same key regardless
+    of acquisition metadata.
+    """
+    pid = _pool_id_bytes()
+    addr = Address.from_hex("0x" + "44" * 20)
+    sender = Address.from_hex("0x" + "11" * 20)
+    record_a = SwapLogRecord(
+        chain_id=CHAIN,
+        pool_id=pid,
+        block_number=100,
+        block_hash=0xAA,
+        transaction_hash=0xBB,
+        transaction_index=2,
+        log_index=7,
+        address=addr,
+        sender=sender,
+        amount0=-1,
+        amount1=1,
+        sqrt_price_x96=1,
+        liquidity=1,
+        tick=0,
+        fee=3000,
+        acquisition=AcquisitionProvenance(
+            endpoint_alias="robinhood_public",
+            retrieval_time="2026-09-16T00:00:00+00:00",
+            request_from_block=1_000_000,
+            request_to_block=1_000_999,
+        ),
+    )
+    record_b = SwapLogRecord(
+        chain_id=CHAIN,
+        pool_id=pid,
+        block_number=100,
+        block_hash=0xAA,
+        transaction_hash=0xBB,
+        transaction_index=2,
+        log_index=7,
+        address=addr,
+        sender=sender,
+        amount0=-1,
+        amount1=1,
+        sqrt_price_x96=1,
+        liquidity=1,
+        tick=0,
+        fee=3000,
+        acquisition=AcquisitionProvenance(
+            endpoint_alias="alchemy_free",
+            retrieval_time="2026-09-16T00:00:05+00:00",
+            request_from_block=1_000_000,
+            request_to_block=1_000_099,
+            http_batch_size=10,
+            http_batch_position=0,
+        ),
+    )
+    assert record_a.event_key() == record_b.event_key()
+    expected = EventKey(chain_id=CHAIN, block_hash=0xAA, tx_hash=0xBB, log_index=7)
+    assert record_a.event_key() == expected
+
+
+def test_same_chain_event_different_endpoints_have_same_normalized_content_hash() -> None:
+    """T030 acceptance: 'Re-fetching identical logs from different
+    endpoints/times produces the same normalized content hash while
+    retaining both raw provenance observations'.
+    """
+    pid = _pool_id_bytes()
+    addr = Address.from_hex("0x" + "44" * 20)
+    sender = Address.from_hex("0x" + "11" * 20)
+    record_a = SwapLogRecord(
+        chain_id=CHAIN,
+        pool_id=pid,
+        block_number=100,
+        block_hash=0xAA,
+        transaction_hash=0xBB,
+        transaction_index=2,
+        log_index=7,
+        address=addr,
+        sender=sender,
+        amount0=-1,
+        amount1=1,
+        sqrt_price_x96=1,
+        liquidity=1,
+        tick=0,
+        fee=3000,
+        acquisition=AcquisitionProvenance(
+            endpoint_alias="robinhood_public",
+            retrieval_time="2026-09-16T00:00:00+00:00",
+            request_from_block=1_000_000,
+            request_to_block=1_000_999,
+        ),
+    )
+    record_b = SwapLogRecord(
+        chain_id=CHAIN,
+        pool_id=pid,
+        block_number=100,
+        block_hash=0xAA,
+        transaction_hash=0xBB,
+        transaction_index=2,
+        log_index=7,
+        address=addr,
+        sender=sender,
+        amount0=-1,
+        amount1=1,
+        sqrt_price_x96=1,
+        liquidity=1,
+        tick=0,
+        fee=3000,
+        acquisition=AcquisitionProvenance(
+            endpoint_alias="alchemy_free",
+            retrieval_time="2026-09-16T00:00:05+00:00",
+            request_from_block=1_000_000,
+            request_to_block=1_000_099,
+            http_batch_size=10,
+            http_batch_position=0,
+        ),
+    )
+    assert normalized_content_hash(record_a) == normalized_content_hash(record_b)
+    # But the canonical (full) bytes differ — both acquisition
+    # envelopes are retained separately.
+    assert canonical_bytes(record_a) != canonical_bytes(record_b)
+
+
+def test_same_height_fork_logs_remain_distinct_by_block_hash() -> None:
+    """T030 acceptance: 'same-height fork logs remain distinct by
+    block hash'. Two records with the same block number, tx hash,
+    and log index but different block hashes have different
+    EventKey identities and different normalized content hashes.
+    """
+    pid = _pool_id_bytes()
+    addr = Address.from_hex("0x" + "44" * 20)
+    sender = Address.from_hex("0x" + "11" * 20)
+    fork_a = SwapLogRecord(
+        chain_id=CHAIN,
+        pool_id=pid,
+        block_number=100,
+        block_hash=0xAA,  # fork A
+        transaction_hash=0xBB,
+        transaction_index=2,
+        log_index=0,
+        address=addr,
+        sender=sender,
+        amount0=-1,
+        amount1=1,
+        sqrt_price_x96=1,
+        liquidity=1,
+        tick=0,
+        fee=3000,
+    )
+    fork_b = SwapLogRecord(
+        chain_id=CHAIN,
+        pool_id=pid,
+        block_number=100,
+        block_hash=0xAB,  # fork B (same height, different hash)
+        transaction_hash=0xBB,
+        transaction_index=2,
+        log_index=0,
+        address=addr,
+        sender=sender,
+        amount0=-1,
+        amount1=1,
+        sqrt_price_x96=1,
+        liquidity=1,
+        tick=0,
+        fee=3000,
+    )
+    assert fork_a.event_key() != fork_b.event_key()
+    assert normalized_content_hash(fork_a) != normalized_content_hash(fork_b)
+
+
+def test_sort_key_is_block_number_then_transaction_index_then_log_index() -> None:
+    """T030 acceptance: deterministic ordering by
+    ``(block_number, transaction_index, log_index)``.
+    """
+    pid = _pool_id_bytes()
+    addr = Address.from_hex("0x" + "44" * 20)
+    sender = Address.from_hex("0x" + "11" * 20)
+    records = [
+        SwapLogRecord(
+            chain_id=CHAIN,
+            pool_id=pid,
+            block_number=100,
+            block_hash=0x10,
+            transaction_hash=0xB0,
+            transaction_index=5,
+            log_index=3,
+            address=addr,
+            sender=sender,
+            amount0=0,
+            amount1=0,
+            sqrt_price_x96=1,
+            liquidity=1,
+            tick=0,
+            fee=3000,
+        ),
+        SwapLogRecord(
+            chain_id=CHAIN,
+            pool_id=pid,
+            block_number=100,
+            block_hash=0x10,
+            transaction_hash=0xB0,
+            transaction_index=5,
+            log_index=1,
+            address=addr,
+            sender=sender,
+            amount0=0,
+            amount1=0,
+            sqrt_price_x96=1,
+            liquidity=1,
+            tick=0,
+            fee=3000,
+        ),
+        SwapLogRecord(
+            chain_id=CHAIN,
+            pool_id=pid,
+            block_number=99,
+            block_hash=0x10,
+            transaction_hash=0xB0,
+            transaction_index=99,
+            log_index=99,
+            address=addr,
+            sender=sender,
+            amount0=0,
+            amount1=0,
+            sqrt_price_x96=1,
+            liquidity=1,
+            tick=0,
+            fee=3000,
+        ),
+        SwapLogRecord(
+            chain_id=CHAIN,
+            pool_id=pid,
+            block_number=100,
+            block_hash=0x10,
+            transaction_hash=0xB0,
+            transaction_index=4,
+            log_index=99,
+            address=addr,
+            sender=sender,
+            amount0=0,
+            amount1=0,
+            sqrt_price_x96=1,
+            liquidity=1,
+            tick=0,
+            fee=3000,
+        ),
+    ]
+    ordered = sorted(records, key=lambda r: r.sort_key())
+    sort_keys = [r.sort_key() for r in ordered]
+    assert sort_keys == [
+        (99, 99, 99),
+        (100, 4, 99),
+        (100, 5, 1),
+        (100, 5, 3),
+    ]
+
+
+def test_normalized_content_hash_is_stable() -> None:
+    """Two records with identical normalized content but different
+    acquisition provenance produce identical normalized content
+    hashes.
+    """
+    pid = _pool_id_bytes()
+    addr = Address.from_hex("0x" + "44" * 20)
+    sender = Address.from_hex("0x" + "11" * 20)
+    base = dict(
+        chain_id=CHAIN,
+        pool_id=pid,
+        block_number=100,
+        block_hash=0xAA,
+        transaction_hash=0xBB,
+        transaction_index=2,
+        log_index=7,
+        address=addr,
+        sender=sender,
+        amount0=-42,
+        amount1=42,
+        sqrt_price_x96=1,
+        liquidity=1,
+        tick=0,
+        fee=3000,
+    )
+    record_a = SwapLogRecord(  # type: ignore[arg-type]
+        **base,
+        acquisition=AcquisitionProvenance(
+            endpoint_alias="robinhood_public",
+            retrieval_time="2026-09-16T00:00:00+00:00",
+        ),
+    )
+    record_b = SwapLogRecord(  # type: ignore[arg-type]
+        **base,
+        acquisition=AcquisitionProvenance(
+            endpoint_alias="alchemy_free",
+            retrieval_time="2026-09-16T01:23:45+00:00",
+            request_from_block=100,
+            request_to_block=199,
+        ),
+    )
+    assert normalized_content_hash(record_a) == normalized_content_hash(record_b)
+    # But the canonical bytes retain both provenance envelopes.
+    assert canonical_bytes(record_a) != canonical_bytes(record_b)
+
+
+def test_normalized_content_hash_changes_on_typed_field_change() -> None:
+    """Changing any typed (normalized) field changes the normalized
+    content hash. The hash is content-derived, not identity-derived;
+    distinct events produce distinct hashes."""
+    pid = _pool_id_bytes()
+    addr = Address.from_hex("0x" + "44" * 20)
+    sender = Address.from_hex("0x" + "11" * 20)
+    common = dict(
+        chain_id=CHAIN,
+        pool_id=pid,
+        block_number=100,
+        block_hash=0xAA,
+        transaction_hash=0xBB,
+        transaction_index=2,
+        log_index=7,
+        address=addr,
+        sender=sender,
+        sqrt_price_x96=1,
+        liquidity=1,
+        tick=0,
+        fee=3000,
+    )
+    record_a = SwapLogRecord(  # type: ignore[arg-type]
+        **common, amount0=-1, amount1=1
+    )
+    record_b = SwapLogRecord(  # type: ignore[arg-type]
+        **common,
+        amount0=-1,
+        amount1=2,  # amount1 differs
+    )
+    assert normalized_content_hash(record_a) != normalized_content_hash(record_b)
+
+
+def test_signed_amounts_preserve_exact_sign_and_width() -> None:
+    """T030 acceptance: signed amounts and liquidity deltas remain
+    integers with exact sign/width semantics. The canonical form
+    encodes the same signed int (not a two's-complement hex blob).
+    """
+    pid = _pool_id_bytes()
+    addr = Address.from_hex("0x" + "44" * 20)
+    sender = Address.from_hex("0x" + "11" * 20)
+    record = SwapLogRecord(
+        chain_id=CHAIN,
+        pool_id=pid,
+        block_number=100,
+        block_hash=0xAA,
+        transaction_hash=0xBB,
+        transaction_index=2,
+        log_index=7,
+        address=addr,
+        sender=sender,
+        # Signed int128 extremes (the V4 Swap event declares
+        # amount0/amount1 as int128). Use values that fit comfortably.
+        amount0=-(2**127),
+        amount1=(2**127) - 1,
+        sqrt_price_x96=(1 << 160) - 1,
+        liquidity=(1 << 128) - 1,
+        tick=-(2**23),
+        fee=(1 << 24) - 1,
+    )
+    blob = canonical_bytes(record)
+    parsed = from_canonical_bytes(blob)
+    assert parsed["amount0"] == -(2**127)
+    assert parsed["amount1"] == (2**127) - 1
+    assert parsed["sqrt_price_x96"] == (1 << 160) - 1
+    assert parsed["liquidity"] == (1 << 128) - 1
+    assert parsed["tick"] == -(2**23)
+    assert parsed["fee"] == (1 << 24) - 1
+    # No float coercion: every int field is a JSON integer literal.
+    blob_text = blob.decode("utf-8")
+    assert "1e" not in blob_text
+    assert ".0" not in blob_text
+
+
+def test_removed_flag_round_trips() -> None:
+    """T030 acceptance: 'removed flag' is part of the common log
+    record fields. A reorged log carries removed=True and survives
+    round-trip.
+    """
+    pid = _pool_id_bytes()
+    addr = Address.from_hex("0x" + "44" * 20)
+    record = SwapLogRecord(
+        chain_id=CHAIN,
+        pool_id=pid,
+        block_number=100,
+        block_hash=0xAA,
+        transaction_hash=0xBB,
+        transaction_index=2,
+        log_index=7,
+        address=addr,
+        sender=Address.zero(),
+        amount0=1,
+        amount1=1,
+        sqrt_price_x96=1,
+        liquidity=1,
+        tick=0,
+        fee=3000,
+        removed=True,
+    )
+    blob = canonical_bytes(record)
+    parsed = from_canonical_bytes(blob)
+    assert parsed["removed"] is True
+
+
+def test_v1_blob_migrates_to_current() -> None:
+    """T030 acceptance: 'compatibility/migration tests cover unknown
+    fields and old versions'. A v1 canonical blob (pre-acquisition /
+    pre-removed / pre-transaction_index) loads through
+    ``migrate_to_current`` with safe defaults applied.
+    """
+    # Synthesise a v1-shaped canonical blob for a SwapLogRecord.
+    v1_payload = {
+        "__class__": "SwapLogRecord",
+        "__schema_version__": 1,
+        "__decode_version__": 1,
+        "chain_id": CHAIN.value,
+        "pool_id": _pool_id_bytes().value,
+        "block_number": 100,
+        "block_hash": 0xAA,
+        "transaction_hash": 0xBB,
+        "log_index": 2,
+        "address": Address.from_hex("0x" + "44" * 20).value,
+        "sender": Address.from_hex("0x" + "11" * 20).value,
+        "amount0": -100,
+        "amount1": 200,
+        "sqrt_price_x96": 1,
+        "liquidity": 1,
+        "tick": 0,
+        "fee": 3000,
+        "decode_version": 1,
+        "ingestion_time": "2026-09-15T00:00:00+00:00",
+        "source_endpoint": "robinhood_public",
+        "raw": {"foo": "bar"},
+        "unknown_fields": {},
+    }
+    import json as _json
+
+    v1_blob = _json.dumps(v1_payload, sort_keys=True).encode("utf-8")
+    migrated = migrate_to_current(v1_blob)
+    # The migration materialises the right dataclass with the v2
+    # defaults applied.
+    assert isinstance(migrated, SwapLogRecord)
+    assert migrated.removed is False
+    assert migrated.transaction_index == 0
+    # The legacy source_endpoint is copied into the structured
+    # acquisition envelope so downstream code can read either form.
+    assert isinstance(migrated.acquisition, AcquisitionProvenance)
+    assert migrated.acquisition.endpoint_alias == "robinhood_public"
+    assert migrated.acquisition.retrieval_time == "2026-09-15T00:00:00+00:00"
+    # The legacy fields are still present on the migrated record so a
+    # v2 reader can still inspect them.
+    assert migrated.source_endpoint == "robinhood_public"
+    assert migrated.ingestion_time == "2026-09-15T00:00:00+00:00"
+    # The record round-trips through canonical_bytes after migration.
+    blob = canonical_bytes(migrated)
+    roundtrip = migrate_to_current(blob)
+    assert isinstance(roundtrip, SwapLogRecord)
+    assert roundtrip.acquisition.endpoint_alias == "robinhood_public"
+    assert roundtrip.raw == {"foo": "bar"}
+
+
+def test_v1_migration_preserves_unknown_fields() -> None:
+    """A v1 blob carrying future-shape unknown fields loads them
+    through the migration so the dataclass can store them in
+    ``unknown_fields``."""
+    pid = _pool_id_bytes()
+    addr = Address.from_hex("0x" + "44" * 20)
+    sender = Address.from_hex("0x" + "11" * 20)
+    record = SwapLogRecord(
+        chain_id=CHAIN,
+        pool_id=pid,
+        block_number=100,
+        block_hash=0xAA,
+        transaction_hash=0xBB,
+        transaction_index=2,
+        log_index=7,
+        address=addr,
+        sender=sender,
+        amount0=-1,
+        amount1=1,
+        sqrt_price_x96=1,
+        liquidity=1,
+        tick=0,
+        fee=3000,
+    )
+    blob = canonical_bytes(record)
+    parsed = from_canonical_bytes(blob)
+    # Inject a forward-compat field and re-emit as if it were a v2 blob.
+    parsed["future_v3_field"] = {"k": "v"}
+    parsed["future_array"] = [1, 2, 3]
+    import json as _json
+
+    fwd_blob = _json.dumps(parsed, sort_keys=True).encode("utf-8")
+    migrated = migrate_to_current(fwd_blob)
+    # The current dataclass must accept the migrated payload by
+    # treating the future keys as ``unknown_fields`` extras; the
+    # canonical form re-serialises them.
+    assert isinstance(migrated, SwapLogRecord)
+    assert migrated.unknown_fields["future_v3_field"] == {"k": "v"}
+    assert migrated.unknown_fields["future_array"] == [1, 2, 3]
+
+
+def test_migration_rejects_future_schema_version() -> None:
+    """A blob whose ``__schema_version__`` exceeds the current build's
+    version is rejected; loading it would silently misrepresent the
+    record's shape."""
+    import json as _json
+
+    future_blob = _json.dumps(
+        {
+            "__class__": "SwapLogRecord",
+            "__schema_version__": CURRENT_SCHEMA_VERSION + 1,
+            "chain_id": 1,
+        },
+        sort_keys=True,
+    ).encode("utf-8")
+    with pytest.raises(ValueError, match="future schema version"):
+        migrate_to_current(future_blob)
+
+
+def test_acquisition_envelope_round_trips_and_is_excluded_from_normalized_hash() -> None:
+    """The acquisition envelope round-trips through canonical_bytes
+    and is excluded from ``normalized_content_hash`` (observational
+    metadata, not chain-event content).
+    """
+    import hashlib
+    import json as _json
+
+    pid = _pool_id_bytes()
+    addr = Address.from_hex("0x" + "44" * 20)
+    sender = Address.from_hex("0x" + "11" * 20)
+    acq = AcquisitionProvenance(
+        endpoint_alias="alchemy_free",
+        retrieval_time="2026-09-16T00:00:00+00:00",
+        request_from_block=1_000_000,
+        request_to_block=1_000_999,
+        http_batch_size=10,
+        http_batch_position=3,
+        request_attempt=1,
+    )
+    record = SwapLogRecord(
+        chain_id=CHAIN,
+        pool_id=pid,
+        block_number=100,
+        block_hash=0xAA,
+        transaction_hash=0xBB,
+        transaction_index=2,
+        log_index=7,
+        address=addr,
+        sender=sender,
+        amount0=-1,
+        amount1=1,
+        sqrt_price_x96=1,
+        liquidity=1,
+        tick=0,
+        fee=3000,
+        acquisition=acq,
+    )
+    blob = canonical_bytes(record)
+    parsed = from_canonical_bytes(blob)
+    assert parsed["acquisition"]["endpoint_alias"] == "alchemy_free"
+    assert parsed["acquisition"]["request_from_block"] == 1_000_000
+    assert parsed["acquisition"]["http_batch_position"] == 3
+    # The normalized hash does not include the acquisition envelope.
+    payload = dict(parsed)
+    payload.pop("acquisition", None)
+    payload.pop("ingestion_time", None)
+    payload.pop("source_endpoint", None)
+    payload.pop("raw", None)
+    payload.pop("raw_topics", None)
+    payload.pop("raw_data", None)
+    payload.pop("unknown_fields", None)
+    canonical = _json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    assert normalized_content_hash(record) == hashlib.sha256(canonical).digest()

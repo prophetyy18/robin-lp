@@ -1,7 +1,7 @@
 {
   "_meta": {
     "compiler": "solc ^0.8.24 (PoolManager.sol declares pragma solidity 0.8.26; IStateView.sol declares pragma solidity ^0.8.0; the framework compiles under solc 0.8.26 set in tools/oracle/foundry.toml)",
-    "description": "Pinned V4 PoolManager + StateView artifacts consumed by the framework. Only ABI entries actually used by T022 / T024 / T042 / T051 are stored (T021 acceptance: 'only actually used ABI entries are stored'). Topics and selectors are produced by the Foundry SelectorOracle under tools/oracle/src/SelectorOracle.sol and byte-compared by tests/test_abi_artifacts.py against the values below; any drift in the upstream ABI or our pinned v4-core / v4-periphery commits must be reflected here in the same change set, or the regenerate-and-compare test fails closed.",
+    "description": "Pinned V4 PoolManager + StateView artifacts consumed by the framework. Only ABI entries actually used by T022 / T024 / T030 / T042 / T051 are stored (T021 acceptance: 'only actually used ABI entries are stored'). Topics and selectors are produced by the Foundry SelectorOracle under tools/oracle/src/SelectorOracle.sol and byte-compared by tests/test_abi_artifacts.py against the values below; any drift in the upstream ABI or our pinned v4-core / v4-periphery commits must be reflected here in the same change set, or the regenerate-and-compare test fails closed. ProtocolFeeUpdated is inherited from v4-core IProtocolFees.sol and consumed by T030 (ADR-010) so the framework records LP-owned protocol fees separately from combined swap fees.",
     "license_pool_manager": "BUSL-1.1 \u2014 verified against tools/oracle/lib/v4-core/licenses/BUSL_LICENSE at commit e50237c43811bd9b526eff40f26772152a42daba; PoolManager.sol declares SPDX-License-Identifier: BUSL-1.1",
     "license_state_view": "MIT \u2014 verified against tools/oracle/lib/v4-periphery/LICENSE at commit dce236d4e2057422d0791d9a973a58765eb46f65; IStateView.sol declares SPDX-License-Identifier: MIT",
     "license_verification_paths": [
@@ -14,11 +14,12 @@
     "oracle": "Foundry SelectorOracle under tools/oracle/src/SelectorOracle.sol; forge 1.8.1 (commit 982849d314 2026-08-28T17:46:00Z; user-level install under ~/.foundry/bin); regenerated with `forge test --match-contract SelectorOracleTest --json-file /tmp/forge-result.json -vv`",
     "regenerate_artifact_cli": "python -m robinhood_lp.tools.regenerate_artifact",
     "regeneration_command": "cd tools/oracle && forge test --match-contract SelectorOracleTest --json-file /tmp/forge-result.json -vv && python -m robinhood_lp.tools.regenerate_artifact /tmp/forge-result.json docs/implement/protocol-artifacts/v4-core-e50237c.json",
-    "sha256": "b5a50257328a824f67259f4f190d2451383aada7aafc8180f6887ee5cfb9b881",
+    "sha256": "6123a0f0e51b35ad6c0b5496801084753567f73161172315cbc227ea506b5473",
     "source_commit": "e50237c43811bd9b526eff40f26772152a42daba",
     "source_commit_pool_manager": "e50237c43811bd9b526eff40f26772152a42daba",
     "source_commit_state_view": "dce236d4e2057422d0791d9a973a58765eb46f65",
     "source_path_pool_manager_event": "src/interfaces/IPoolManager.sol",
+    "source_path_pool_manager_event_protocol_fee_updated": "src/interfaces/IProtocolFees.sol",
     "source_path_pool_manager_function": "src/interfaces/IPoolManager.sol",
     "source_path_state_view": "src/interfaces/IStateView.sol",
     "source_repository_pool_manager": "https://github.com/Uniswap/v4-core",
@@ -38,6 +39,10 @@
     "ModifyLiquidity": {
       "signature": "ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)",
       "topic0": "0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec"
+    },
+    "ProtocolFeeUpdated": {
+      "signature": "ProtocolFeeUpdated(bytes32,uint24)",
+      "topic0": "0xe9c42593e71f84403b84352cd168d693e2c9fcd1fdbcc3feb21d92b43e6696f9"
     },
     "Swap": {
       "signature": "Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)",

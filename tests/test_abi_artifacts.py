@@ -52,7 +52,7 @@ ORACLE_DIR = Path(__file__).resolve().parents[1] / "tools" / "oracle"
 # T024/T042/T051 read-side oracle and must be present alongside
 # PoolManager (T021 scope addition #1).
 _EXPECTED_CONTRACTS = {"PoolManager", "StateView"}
-_EXPECTED_EVENT_NAMES = {"Initialize", "ModifyLiquidity", "Swap", "Donate"}
+_EXPECTED_EVENT_NAMES = {"Initialize", "ModifyLiquidity", "Swap", "Donate", "ProtocolFeeUpdated"}
 _EXPECTED_POOLMANAGER_FUNCTIONS = {
     "initialize",
     "modifyLiquidity",

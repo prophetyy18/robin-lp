@@ -58,6 +58,17 @@ contract SelectorOracle {
         );
     }
 
+    function emitProtocolFeeUpdatedTopic() external pure returns (bytes32) {
+        // event ProtocolFeeUpdated(PoolId indexed id, uint24 protocolFee)
+        // — declared in v4-core IProtocolFees.sol and inherited into the
+        // PoolManager event surface. Required by T030 (ADR-010 §"Required
+        // data boundary") because the fee recorded in a Swap is the
+        // combined swap fee, not automatically the LP-owned share.
+        return keccak256(
+            "ProtocolFeeUpdated(bytes32,uint24)"
+        );
+    }
+
     // -------------------------------------------------------------------
     // PoolManager function selectors (T022)
     // -------------------------------------------------------------------

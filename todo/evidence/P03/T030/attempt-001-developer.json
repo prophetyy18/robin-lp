@@ -1,0 +1,35 @@
+{
+  "task_id": "T030",
+  "outcome": "TRIAGE_REQUIRED",
+  "summary": "T030 合同正文标记 FROZEN_FROM_BASELINE_6C31778，顶部追加 2026-09-16 Owner amendment。按 Owner 决定 #5（binding direction）必须先经 planning route 把 frozen + amendment 合并为单一合同正文，再开始 implementation。本次 attempt 001 已完成部分 implementation 与 31 个 storage schema 测试，但因合同未合并，不直接形成 candidate commit，转入 TRIAGE_REQUIRED 让 triager 分类为 CONTRACT_MISMATCH 后进入 planning。",
+  "commands": [
+    {
+      "command": "git status --porcelain (executed during attempt 001, before stop)",
+      "result": "modified (kept as branch evidence): docs/implement/protocol-artifacts/v4-core-e50237c.json, src/robinhood_lp/storage/__init__.py, src/robinhood_lp/storage/schema.py, tests/test_abi_artifacts.py, tests/test_storage_schema.py, tools/oracle/src/SelectorOracle.sol, tools/oracle/test/SelectorOracle.t.sol; todo/config.yaml 已回滚到 prepare-develop snapshot；.workflow/developer-result.json 为新写入的 handoff"
+    },
+    {
+      "command": "pytest tests/test_storage_schema.py -q (executed during attempt 001)",
+      "result": "All 31 storage schema tests pass on attempt 001 implementation evidence"
+    },
+    {
+      "command": "git checkout -- todo/config.yaml (executed on resume)",
+      "result": "todo/config.yaml 回滚到 prepare-develop snapshot，protected-file check 可通过"
+    }
+  ],
+  "residual_risks": [
+    "src/robinhood_lp/storage/schema.py 与相关测试按 Owner 决定 #1 是 pre-existing unverified implementation；T030 内必须按 WORKFLOW.md migration rule 处理（preserve, review per task, claim after approval）",
+    "本次 attempt 001 implementation evidence 保留在分支 workflow/t030-attempt-001；plan review PASS 后 attempt 002 会在 planning candidate commit 之上重建",
+    "todo/config.yaml 已回滚到 prepare-develop snapshot；其余 implementation 修改保留为 attempt 001 evidence"
+  ],
+  "triage_request": {
+    "observed_problem": "T030 合同正文标记 FROZEN_FROM_BASELINE_6C31778 + 顶部追加 2026-09-16 Owner amendment。按 Owner 决定 #5（binding direction，/tmp/owner_decision_T030.txt 记录），workflow 必须经 planning route（Planner → Plan Reviewer）把 frozen 与 amendment 合并为单一合同正文，再开始 implementation。amendment 内容覆盖：T030 pre-existing code 处理、ADR-002/ADR-010 分层、T031 物理 Parquet 衔接、frozen+amendment 合并规则。Developer 不得自行选择只执行旧合同或只执行 amendment；当前 contract 的双层表达不直接可执行。",
+    "evidence": [
+      "todo/phases/P03-ingestion-and-storage/T030.md",
+      "/tmp/owner_decision_T030.txt",
+      "docs/spec/architecture/adr/ADR-010-free-dual-provider-ingestion.md",
+      "docs/spec/architecture/adr/ADR-002-storage-and-query-format.md"
+    ],
+    "proposed_classification": "CONTRACT_MISMATCH",
+    "requested_change": "由 Planner 把 2026-09-16 Owner amendment 合并进 T030 的 Outcome / Deliverables / Acceptance / Must-not / References 段落，去除顶部 amendment block 与 FROZEN_FROM_BASELINE marker 的双层表达；Implementation status 明确 src/robinhood_lp/storage/schema.py 及相关测试为 pre-existing unverified implementation；明确 T030 = 逻辑 schema、T031 = Parquet 列/partition/manifest 布局；Acceptance 段落新增 normalized content hash 跨 provider 一致与 provenance/content identity 分离显式验收；Must-not 与 References 段落确保 ADR-002/010/011 与硬约束均列出。然后由独立 Plan Reviewer 校验修改是否完整、一致、未削弱验收。"
+  }
+}

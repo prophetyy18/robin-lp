@@ -56,6 +56,14 @@ contract SelectorOracleTest is Test {
         emit log_named_bytes32("topic0", topic);
     }
 
+    function test_PoolManager_ProtocolFeeUpdated_topic() public {
+        bytes32 topic = oracle.emitProtocolFeeUpdatedTopic();
+        emit log_named_string("kind", "event");
+        emit log_named_string("contract", "PoolManager");
+        emit log_named_string("name", "ProtocolFeeUpdated");
+        emit log_named_bytes32("topic0", topic);
+    }
+
     // -------------------------------------------------------------------
     // PoolManager function selectors
     // -------------------------------------------------------------------
