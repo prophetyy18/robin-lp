@@ -129,6 +129,19 @@
       "approved_commit": "d1d93cd8ddd9dde2700696fe63ad12616c313e25",
       "latest_review": "todo/reviews/P01/T013/review-001.json"
     },
+    "T014": {
+      "phase": "P01",
+      "status": "PLANNED",
+      "depends_on": [
+        "T012"
+      ],
+      "task_file": "todo/phases/P01-protocol-foundation/T014.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
+    },
     "T020": {
       "phase": "P02",
       "status": "APPROVED",
