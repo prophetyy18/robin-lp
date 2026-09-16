@@ -1,0 +1,118 @@
+{
+  "task_id": "T015",
+  "base_commit": "4b7ac2daaf05a087f164ae67ecadc48e3616bcee",
+  "candidate_commit": "171f81812c373286efc5fd73f571c411d4f0f3b2",
+  "verdict": "PASS",
+  "checks": [
+    {
+      "id": "diff-scope-tests-file-only",
+      "status": "PASS",
+      "evidence": [
+        "git diff 4b7ac2d..171f8181 -- tests/test_workflow_contracts.py shows exactly one line replaced: -    assert len(config[\"tasks\"]) == 53 +    assert len(config[\"tasks\"]) >= 53",
+        "git diff --numstat for the file is 1 insertion / 1 deletion (the assertion swap); the rest of the file is byte-identical"
+      ],
+      "finding": "The in-scope Python change is exactly +1/-1 in tests/test_workflow_contracts.py, replacing the brittle ==53 catalog-count assertion with the contractually-required lower-bound form >=53. No other line in the file is touched."
+    },
+    {
+      "id": "diff-scope-no-other-tracked-implementation-files",
+      "status": "PASS",
+      "evidence": [
+        "git diff 4b7ac2d..171f8181 --name-only returns: tests/test_workflow_contracts.py, todo/config.yaml, todo/evidence/P00/T015/attempt-001-developer.json",
+        "git diff 4b7ac2d..171f8181 -- todo/phases/ docs/ tools/ tools/workflow/ AGENTS.md todo/WORKFLOW.md tests/fixtures/ tests/test_abi_artifacts.py tests/test_initialize_scanner.py tests/test_chain_capability.py is empty",
+        "The todo/config.yaml change is the standard prepare-develop / finish-develop controller transition (workflow_state READY->AWAITING_REVIEW, T015 status READY->AWAITING_REVIEW, attempt 0->1, base_commit set to 4b7ac2d, candidate_commit null, approved_commit null, latest_review null). It is workflow bookkeeping required by the finish-develop gate, not an implementation edit.",
+        "The todo/evidence/P00/T015/attempt-001-developer.json is the developer structured handoff required by the workflow. The same pattern appears for every other completed attempt (e.g. P00/T001/attempt-001-developer.json, P00/T002/attempt-001-developer.json, P01/T013/attempt-001-developer.json, P01/T014/attempt-001-developer.json) and is the standard mechanism by which the developer communicates with the reviewer; the workflow validation in check 9 below depends on it existing."
+      ],
+      "finding": "No protected implementation path (todo/phases, docs, tools, tools/workflow, AGENTS.md, todo/WORKFLOW.md, tests/fixtures, test_abi_artifacts.py, test_initialize_scanner.py, test_chain_capability.py) is modified. The two non-implementation diffs are the workflow's controller bookkeeping and the standard developer handoff evidence file, both of which are required by the workflow's finish-develop gate."
+    },
+    {
+      "id": "four-assertions-preserved",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_workflow_contracts.py lines 27-32 after the candidate commit:",
+        "  27:     assert len(config[\"tasks\"]) >= 53",
+        "  28:     assert config[\"tasks\"][\"T000\"][\"status\"] == \"APPROVED\"",
+        "  29:     assert config[\"tasks\"][\"T004\"][\"status\"] == \"APPROVED\"",
+        "  30:     assert {\"T000\", \"T004\"} <= {",
+        "  31:         task_id for task_id, task in config[\"tasks\"].items() if task[\"status\"] == \"APPROVED\"",
+        "  32:     }",
+        "Only line 27 changed (== -> >=). Lines 28, 29, and 30-32 are byte-identical to the base."
+      ],
+      "finding": "All four assertions required by the contract are present: (a) the lower-bound catalog-count >=53 (the only one modified), (b) T000 status APPROVED, (c) T004 status APPROVED, (d) the subset check {T000,T004} <= {APPROVED ids}. The historical T000-T004 APPROVED seed invariants are preserved verbatim."
+    },
+    {
+      "id": "contract-tests-4-passed",
+      "status": "PASS",
+      "evidence": [
+        "pytest tests/test_workflow_contracts.py -v: 4 passed in 0.07s; specifically test_repository_workflow_configuration_is_valid PASSED, test_python_workflow_never_launches_claude PASSED, test_every_task_is_a_separate_complete_contract PASSED, test_binding_documents_use_the_new_layer_paths PASSED",
+        "Two-run byte-identity of pytest tests/test_workflow_contracts.py -v output (after normalising the elapsed-time token) confirmed: sha=f153ba2bb1793890 for both runs, length 965 for both runs"
+      ],
+      "finding": "All four tests in tests/test_workflow_contracts.py pass on a single run and produce byte-identical normalised output across two consecutive runs. test_repository_workflow_configuration_is_valid PASSes, eliminating the T014-induced regression."
+    },
+    {
+      "id": "full-suite-0-failed",
+      "status": "PASS",
+      "evidence": [
+        "pytest -q: 373 passed, 6 skipped, 0 failed",
+        "Base commit (4b7ac2d) with the same gitignored oracle lib available: 1 failed, 372 passed, 6 skipped -- the failed test is tests/test_workflow_contracts.py::test_repository_workflow_configuration_is_valid (the T014-induced regression). Candidate replaces that with PASS, so the diff is +1 passed / -1 failed, with no other count change.",
+        "Two-run byte-identity of pytest -q output (after normalising the elapsed-time token) confirmed: sha=d45f9b31b0557440 for both runs, length 1839 for both runs",
+        "In the review worktree, tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails when tools/oracle/lib is absent; tools/oracle/lib is .gitignore'd (see .gitignore: tools/oracle/lib) and was not populated when this detached worktree was created. Creating a non-tracked symlink to the populated /home/lpdev/lp/tools/oracle/lib in the main checkout makes the oracle test pass and is not a tracked change. This is a pre-existing worktree environmental gap, not a regression introduced by the candidate (test_abi_artifacts.py is not in the candidate diff, and the developer's handoff explicitly records this residual risk)."
+      ],
+      "finding": "The T014-induced regression is gone. Full suite reports 0 failed. The skip set (6) and the test that would otherwise fail in a worktree without the gitignored oracle lib are unchanged from the base; the candidate introduces no new failure and no new skip. Counts: passed 373 (base 372), skipped 6 (base 6), failed 0 (base 1)."
+    },
+    {
+      "id": "other-contract-tests-still-pass",
+      "status": "PASS",
+      "evidence": [
+        "test_python_workflow_never_launches_claude PASSED",
+        "test_every_task_is_a_separate_complete_contract PASSED",
+        "test_binding_documents_use_the_new_layer_paths PASSED"
+      ],
+      "finding": "The other three tests in tests/test_workflow_contracts.py are untouched and continue to PASS."
+    },
+    {
+      "id": "quality-gates-exit-0-byte-identical",
+      "status": "PASS",
+      "evidence": [
+        "ruff check: exit 0, stdout 'All checks passed!'; two-run sha256=82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18 for both runs",
+        "ruff format --check: exit 0, stdout '177 files already formatted'; two-run sha256=be05eba385c4aa3cfc2f02c3191dfad1969b9e462fadc2cbb394fe03f409ff03 for both runs",
+        "mypy src tests: exit 0, stdout 'Success: no issues found in 46 source files'; two-run sha256=a97cee1ee1bdb5e2d1ca7098f7b33a6c6a21263225643192fdeb78654687ed89 for both runs"
+      ],
+      "finding": "All three quality gates exit 0 and produce byte-identical output across two consecutive runs after normalising volatile elapsed-time tokens."
+    },
+    {
+      "id": "skip-set-unchanged",
+      "status": "PASS",
+      "evidence": [
+        "Skip set on the candidate (373 passed, 6 skipped): tests/test_oracle_drift.py:209, tests/test_oracle_drift.py:217, tests/test_oracle_drift.py:249 (3x forge-not-on-PATH); tests/test_oracle_review_provenance.py:232, tests/test_oracle_review_provenance.py:245 (2x gpg-verification-out-of-scope); tests/test_protocol_ids.py:289 (1x unordered-vector)",
+        "Skip set on the base (4b7ac2d) with oracle lib available: identical six entries at identical locations",
+        "Total skip count is 6 in both base and candidate; no new skip introduced"
+      ],
+      "finding": "The skip set is identical to the base: 3 forge-not-on-PATH + 2 gpg-verification-out-of-scope + 1 unordered-vector. The candidate introduces no new skip."
+    },
+    {
+      "id": "developer-handoff-schema-valid",
+      "status": "PASS",
+      "evidence": [
+        "todo/evidence/P00/T015/attempt-001-developer.json validates against todo/schemas/developer-result.schema.json (jsonschema validate, no exceptions)",
+        "outcome = 'CANDIDATE_READY'",
+        "triage_request is absent (key not present); the absence is consistent with outcome=CANDIDATE_READY per the schema's enum (CANDIDATE_READY | TRIAGE_REQUIRED | BLOCKED) -- CANDIDATE_READY does not require triage_request, only TRIAGE_REQUIRED does"
+      ],
+      "finding": "The developer handoff is schema-valid; outcome=CANDIDATE_READY is internally consistent with no triage_request being present."
+    },
+    {
+      "id": "no-secrets-in-candidate",
+      "status": "PASS",
+      "evidence": [
+        "git diff 4b7ac2d..171f8181 -- tests/test_workflow_contracts.py todo/evidence/P00/T015/attempt-001-developer.json | grep -iE 'password|secret|private_key|seed_phrase|api_key|bearer|credential|wallet' returns 0 hits",
+        "The Python file change is a single assertion swap; the JSON handoff contains only task metadata, command strings, stdout hashes, and a residual_risks array (no env values, no keystore references, no wallet material)"
+      ],
+      "finding": "No sensitive material appears in the candidate diff. The candidate touches only a Python test assertion and the structured developer handoff."
+    }
+  ],
+  "must_not_violations": [],
+  "unknowns": [],
+  "required_changes": [],
+  "residual_risks": [
+    "In a freshly created detached worktree, tools/oracle/lib is .gitignore'd and absent, so tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output will fail until the host populates the lib directory (or the reviewer symlinks it from the main checkout). This is a pre-existing worktree environment gap, not a candidate-introduced regression; the candidate diff does not touch tests/test_abi_artifacts.py and the base commit exhibits the same gap when the lib is missing. The developer handoff records this gap as a residual_risk. The Manager should arrange for the worktree to have tools/oracle/lib available before the next acceptance run if the candidate is approved."
+  ]
+}
