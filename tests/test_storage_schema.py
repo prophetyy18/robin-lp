@@ -29,7 +29,7 @@ verified to round-trip byte-exactly through ``canonical_bytes``.
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any
 
 import pytest
@@ -995,7 +995,7 @@ def test_normalized_content_hash_is_stable() -> None:
     pid = _pool_id_bytes()
     addr = Address.from_hex("0x" + "44" * 20)
     sender = Address.from_hex("0x" + "11" * 20)
-    base = dict(
+    base = SwapLogRecord(
         chain_id=CHAIN,
         pool_id=pid,
         block_number=100,
@@ -1012,15 +1012,15 @@ def test_normalized_content_hash_is_stable() -> None:
         tick=0,
         fee=3000,
     )
-    record_a = SwapLogRecord(  # type: ignore[arg-type]
-        **base,
+    record_a = replace(
+        base,
         acquisition=AcquisitionProvenance(
             endpoint_alias="robinhood_public",
             retrieval_time="2026-09-16T00:00:00+00:00",
         ),
     )
-    record_b = SwapLogRecord(  # type: ignore[arg-type]
-        **base,
+    record_b = replace(
+        base,
         acquisition=AcquisitionProvenance(
             endpoint_alias="alchemy_free",
             retrieval_time="2026-09-16T01:23:45+00:00",
@@ -1040,7 +1040,7 @@ def test_normalized_content_hash_changes_on_typed_field_change() -> None:
     pid = _pool_id_bytes()
     addr = Address.from_hex("0x" + "44" * 20)
     sender = Address.from_hex("0x" + "11" * 20)
-    common = dict(
+    record_a = SwapLogRecord(
         chain_id=CHAIN,
         pool_id=pid,
         block_number=100,
@@ -1050,19 +1050,14 @@ def test_normalized_content_hash_changes_on_typed_field_change() -> None:
         log_index=7,
         address=addr,
         sender=sender,
+        amount0=-1,
+        amount1=1,
         sqrt_price_x96=1,
         liquidity=1,
         tick=0,
         fee=3000,
     )
-    record_a = SwapLogRecord(  # type: ignore[arg-type]
-        **common, amount0=-1, amount1=1
-    )
-    record_b = SwapLogRecord(  # type: ignore[arg-type]
-        **common,
-        amount0=-1,
-        amount1=2,  # amount1 differs
-    )
+    record_b = replace(record_a, amount1=2)
     assert normalized_content_hash(record_a) != normalized_content_hash(record_b)
 
 
