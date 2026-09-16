@@ -54,6 +54,22 @@ Run from the repository root with the project Python:
 /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow finish-review T001
 ```
 
+If a healthy Developer run needs another session, its
+`CONTINUATION_REQUIRED` handoff is consumed with:
+
+```bash
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow continue-develop T001
+```
+
+The command preserves the task's `IN_DEVELOPMENT` state, attempt, branch and
+worktree, then returns a prompt for a fresh Developer. If the visible Agent is
+stopped specifically by its hard `maxTurns` limit before it can write the
+handoff, the Manager may instead pass `--max-turns-exhausted`; the controller
+creates a minimal checkpoint from the retained worktree. This flag is not a
+substitute for `BLOCKED` or `TRIAGE_REQUIRED`. One continuation is allowed per
+attempt, giving the Developer two sessions while retaining a finite cumulative
+budget.
+
 After T001 is approved, the Manager may select one dependency-complete planned
 task and activate it explicitly:
 
@@ -71,7 +87,8 @@ task ID and instruct it to:
    selected task contract;
 2. run `validate` and `status`;
 3. call `prepare-develop <task>`, visibly invoke the returned Developer, then
-   call `finish-develop <task>` after its handoff exists;
+   call `finish-develop <task>` after its terminal handoff exists; use
+   `continue-develop <task>` for `CONTINUATION_REQUIRED`;
 4. call `prepare-review <task>`, visibly invoke the returned Reviewer, then
    call `finish-review <task>`;
 5. call `prepare-retry <task>` followed by the same finish and a fresh review after
@@ -166,6 +183,10 @@ python -m tools.workflow prepare-maintenance-review M0001
 python -m tools.workflow finish-maintenance-review M0001
 ```
 
+Maintenance uses `continue-maintenance-develop M0001` under the same rules. The
+`--max-turns-exhausted` recovery is allowed only when the visible maintenance
+Developer was stopped by that hard limit.
+
 If review returns `CHANGES_REQUESTED`, run
 `prepare-maintenance-retry M0001`, invoke the fresh Developer, and repeat the
 finish/review gates. The original request and allowed paths remain frozen.
@@ -224,6 +245,9 @@ the exact implementation candidate that the Reviewer inspected.
   product question.
 - `BLOCKED`: preserve the branch and evidence for external/user action.
 - `CHANGES_REQUESTED`: preserve the branch; `retry` starts a fresh Developer.
+- `CONTINUATION_REQUIRED`: keep `IN_DEVELOPMENT`, preserve the same attempt and
+  uncommitted worktree, and start one fresh Developer through the continuation
+  gate. It is neither a task-state transition nor exception triage.
 - inconsistent `PASS`, wrong SHA, malformed JSON, protected-file edits or a dirty
   Reviewer worktree invalidate the run.
 

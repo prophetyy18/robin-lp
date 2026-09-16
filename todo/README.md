@@ -99,6 +99,9 @@ or `CHANGES_REQUESTED`; downstream code does not retroactively complete an unmet
 ### Workflow state machine
 
 `PLANNED → READY → IN_DEVELOPMENT → AWAITING_REVIEW` is the normal forward path.
+An unfinished Developer may checkpoint as `CONTINUATION_REQUIRED` without leaving
+`IN_DEVELOPMENT`; the controller then starts one fresh Developer in the same
+attempt and retained worktree.
 Review produces `APPROVED`, `CHANGES_REQUESTED` or `BLOCKED`. Exceptional evidence may produce
 `TRIAGE_REQUIRED`; a fresh read-only triager routes it to implementation repair, planning, an
 owner decision, or an external blocker. Planning changes pass through `PLANNING →

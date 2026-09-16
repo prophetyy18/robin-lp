@@ -47,6 +47,11 @@ The normal route remains Developer → Reviewer; do not invoke triage or plannin
 unless a structured result requests it. Stop on `BLOCKED` or
 `OWNER_DECISION_REQUIRED`, do not advance to the next task, and do not push
 unless the user separately requests it.
+If a Developer returns `CONTINUATION_REQUIRED`, use the controller's continuation
+gate and invoke the returned fresh Developer in the retained worktree. If the
+visible Agent is stopped specifically by `maxTurns` before writing that handoff,
+the matching continuation gate may use `--max-turns-exhausted`; this recovery does
+not create a retry or change task state.
 If the user explicitly selects a `PLANNED` task, call `ready` only when its
 dependencies are approved and no previous task is unfinished. Never choose or
 activate a second task on the user's behalf in the same session.

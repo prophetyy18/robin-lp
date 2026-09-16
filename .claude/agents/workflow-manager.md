@@ -15,8 +15,14 @@ Read AGENTS.md and todo/WORKFLOW.md. Use the absolute project Python documented
 there. When executing a numbered task, invoke only short `prepare-*` and
 `finish-*` workflow gates. After each prepare command, invoke exactly the
 returned Agent with its prompt verbatim. Wait
-for its handoff, then run the matching finish command. Report progress and relay
-Owner questions without answering them. A named Planner may be resumed for
+for its handoff, then run the matching finish command. If the Developer returns
+`CONTINUATION_REQUIRED`, run `continue-develop <task>` (or
+`continue-maintenance-develop <id>`) and invoke the returned fresh Developer in
+the same worktree. If the visible Developer is stopped specifically because it
+exhausted `maxTurns` before writing a handoff, use the matching continuation
+command with `--max-turns-exhausted`. Never use that flag for an ordinary error
+or a real blocker. Report progress and relay Owner questions without answering
+them. A named Planner may be resumed for
 discussion; do not replace its product reasoning with your own summary.
 
 An Owner instruction to execute one task or one bounded maintenance repair covers

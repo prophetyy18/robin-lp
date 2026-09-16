@@ -26,6 +26,12 @@ def _parser() -> argparse.ArgumentParser:
         "finish-develop", help="validate and seal a visible developer result"
     )
     finish_develop.add_argument("task_id")
+    continue_develop = subparsers.add_parser(
+        "continue-develop",
+        help="continue an unfinished developer session in the same task attempt",
+    )
+    continue_develop.add_argument("task_id")
+    continue_develop.add_argument("--max-turns-exhausted", action="store_true")
     prepare_retry = subparsers.add_parser(
         "prepare-retry", help="prepare a fresh visible developer after changes requested"
     )
@@ -65,6 +71,10 @@ def _parser() -> argparse.ArgumentParser:
     maintenance.add_argument("--related-task")
     for name, help_text in (
         ("finish-maintenance-develop", "validate and seal a maintenance developer result"),
+        (
+            "continue-maintenance-develop",
+            "continue an unfinished maintenance developer session in the same attempt",
+        ),
         ("prepare-maintenance-retry", "prepare a maintenance repair after review failure"),
         ("prepare-maintenance-review", "prepare an independent maintenance review"),
         ("finish-maintenance-review", "validate and record a maintenance review"),
@@ -72,6 +82,8 @@ def _parser() -> argparse.ArgumentParser:
     ):
         command = subparsers.add_parser(name, help=help_text)
         command.add_argument("maintenance_id")
+        if name == "continue-maintenance-develop":
+            command.add_argument("--max-turns-exhausted", action="store_true")
     return parser
 
 
@@ -90,6 +102,11 @@ def main(argv: list[str] | None = None) -> None:
             output = manager.prepare_develop(args.task_id)
         elif args.command == "finish-develop":
             output = manager.finish_develop(args.task_id).to_dict()
+        elif args.command == "continue-develop":
+            output = manager.continue_develop(
+                args.task_id,
+                max_turns_exhausted=args.max_turns_exhausted,
+            )
         elif args.command == "prepare-retry":
             output = manager.prepare_develop(args.task_id, retry=True)
         elif args.command == "prepare-review":
@@ -128,6 +145,11 @@ def main(argv: list[str] | None = None) -> None:
             )
         elif args.command == "finish-maintenance-develop":
             output = manager.finish_maintenance_develop(args.maintenance_id).to_dict()
+        elif args.command == "continue-maintenance-develop":
+            output = manager.continue_maintenance_develop(
+                args.maintenance_id,
+                max_turns_exhausted=args.max_turns_exhausted,
+            )
         elif args.command == "prepare-maintenance-retry":
             output = manager.prepare_maintenance_retry(args.maintenance_id)
         elif args.command == "prepare-maintenance-review":

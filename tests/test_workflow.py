@@ -170,6 +170,95 @@ def test_visible_manager_prepare_and_finish_round_trip(tmp_path: Path) -> None:
     assert manager.status()["workflow_state"] == "APPROVED"
 
 
+def test_developer_continuation_preserves_attempt_worktree_and_state(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    prepared = manager.prepare_develop("T001")
+    development = Path(str(prepared["development_worktree"]))
+    (development / "src" / "value.txt").write_text("partially repaired\n", encoding="utf-8")
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "CONTINUATION_REQUIRED",
+            "summary": "implementation is healthy but needs another session",
+            "commands": [{"command": "targeted-check", "result": "passed"}],
+            "residual_risks": [],
+            "continuation": {
+                "reason": "TURN_BUDGET",
+                "completed_work": ["implemented the main path"],
+                "remaining_work": ["add the failure-path test"],
+                "next_actions": ["inspect the retained diff and add the test"],
+                "changed_paths": ["src/value.txt"],
+            },
+        },
+    )
+
+    continued = manager.continue_develop("T001")
+
+    assert continued["attempt"] == prepared["attempt"]
+    assert continued["branch"] == prepared["branch"]
+    assert continued["development_worktree"] == prepared["development_worktree"]
+    assert continued["continuation_count"] == 1
+    assert manager.status()["workflow_state"] == "IN_DEVELOPMENT"
+    assert (development / ".workflow" / "developer-continuation.json").is_file()
+    assert not (development / ".workflow" / "developer-result.json").exists()
+
+    (development / "src" / "value.txt").write_text("good\n", encoding="utf-8")
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "CANDIDATE_READY",
+            "summary": "continued session completed the task",
+            "commands": [{"command": "full-check", "result": "passed"}],
+            "residual_risks": [],
+        },
+    )
+    candidate = manager.finish_develop("T001")
+
+    assert candidate.candidate_commit is not None
+    assert manager.status()["workflow_state"] == "AWAITING_REVIEW"
+    assert _git(development, "status", "--porcelain") == ""
+
+
+def test_max_turns_continuation_recovers_without_developer_handoff(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    prepared = manager.prepare_develop("T001")
+    development = Path(str(prepared["development_worktree"]))
+    (development / "src" / "value.txt").write_text("partial\n", encoding="utf-8")
+
+    continued = manager.continue_develop("T001", max_turns_exhausted=True)
+    checkpoint = json.loads(
+        (development / ".workflow" / "developer-continuation.json").read_text(encoding="utf-8")
+    )
+
+    assert continued["continuation_count"] == 1
+    assert checkpoint["outcome"] == "CONTINUATION_REQUIRED"
+    assert checkpoint["continuation"]["changed_paths"] == ["src/value.txt"]
+    assert manager.status()["workflow_state"] == "IN_DEVELOPMENT"
+
+
+def test_continuation_requires_handoff_or_explicit_max_turns_signal(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    manager.prepare_develop("T001")
+
+    with pytest.raises(WorkflowError, match="CONTINUATION_REQUIRED handoff"):
+        manager.continue_develop("T001")
+
+
+def test_development_attempt_allows_only_one_continuation(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    manager.prepare_develop("T001")
+    manager.continue_develop("T001", max_turns_exhausted=True)
+
+    with pytest.raises(WorkflowError, match="continuation limit reached"):
+        manager.continue_develop("T001", max_turns_exhausted=True)
+
+
 def _finish_seed_task_for_maintenance(repo: Path, manager: WorkflowManager) -> None:
     config = manager.load_config()
     config["tasks"]["T001"]["status"] = "APPROVED"
@@ -199,6 +288,9 @@ def test_low_risk_maintenance_round_trip_does_not_add_product_task(tmp_path: Pat
     assert prepared["agent"] == "stage-developer"
     development = Path(str(prepared["development_worktree"]))
     (development / "src" / "value.txt").write_text("repaired\n", encoding="utf-8")
+    continued = manager.continue_maintenance_develop("M0001", max_turns_exhausted=True)
+    assert continued["attempt"] == prepared["attempt"]
+    assert continued["continuation_count"] == 1
     _write_json(
         development / ".workflow" / "developer-result.json",
         {
