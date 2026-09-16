@@ -1,0 +1,33 @@
+{
+  "_meta": {
+    "description": "Expected Robinhood Chain testnet V4 deployment used by T024 as the baseline for the capability probe. The chain_id comes from the project owner's stated value (46630); the PoolManager and StateView addresses come from the project's CREATE2 derivation (same addresses as mainnet by design — see ADR-005 §'V1 admits one chain' and the Uniswap V4 CREATE2 deployment). The bytecode hashes are pinned from the on-chain probe report under docs/implement/protocol-artifacts/chain-capability-report-robinhood-testnet.json; subsequent probes must match or fail closed with a 'bytecode_drift' reason.",
+    "source_retrieval_time": "2026-09-16",
+    "chain_name": "Robinhood Chain testnet",
+    "expected_chain_id": 46630,
+    "source_chain_id": "owner-confirmed; verified by the on-chain probe at 2026-09-16",
+    "source_pool_manager": "project documentation; CREATE2 deployment produces the same address as mainnet by design",
+    "license": "Documentation references are public; deployment addresses are public facts on the respective chains.",
+    "verification_status": "verified-against-2-endpoints-2026-09-16",
+    "reference_commit": "e50237c43811bd9b526eff40f26772152a42daba",
+    "verification_evidence": {
+      "endpoints_used": [
+        "alchemy-testnet",
+        "robinhood-official-testnet"
+      ],
+      "report_path": "docs/implement/protocol-artifacts/chain-capability-report-robinhood-testnet.json"
+    }
+  },
+  "chain_id": 46630,
+  "pool_manager_address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+  "state_view_address": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
+  "pool_manager_code_hash": "6eb21c69298b064e37fcf8089a941ae096fe08c0f179b2d399567aef1b10585b",
+  "state_view_code_hash": "60cd24035661345b74c14895a641420f2598f910e376fb3f115bbd6bf504c8c0",
+  "min_block_number": null,
+  "_verification_notes": [
+    "Re-run probe_chain_capability(adapter, ExpectedDeployment(...)) against the two configured endpoints (alchemy-testnet from env ROBINHOOD_CHAIN_RPC_URL and robinhood-official-testnet at https://rpc.testnet.chain.robinhood.com) and commit the resulting ChainCapabilityReport under docs/implement/protocol-artifacts/chain-capability-report-robinhood-testnet.json.",
+    "pool_manager_code_hash and state_view_code_hash were populated from the report's pool_manager.<endpoint>.code_hash and state_view.<endpoint>.code_hash fields after every endpoint agreed on the value.",
+    "All endpoints must agree on chain_id, PoolManager bytecode hash, and StateView bytecode hash before this artifact can be marked 'verified'.",
+    "If any endpoint reports a different chain_id or bytecode hash, the report fails and the deployment is rejected (T024 acceptance).",
+    "Bytecode drift vs the reference commit e50237c43811bd9b526eff40f26772152a42daba fails the report with a 'bytecode_drift' reason; the probe does NOT fall back to the mainnet code hash."
+  ]
+}

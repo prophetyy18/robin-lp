@@ -1,0 +1,103 @@
+{
+  "archive_depth_blocks": {
+    "alchemy-testnet": 120242334,
+    "robinhood-official-testnet": 120242334
+  },
+  "archive_probe_method": "eth_getCode(addr, earliest)",
+  "cross_endpoint": {
+    "chain_id_agree": true,
+    "latest_block_agree": true,
+    "observed_chain_ids": {
+      "alchemy-testnet": 46630,
+      "robinhood-official-testnet": 46630
+    },
+    "observed_latest_blocks": {
+      "alchemy-testnet": 120242334,
+      "robinhood-official-testnet": 120242334
+    },
+    "observed_pinned_block_hashes": {
+      "alchemy-testnet": "0x0b21fedef0b15a39d5d3b93fc6ce8b2108653c087f5e4e96bdfd3593bf3f801b",
+      "robinhood-official-testnet": "0x0b21fedef0b15a39d5d3b93fc6ce8b2108653c087f5e4e96bdfd3593bf3f801b"
+    },
+    "pinned_block_hash_agree": true,
+    "pool_manager_code_hash_agree": true,
+    "state_view_code_hash_agree": true
+  },
+  "deployment_evidence": {
+    "pool_manager": {
+      "address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+      "archive_probe_method": "eth_getCode(addr, earliest) + eth_getCode(addr, 0x395604f)",
+      "deployed_at_block_zero": false,
+      "earliest_block_with_code": 60121168,
+      "earliest_block_with_code_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reason": null
+    },
+    "state_view": {
+      "address": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
+      "archive_probe_method": "eth_getCode(addr, earliest) + eth_getCode(addr, 0x395604f)",
+      "deployed_at_block_zero": false,
+      "earliest_block_with_code": 60121168,
+      "earliest_block_with_code_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reason": null
+    }
+  },
+  "errors": [],
+  "expected_chain_id": 46630,
+  "finalized_block": {
+    "alchemy-testnet": 120238006,
+    "robinhood-official-testnet": 120238006
+  },
+  "first_run": false,
+  "genesis_block_number_zero": true,
+  "genesis_hash": "0x829a42e6d68c872aafcef3abb2123fe371138fc415dd8b44381bbbf23049dd32",
+  "latest_block": {
+    "alchemy-testnet": 120242334,
+    "robinhood-official-testnet": 120242334
+  },
+  "metrics": {
+    "failovers": 0,
+    "failures": 0,
+    "range_splits": 0,
+    "requests": 19,
+    "retries": 0,
+    "successes": 19
+  },
+  "observed_chain_ids": {
+    "alchemy-testnet": 46630,
+    "robinhood-official-testnet": 46630
+  },
+  "passed": true,
+  "per_endpoint_pinned_block_hashes": {
+    "alchemy-testnet": "0x0b21fedef0b15a39d5d3b93fc6ce8b2108653c087f5e4e96bdfd3593bf3f801b",
+    "robinhood-official-testnet": "0x0b21fedef0b15a39d5d3b93fc6ce8b2108653c087f5e4e96bdfd3593bf3f801b"
+  },
+  "pinned_at": "2026-09-16T04:47:57+00:00",
+  "pinned_block_hash": "0x0b21fedef0b15a39d5d3b93fc6ce8b2108653c087f5e4e96bdfd3593bf3f801b",
+  "pinned_block_number": 120242334,
+  "pool_manager": {
+    "alchemy-testnet": {
+      "bytecode_size": 24009,
+      "code_hash": "6eb21c69298b064e37fcf8089a941ae096fe08c0f179b2d399567aef1b10585b"
+    },
+    "robinhood-official-testnet": {
+      "bytecode_size": 24009,
+      "code_hash": "6eb21c69298b064e37fcf8089a941ae096fe08c0f179b2d399567aef1b10585b"
+    }
+  },
+  "safe_block": {
+    "alchemy-testnet": 120238006,
+    "robinhood-official-testnet": 120238006
+  },
+  "source_retrieval_time": "2026-09-16T04:47:57+00:00",
+  "state_view": {
+    "alchemy-testnet": {
+      "bytecode_size": 3531,
+      "code_hash": "60cd24035661345b74c14895a641420f2598f910e376fb3f115bbd6bf504c8c0"
+    },
+    "robinhood-official-testnet": {
+      "bytecode_size": 3531,
+      "code_hash": "60cd24035661345b74c14895a641420f2598f910e376fb3f115bbd6bf504c8c0"
+    }
+  },
+  "unsupported_block_tags": {}
+}
