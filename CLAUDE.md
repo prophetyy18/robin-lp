@@ -47,6 +47,10 @@ The normal route remains Developer → Reviewer; do not invoke triage or plannin
 unless a structured result requests it. Stop on `BLOCKED` or
 `OWNER_DECISION_REQUIRED`, do not advance to the next task, and do not push
 unless the user separately requests it.
+An explicit Owner request to amend one or more still-`PLANNED` contracts may use
+the separate `prepare-amendment` → Planner → `finish-amendment` → independent
+amendment-review route. This does not require a synthetic Developer failure and
+must not activate the target tasks or consume implementation attempts.
 If a Developer returns `CONTINUATION_REQUIRED`, use the controller's continuation
 gate and invoke the returned fresh Developer in the retained worktree. If the
 visible Agent is stopped specifically by `maxTurns` before writing that handoff,

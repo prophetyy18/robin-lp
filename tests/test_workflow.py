@@ -271,6 +271,164 @@ def _finish_seed_task_for_maintenance(repo: Path, manager: WorkflowManager) -> N
     _git(repo, "commit", "-m", "approve seed task")
 
 
+def _make_future_task_planned(repo: Path, manager: WorkflowManager) -> None:
+    config = manager.load_config()
+    config["tasks"]["T001"]["status"] = "PLANNED"
+    config["active_task"] = "T000"
+    config["active_phase"] = "P00"
+    config["workflow_state"] = "APPROVED"
+    _write_json(repo / "todo" / "config.yaml", config)
+    _git(repo, "add", "todo/config.yaml")
+    _git(repo, "commit", "-m", "leave future task planned")
+
+
+def test_owner_amendment_updates_planned_contract_without_activating_task(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    prepared = manager.prepare_amendment(
+        task_ids=["T001"],
+        layer="CONTRACT",
+        summary="clarify future acceptance",
+        owner_direction="Require an explicit deterministic assertion.",
+    )
+    with pytest.raises(WorkflowError, match="owner amendment is unfinished"):
+        manager.ready("T001")
+    amendment = Path(str(prepared["worktree"]))
+    task = amendment / "todo" / "phases" / "P00" / "T001.md"
+    task.write_text(task.read_text(encoding="utf-8") + "\nOwner clarification.\n", encoding="utf-8")
+    _write_json(
+        amendment / ".workflow" / "amendment-result.json",
+        {
+            "amendment_id": "A0001",
+            "outcome": "AMENDMENT_READY",
+            "summary": "clarified the target contract",
+            "rationale": "implements the recorded Owner direction",
+            "unresolved_questions": [],
+        },
+    )
+    candidate = manager.finish_amendment("A0001")
+    assert candidate.status == "AWAITING_REVIEW"
+    review = manager.prepare_amendment_review("A0001")
+    review_worktree = Path(str(review["review_worktree"]))
+    _write_json(
+        review_worktree / ".workflow" / "amendment-review-result.json",
+        {
+            "amendment_id": "A0001",
+            "base_commit": candidate.base_commit,
+            "candidate_commit": candidate.candidate_commit,
+            "verdict": "PASS",
+            "summary": "direction and scope are satisfied",
+            "required_changes": [],
+            "unknowns": [],
+        },
+    )
+
+    state, report = manager.finish_amendment_review("A0001")
+
+    assert state == "APPROVED"
+    assert report.is_file()
+    assert "Owner clarification" in (repo / "todo" / "phases" / "P00" / "T001.md").read_text(
+        encoding="utf-8"
+    )
+    config = manager.load_config()
+    assert config["tasks"]["T001"]["status"] == "PLANNED"
+    assert config["tasks"]["T001"]["attempt"] == 0
+    assert config["active_task"] == "T000"
+    assert manager.amendment_status("A0001") == {
+        "amendment_id": "A0001",
+        "status": "APPROVED",
+    }
+
+
+def test_owner_amendment_rejects_an_unfinished_active_task(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+
+    with pytest.raises(WorkflowError, match="T001 is unfinished"):
+        manager.prepare_amendment(
+            task_ids=["T001"],
+            layer="CONTRACT",
+            summary="invalid concurrent amendment",
+            owner_direction="Change the active task.",
+        )
+
+
+def test_owner_amendment_rejects_an_untargeted_contract_change(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    prepared = manager.prepare_amendment(
+        task_ids=["T001"],
+        layer="CONTRACT",
+        summary="clarify future acceptance",
+        owner_direction="Change only T001.",
+    )
+    amendment = Path(str(prepared["worktree"]))
+    other = amendment / "todo" / "phases" / "P00" / "T000.md"
+    other.write_text(other.read_text(encoding="utf-8") + "\nout of scope\n", encoding="utf-8")
+    _write_json(
+        amendment / ".workflow" / "amendment-result.json",
+        {
+            "amendment_id": "A0001",
+            "outcome": "AMENDMENT_READY",
+            "summary": "changed the wrong task",
+            "rationale": "invalid test fixture",
+            "unresolved_questions": [],
+        },
+    )
+
+    with pytest.raises(WorkflowError, match="outside the owner amendment"):
+        manager.finish_amendment("A0001")
+
+
+def test_owner_amendment_review_failure_starts_fresh_planner_retry(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    prepared = manager.prepare_amendment(
+        task_ids=["T001"],
+        layer="CONTRACT",
+        summary="clarify future acceptance",
+        owner_direction="Require an explicit deterministic assertion.",
+    )
+    amendment = Path(str(prepared["worktree"]))
+    _write_json(
+        amendment / ".workflow" / "amendment-result.json",
+        {
+            "amendment_id": "A0001",
+            "outcome": "NO_CHANGE_REQUIRED",
+            "summary": "incorrectly claimed no change was needed",
+            "rationale": "candidate for rejection",
+            "unresolved_questions": [],
+        },
+    )
+    candidate = manager.finish_amendment("A0001")
+    review = manager.prepare_amendment_review("A0001")
+    review_worktree = Path(str(review["review_worktree"]))
+    _write_json(
+        review_worktree / ".workflow" / "amendment-review-result.json",
+        {
+            "amendment_id": "A0001",
+            "base_commit": candidate.base_commit,
+            "candidate_commit": candidate.candidate_commit,
+            "verdict": "FAIL",
+            "summary": "the Owner direction requires a contract change",
+            "required_changes": ["add the deterministic assertion"],
+            "unknowns": [],
+        },
+    )
+    state, _ = manager.finish_amendment_review("A0001")
+
+    retry = manager.prepare_amendment_retry("A0001")
+
+    assert state == "CHANGES_REQUESTED"
+    assert retry["agent"] == "planner"
+    assert retry["attempt"] == 2
+    assert retry["worktree"] == prepared["worktree"]
+    assert manager.amendment_status("A0001")["status"] == "PLANNING"
+
+
 def test_low_risk_maintenance_round_trip_does_not_add_product_task(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
     manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")

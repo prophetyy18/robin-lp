@@ -12,13 +12,14 @@ import json
 import re
 import subprocess
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 TASK_PATTERN = re.compile(r"^T[0-9]{3}$")
 MAINTENANCE_PATTERN = re.compile(r"^M[0-9]{4}$")
+AMENDMENT_PATTERN = re.compile(r"^A[0-9]{4}$")
 PHASE_PATTERN = re.compile(r"^P[0-9]{2}$")
 REQUIRED_AGENT_MODEL = "MiniMax-M3[1m]"
 MAX_DEVELOPMENT_CONTINUATIONS = 1
@@ -182,6 +183,60 @@ class PlanRecord:
             classification=_required_string(value, "classification"),
             base_commit=_required_string(value, "base_commit"),
             candidate_commit=_required_string(value, "candidate_commit"),
+        )
+
+
+@dataclass(frozen=True)
+class AmendmentRecord:
+    amendment_id: str
+    status: str
+    attempt: int
+    layer: str
+    task_ids: tuple[str, ...]
+    base_commit: str
+    candidate_commit: str | None
+    branch: str
+    worktree: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "amendment_id": self.amendment_id,
+            "status": self.status,
+            "attempt": self.attempt,
+            "layer": self.layer,
+            "task_ids": list(self.task_ids),
+            "base_commit": self.base_commit,
+            "candidate_commit": self.candidate_commit,
+            "branch": self.branch,
+            "worktree": self.worktree,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, object]) -> AmendmentRecord:
+        amendment_id = _required_string(value, "amendment_id")
+        if not AMENDMENT_PATTERN.fullmatch(amendment_id):
+            raise WorkflowError(f"invalid amendment ID {amendment_id!r}")
+        status = _required_string(value, "status")
+        if status not in {"PLANNING", "AWAITING_REVIEW", "CHANGES_REQUESTED", "BLOCKED"}:
+            raise WorkflowError(f"invalid amendment status {status!r}")
+        layer = _required_string(value, "layer")
+        if layer not in {"CONTRACT", "SPEC", "INTENT"}:
+            raise WorkflowError(f"invalid amendment layer {layer!r}")
+        raw_task_ids = value.get("task_ids")
+        if not isinstance(raw_task_ids, list) or not raw_task_ids:
+            raise WorkflowError("amendment task_ids must be a non-empty list")
+        if not all(isinstance(item, str) and TASK_PATTERN.fullmatch(item) for item in raw_task_ids):
+            raise WorkflowError("amendment task_ids contain an invalid task ID")
+        return cls(
+            amendment_id=amendment_id,
+            status=status,
+            attempt=_required_int(value, "attempt"),
+            layer=layer,
+            task_ids=tuple(cast(list[str], raw_task_ids)),
+            base_commit=_required_string(value, "base_commit"),
+            candidate_commit=_optional_string(value, "candidate_commit"),
+            branch=_required_string(value, "branch"),
+            worktree=_required_string(value, "worktree"),
         )
 
 
@@ -376,6 +431,19 @@ def _without_planner_owned_config_fields(
     return comparable
 
 
+def _without_amendment_owned_config_fields(
+    config: Mapping[str, Any], task_ids: Sequence[str], layer: str
+) -> dict[str, Any]:
+    comparable = cast(dict[str, Any], json.loads(json.dumps(config)))
+    for task_id in task_ids:
+        comparable["tasks"][task_id].pop("depends_on", None)
+    if layer in {"SPEC", "INTENT"}:
+        comparable.pop("spec_revision", None)
+    if layer == "INTENT":
+        comparable.pop("intent_revision", None)
+    return comparable
+
+
 def _render_review(result: Mapping[str, Any]) -> str:
     lines = [
         f"# {result['task_id']} independent review",
@@ -413,6 +481,27 @@ def _render_review(result: Mapping[str, Any]) -> str:
 def _render_plan_review(result: Mapping[str, Any]) -> str:
     lines = [
         f"# {result['task_id']} planning review",
+        "",
+        f"- Base commit: `{result['base_commit']}`",
+        f"- Candidate commit: `{result['candidate_commit']}`",
+        f"- Verdict: **{result['verdict']}**",
+        "",
+        "## Summary",
+        "",
+        result["summary"] or "No summary supplied.",
+        "",
+    ]
+    for key, title in (("required_changes", "Required changes"), ("unknowns", "Unknowns")):
+        lines.extend([f"## {title}", ""])
+        values = result.get(key, []) or ["None."]
+        lines.extend(f"- {item}" for item in values)
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_amendment_review(result: Mapping[str, Any]) -> str:
+    lines = [
+        f"# {result['amendment_id']} owner amendment review",
         "",
         f"- Base commit: `{result['base_commit']}`",
         f"- Candidate commit: `{result['candidate_commit']}`",
@@ -561,6 +650,7 @@ class WorkflowManager:
             for record in self._maintenance_records()
             if record.status in {"IN_DEVELOPMENT", "AWAITING_REVIEW", "CHANGES_REQUESTED"}
         ]
+        active_amendments = [record.to_dict() for record in self._amendment_records()]
         return {
             "active_phase": config.get("active_phase"),
             "active_task": active,
@@ -569,6 +659,7 @@ class WorkflowManager:
             "attempt": runtime.to_dict() if runtime else None,
             "plan": active_plan.to_dict() if active_plan else None,
             "active_maintenance": active_maintenance,
+            "active_amendments": active_amendments,
         }
 
     def validate_repository(self) -> None:
@@ -585,6 +676,8 @@ class WorkflowManager:
                 raise WorkflowError(f"{agent} agent is missing")
         for name in (
             "config",
+            "amendment-result",
+            "amendment-review-result",
             "developer-result",
             "review-result",
             "triage-result",
@@ -618,6 +711,8 @@ class WorkflowManager:
 
     def ready(self, task_id: str) -> str:
         self._ensure_clean_main()
+        if self._amendment_records():
+            raise WorkflowError("cannot activate a task while an owner amendment is unfinished")
         config = self.load_config()
         task = self._task(config, task_id)
         if task["status"] != "PLANNED":
@@ -666,6 +761,47 @@ class WorkflowManager:
         if not path.is_file():
             return None
         return PlanRecord.from_dict(_load_json(path))
+
+    def _amendment_path(self, amendment_id: str) -> Path:
+        return self.runtime_dir / f"{amendment_id}.json"
+
+    def _amendment_request_path(self, amendment_id: str) -> Path:
+        return self.runtime_dir / f"{amendment_id}-request.json"
+
+    def save_amendment(self, record: AmendmentRecord) -> None:
+        _write_json(self._amendment_path(record.amendment_id), record.to_dict())
+
+    def _amendment_records(self) -> list[AmendmentRecord]:
+        if not self.runtime_dir.is_dir():
+            return []
+        return [
+            AmendmentRecord.from_dict(_load_json(path))
+            for path in sorted(self.runtime_dir.glob("A[0-9][0-9][0-9][0-9].json"))
+        ]
+
+    def load_amendment(self, amendment_id: str) -> AmendmentRecord | None:
+        if not AMENDMENT_PATTERN.fullmatch(amendment_id):
+            raise WorkflowError(f"invalid amendment ID {amendment_id!r}")
+        path = self._amendment_path(amendment_id)
+        if not path.is_file():
+            return None
+        return AmendmentRecord.from_dict(_load_json(path))
+
+    def _next_amendment_id(self) -> str:
+        numbers: set[int] = set()
+        amendment_root = self.repo / "todo" / "amendments"
+        if amendment_root.is_dir():
+            for path in amendment_root.glob("A[0-9][0-9][0-9][0-9]"):
+                if path.is_dir() and AMENDMENT_PATTERN.fullmatch(path.name):
+                    numbers.add(int(path.name[1:]))
+        if self.runtime_dir.is_dir():
+            for path in self.runtime_dir.glob("A[0-9][0-9][0-9][0-9].json"):
+                if AMENDMENT_PATTERN.fullmatch(path.stem):
+                    numbers.add(int(path.stem[1:]))
+        number = max(numbers, default=0) + 1
+        if number > 9999:
+            raise WorkflowError("amendment ID space is exhausted")
+        return f"A{number:04d}"
 
     def _maintenance_path(self, maintenance_id: str) -> Path:
         return self.runtime_dir / f"{maintenance_id}.json"
@@ -1150,6 +1286,332 @@ class WorkflowManager:
         if not isinstance(value.get("requested_change"), str):
             raise WorkflowError("triage_request requested_change must be a string")
 
+    def prepare_amendment(
+        self,
+        *,
+        task_ids: Sequence[str],
+        layer: str,
+        summary: str,
+        owner_direction: str,
+    ) -> dict[str, object]:
+        """Prepare an Owner-directed planning amendment without a Developer failure."""
+        self._ensure_clean_main()
+        config = self.load_config()
+        active = config.get("active_task")
+        if isinstance(active, str) and config["tasks"][active]["status"] not in {
+            "APPROVED",
+            "PLANNED",
+        }:
+            raise WorkflowError(f"cannot start an amendment while {active} is unfinished")
+        if self._amendment_records():
+            raise WorkflowError("another owner amendment is already active")
+        active_repairs = [
+            record.maintenance_id
+            for record in self._maintenance_records()
+            if record.status in {"IN_DEVELOPMENT", "AWAITING_REVIEW", "CHANGES_REQUESTED"}
+        ]
+        if active_repairs:
+            raise WorkflowError("cannot start an amendment while maintenance is unfinished")
+        normalized = tuple(dict.fromkeys(task_ids))
+        if not normalized:
+            raise WorkflowError("an amendment requires at least one target task")
+        if len(normalized) > 8:
+            raise WorkflowError("an amendment may target at most eight tasks")
+        for task_id in normalized:
+            task = self._task(config, task_id)
+            if task["status"] != "PLANNED":
+                raise WorkflowError(
+                    f"owner amendment targets must be PLANNED, found {task_id}={task['status']}"
+                )
+        layer = layer.upper()
+        if layer not in {"CONTRACT", "SPEC", "INTENT"}:
+            raise WorkflowError("amendment layer must be CONTRACT, SPEC, or INTENT")
+        if not summary.strip() or not owner_direction.strip():
+            raise WorkflowError("amendment summary and owner direction must be non-empty")
+        amendment_id = self._next_amendment_id()
+        base = _sha(self.repo)
+        branch = f"amendment/{amendment_id.lower()}-attempt-001"
+        worktree = self.worktree_root / f"amendment-{amendment_id.lower()}-attempt-001"
+        worktree.parent.mkdir(parents=True, exist_ok=True)
+        if worktree.exists():
+            raise WorkflowError(f"amendment worktree path already exists: {worktree}")
+        _git(self.repo, "worktree", "add", "-b", branch, str(worktree), base)
+        record = AmendmentRecord(
+            amendment_id=amendment_id,
+            status="PLANNING",
+            attempt=1,
+            layer=layer,
+            task_ids=normalized,
+            base_commit=base,
+            candidate_commit=None,
+            branch=branch,
+            worktree=str(worktree),
+        )
+        request: dict[str, object] = {
+            "amendment_id": amendment_id,
+            "task_ids": list(normalized),
+            "layer": layer,
+            "summary": summary.strip(),
+            "owner_direction": owner_direction.strip(),
+        }
+        self.save_amendment(record)
+        _write_json(self._amendment_request_path(amendment_id), request)
+        request_path = worktree / ".workflow" / "amendment-request.json"
+        _write_json(request_path, request)
+        task_files = [config["tasks"][task_id]["task_file"] for task_id in normalized]
+        prompt = (
+            f"Apply Owner-directed amendment {amendment_id} to exactly these PLANNED tasks: "
+            f"{', '.join(normalized)}. Read {request_path}. Target contracts: "
+            f"{', '.join(task_files)}. Layer: {layer}. Work only in {worktree}. Do not implement "
+            "business code or change workflow state. Make only the smallest planning changes "
+            "required by the recorded Owner direction. Write the structured result only to "
+            f"{worktree / '.workflow' / 'amendment-result.json'}."
+        )
+        return {**record.to_dict(), "agent": "planner", "prompt": prompt}
+
+    def finish_amendment(self, amendment_id: str) -> AmendmentRecord:
+        record = self.load_amendment(amendment_id)
+        if record is None or record.status != "PLANNING":
+            raise WorkflowError("finish-amendment requires an active PLANNING amendment")
+        worktree = Path(record.worktree)
+        request = _load_json(self._amendment_request_path(amendment_id))
+        result_path = worktree / ".workflow" / "amendment-result.json"
+        if not result_path.is_file():
+            raise WorkflowError(f"amendment result is missing: {result_path}")
+        result = _load_json(result_path)
+        outcome = self._validate_amendment_result(result, amendment_id)
+        changed = [
+            path for path in _working_tree_changes(worktree) if not path.startswith(".workflow/")
+        ]
+        config = self.load_config(worktree)
+        base_config = self.load_config()
+        allowed_contracts = {
+            base_config["tasks"][task_id]["task_file"] for task_id in record.task_ids
+        }
+        forbidden: list[str] = []
+        for path in changed:
+            allowed = path in allowed_contracts or path == "todo/config.yaml"
+            if record.layer in {"SPEC", "INTENT"}:
+                allowed = allowed or path.startswith("docs/spec/")
+            if record.layer == "INTENT":
+                allowed = allowed or path.startswith("docs/intent/")
+            if not allowed:
+                forbidden.append(path)
+        if forbidden:
+            raise WorkflowError(
+                "planner changed paths outside the owner amendment: " + ", ".join(forbidden)
+            )
+        if "todo/config.yaml" in changed and _without_amendment_owned_config_fields(
+            base_config, record.task_ids, record.layer
+        ) != _without_amendment_owned_config_fields(config, record.task_ids, record.layer):
+            raise WorkflowError(
+                "planner changed workflow state, evidence, model, SHA, or a non-target config field"
+            )
+        if outcome == "NO_CHANGE_REQUIRED" and changed:
+            raise WorkflowError("NO_CHANGE_REQUIRED contradicts planner file changes")
+        relative_root = Path("todo") / "amendments" / amendment_id
+        _write_json(worktree / relative_root / "request.json", request)
+        _write_json(worktree / relative_root / f"planner-{record.attempt:03d}.json", result)
+        result_path.unlink()
+        (worktree / ".workflow" / "amendment-request.json").unlink(missing_ok=True)
+        if outcome == "BLOCKED":
+            _git(worktree, "add", "-A")
+            _git(worktree, "commit", "-m", f"chore(amendment): record {amendment_id} blocked")
+            updated = replace(record, status="BLOCKED")
+            self.save_amendment(updated)
+            return updated
+        _git(worktree, "diff", "--check")
+        _git(worktree, "add", "-A")
+        _git(worktree, "commit", "-m", f"docs({amendment_id.lower()}): owner amendment candidate")
+        updated = AmendmentRecord(
+            amendment_id=record.amendment_id,
+            status="AWAITING_REVIEW",
+            attempt=record.attempt,
+            layer=record.layer,
+            task_ids=record.task_ids,
+            base_commit=record.base_commit,
+            candidate_commit=_sha(worktree),
+            branch=record.branch,
+            worktree=record.worktree,
+        )
+        self.save_amendment(updated)
+        return updated
+
+    def _validate_amendment_result(self, result: Mapping[str, Any], amendment_id: str) -> str:
+        _validate_object_keys(
+            result,
+            required={"amendment_id", "outcome", "summary", "rationale", "unresolved_questions"},
+            label="amendment result",
+        )
+        if result.get("amendment_id") != amendment_id:
+            raise WorkflowError("amendment result identity does not match")
+        outcome = result.get("outcome")
+        if outcome not in {"AMENDMENT_READY", "NO_CHANGE_REQUIRED", "BLOCKED"}:
+            raise WorkflowError("amendment result outcome is invalid")
+        if not isinstance(result.get("summary"), str) or not isinstance(
+            result.get("rationale"), str
+        ):
+            raise WorkflowError("amendment summary and rationale must be strings")
+        _validate_string_list(result.get("unresolved_questions"), "amendment unresolved_questions")
+        return cast(str, outcome)
+
+    def prepare_amendment_review(self, amendment_id: str) -> dict[str, object]:
+        record = self.load_amendment(amendment_id)
+        if record is None or record.status != "AWAITING_REVIEW" or record.candidate_commit is None:
+            raise WorkflowError("amendment review requires an AWAITING_REVIEW candidate")
+        worktree = Path(record.worktree)
+        if (
+            _sha(worktree) != record.candidate_commit
+            or _git(worktree, "status", "--porcelain").stdout
+        ):
+            raise WorkflowError("amendment worktree must exactly match its clean candidate")
+        review_worktree = (
+            self.worktree_root / f"amendment-review-{amendment_id.lower()}-{record.attempt:03d}"
+        )
+        if review_worktree.exists():
+            raise WorkflowError(f"amendment review worktree already exists: {review_worktree}")
+        _git(
+            self.repo, "worktree", "add", "--detach", str(review_worktree), record.candidate_commit
+        )
+        prompt = (
+            f"Independently review Owner amendment {amendment_id}. Base commit: "
+            f"{record.base_commit}. Candidate commit: {record.candidate_commit}. Target tasks: "
+            f"{', '.join(record.task_ids)}. Work only in {review_worktree}; do not edit planning "
+            "files. Write the structured result only to "
+            f"{review_worktree / '.workflow' / 'amendment-review-result.json'}."
+        )
+        return {
+            **record.to_dict(),
+            "agent": "plan-reviewer",
+            "review_worktree": str(review_worktree),
+            "prompt": prompt,
+        }
+
+    def finish_amendment_review(self, amendment_id: str) -> tuple[str, Path]:
+        record = self.load_amendment(amendment_id)
+        if record is None or record.candidate_commit is None:
+            raise WorkflowError(f"{amendment_id} has no amendment candidate")
+        review_worktree = (
+            self.worktree_root / f"amendment-review-{amendment_id.lower()}-{record.attempt:03d}"
+        )
+        result_path = review_worktree / ".workflow" / "amendment-review-result.json"
+        if not result_path.is_file():
+            raise WorkflowError(f"amendment review result is missing: {result_path}")
+        result = _load_json(result_path)
+        state = self._validate_amendment_review_result(result, record)
+        if state == "APPROVED":
+            self._ensure_clean_main()
+        if [
+            path
+            for path in _working_tree_changes(review_worktree)
+            if path != ".workflow/amendment-review-result.json"
+        ]:
+            raise WorkflowError("amendment reviewer left changes outside its handoff")
+        if _sha(review_worktree) != record.candidate_commit:
+            raise WorkflowError("amendment review worktree no longer matches candidate")
+        worktree = Path(record.worktree)
+        relative_root = Path("todo") / "amendments" / amendment_id
+        review_name = f"review-{record.attempt:03d}"
+        _write_json(worktree / relative_root / f"{review_name}.json", result)
+        report = worktree / relative_root / f"{review_name}.md"
+        report.write_text(_render_amendment_review(result), encoding="utf-8")
+        _git(
+            worktree,
+            "add",
+            str(relative_root / f"{review_name}.json"),
+            str(relative_root / f"{review_name}.md"),
+        )
+        _git(worktree, "commit", "-m", f"chore(amendment): record {amendment_id} review")
+        result_path.unlink()
+        _git(self.repo, "worktree", "remove", str(review_worktree), check=False)
+        if state == "APPROVED":
+            _git(self.repo, "merge", "--ff-only", record.branch)
+            _git(self.repo, "worktree", "remove", record.worktree)
+            _git(self.repo, "branch", "-d", record.branch)
+            self._amendment_path(amendment_id).unlink(missing_ok=True)
+            self._amendment_request_path(amendment_id).unlink(missing_ok=True)
+            return state, self.repo / relative_root / f"{review_name}.md"
+        updated = replace(record, status=state)
+        self.save_amendment(updated)
+        return state, report
+
+    def _validate_amendment_review_result(
+        self, result: Mapping[str, Any], record: AmendmentRecord
+    ) -> str:
+        _validate_object_keys(
+            result,
+            required={
+                "amendment_id",
+                "base_commit",
+                "candidate_commit",
+                "verdict",
+                "summary",
+                "required_changes",
+                "unknowns",
+            },
+            label="amendment review result",
+        )
+        if (
+            result.get("amendment_id") != record.amendment_id
+            or result.get("base_commit") != record.base_commit
+            or result.get("candidate_commit") != record.candidate_commit
+        ):
+            raise WorkflowError("amendment review identity or commits do not match")
+        verdict = result.get("verdict")
+        required = result.get("required_changes")
+        unknowns = result.get("unknowns")
+        if verdict not in {"PASS", "FAIL", "BLOCKED"}:
+            raise WorkflowError("amendment review verdict is invalid")
+        if not isinstance(result.get("summary"), str):
+            raise WorkflowError("amendment review summary must be a string")
+        _validate_string_list(required, "amendment review required_changes")
+        _validate_string_list(unknowns, "amendment review unknowns")
+        if verdict == "PASS":
+            if required or unknowns:
+                raise WorkflowError("amendment review PASS contradicts unresolved findings")
+            return "APPROVED"
+        return "BLOCKED" if verdict == "BLOCKED" else "CHANGES_REQUESTED"
+
+    def prepare_amendment_retry(self, amendment_id: str) -> dict[str, object]:
+        record = self.load_amendment(amendment_id)
+        if record is None or record.status not in {"CHANGES_REQUESTED", "BLOCKED"}:
+            raise WorkflowError("amendment retry requires CHANGES_REQUESTED or resolved BLOCKED")
+        worktree = Path(record.worktree)
+        if _git(worktree, "status", "--porcelain").stdout:
+            raise WorkflowError("amendment worktree must be clean before retry")
+        updated = AmendmentRecord(
+            amendment_id=record.amendment_id,
+            status="PLANNING",
+            attempt=record.attempt + 1,
+            layer=record.layer,
+            task_ids=record.task_ids,
+            base_commit=_sha(worktree),
+            candidate_commit=None,
+            branch=record.branch,
+            worktree=record.worktree,
+        )
+        self.save_amendment(updated)
+        request = _load_json(self._amendment_request_path(amendment_id))
+        request_path = worktree / ".workflow" / "amendment-request.json"
+        _write_json(request_path, request)
+        prompt = (
+            f"Repair Owner amendment {amendment_id} after independent review. Read {request_path} "
+            f"and prior review under todo/amendments/{amendment_id}/review-{record.attempt:03d}.json. "
+            f"Work only in {worktree}; preserve the target tasks and layer. Write the structured "
+            f"result only to {worktree / '.workflow' / 'amendment-result.json'}."
+        )
+        return {**updated.to_dict(), "agent": "planner", "prompt": prompt}
+
+    def amendment_status(self, amendment_id: str) -> dict[str, object]:
+        record = self.load_amendment(amendment_id)
+        if record is not None:
+            return record.to_dict()
+        root = self.repo / "todo" / "amendments" / amendment_id
+        reviews = sorted(root.glob("review-*.json")) if root.is_dir() else []
+        if reviews and _load_json(reviews[-1]).get("verdict") == "PASS":
+            return {"amendment_id": amendment_id, "status": "APPROVED"}
+        raise WorkflowError(f"unknown owner amendment {amendment_id}")
+
     def prepare_maintenance(
         self,
         *,
@@ -1161,6 +1623,8 @@ class WorkflowManager:
     ) -> dict[str, object]:
         """Prepare a low-risk repair without adding a numbered product task."""
         self._ensure_clean_main()
+        if self._amendment_records():
+            raise WorkflowError("cannot start maintenance while an owner amendment is unfinished")
         config = self.load_config()
         active = config.get("active_task")
         if isinstance(active, str) and config["tasks"][active]["status"] not in {

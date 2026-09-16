@@ -111,6 +111,10 @@ may start a fresh Planner each turn, but must include relevant Owner decisions,
 prior Planner findings, repository evidence, and the latest question in its
 delegation prompt. A new Planner does not automatically inherit the Manager's
 conversation. Formal `prepare-plan` prompts and evidence remain controller-owned.
+For an explicit Owner-directed change to one or more still-`PLANNED` tasks, use
+the reviewed `prepare-amendment` route instead of activating a task merely to
+manufacture `TRIAGE_REQUIRED`; amendment PASS leaves implementation state and
+attempt counters unchanged.
 Planner explanations and Owner questions are in Simplified Chinese; identifiers,
 paths, and schema fields are not translated.
 For phase overviews, ask for each Task's purpose, reason, current status, and

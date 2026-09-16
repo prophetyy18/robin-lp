@@ -77,6 +77,35 @@ task and activate it explicitly:
 /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow ready T002
 ```
 
+### Owner-directed amendments before implementation
+
+When the Owner explicitly directs a planning change for one or more tasks that
+are still `PLANNED`, do not manufacture a Developer failure. Prepare one reviewed
+amendment instead:
+
+```bash
+python -m tools.workflow prepare-amendment \
+  --task T031 --task T032 --task T033 --task T034 \
+  --layer CONTRACT \
+  --summary "merge the binding P03 owner amendments" \
+  --owner-direction "<exact Owner direction>"
+# Invoke the returned Planner visibly, then:
+python -m tools.workflow finish-amendment A0001
+python -m tools.workflow prepare-amendment-review A0001
+# Invoke the returned Plan Reviewer visibly, then:
+python -m tools.workflow finish-amendment-review A0001
+```
+
+`CONTRACT` permits only the named task contracts and their dependency fields.
+`SPEC` additionally permits `docs/spec/` and `spec_revision`; `INTENT` additionally
+permits `docs/intent/` and `intent_revision`. Every route preserves task status,
+implementation attempts, evidence, commit identities and approval metadata. A
+PASS fast-forwards the reviewed amendment into the clean invoking checkout while
+the target tasks remain `PLANNED`. FAIL retains the amendment worktree and uses
+`prepare-amendment-retry <id>` with a fresh Planner; resolved BLOCKED amendments
+use the same retry gate. One amendment may target at most eight tasks. Only one
+amendment may be active, and none may start while a product task is unfinished.
+
 ### Claude Code as the Manager
 
 The interactive Claude Code session in the main checkout may orchestrate these

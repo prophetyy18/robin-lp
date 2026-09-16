@@ -1,0 +1,13 @@
+{
+  "$id": "https://robinhood-lp.local/schemas/amendment-result.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["amendment_id", "outcome", "summary", "rationale", "unresolved_questions"],
+  "properties": {
+    "amendment_id": {"type": "string", "pattern": "^A[0-9]{4}$"},
+    "outcome": {"enum": ["AMENDMENT_READY", "NO_CHANGE_REQUIRED", "BLOCKED"]},
+    "summary": {"type": "string"},
+    "rationale": {"type": "string"},
+    "unresolved_questions": {"type": "array", "items": {"type": "string"}}
+  }
+}

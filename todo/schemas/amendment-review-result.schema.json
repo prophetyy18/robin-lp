@@ -1,0 +1,23 @@
+{
+  "$id": "https://robinhood-lp.local/schemas/amendment-review-result.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "amendment_id",
+    "base_commit",
+    "candidate_commit",
+    "verdict",
+    "summary",
+    "required_changes",
+    "unknowns"
+  ],
+  "properties": {
+    "amendment_id": {"type": "string", "pattern": "^A[0-9]{4}$"},
+    "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "candidate_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "verdict": {"enum": ["PASS", "FAIL", "BLOCKED"]},
+    "summary": {"type": "string"},
+    "required_changes": {"type": "array", "items": {"type": "string"}},
+    "unknowns": {"type": "array", "items": {"type": "string"}}
+  }
+}

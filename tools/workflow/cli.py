@@ -60,6 +60,23 @@ def _parser() -> argparse.ArgumentParser:
     prepare_plan.add_argument("--owner-decision")
     changed = subparsers.add_parser("check-paths", help="reject changes to protected paths")
     changed.add_argument("base_commit")
+    amendment = subparsers.add_parser(
+        "prepare-amendment",
+        help="prepare an Owner-directed planning amendment for PLANNED tasks",
+    )
+    amendment.add_argument("--task", dest="task_ids", action="append", required=True)
+    amendment.add_argument("--layer", choices=("CONTRACT", "SPEC", "INTENT"), required=True)
+    amendment.add_argument("--summary", required=True)
+    amendment.add_argument("--owner-direction", required=True)
+    for name, help_text in (
+        ("finish-amendment", "validate and seal an Owner amendment candidate"),
+        ("prepare-amendment-review", "prepare an independent Owner amendment review"),
+        ("finish-amendment-review", "validate and record an Owner amendment review"),
+        ("prepare-amendment-retry", "prepare amendment repair after review failure"),
+        ("amendment-status", "show one Owner amendment's state"),
+    ):
+        command = subparsers.add_parser(name, help=help_text)
+        command.add_argument("amendment_id")
     maintenance = subparsers.add_parser(
         "prepare-maintenance",
         help="prepare a bounded low-risk repair outside the product task graph",
@@ -135,6 +152,24 @@ def main(argv: list[str] | None = None) -> None:
             output = {"status": state, "report": str(report)}
         elif args.command == "check-paths":
             output = {"changed_paths": manager.check_changed_paths(args.base_commit)}
+        elif args.command == "prepare-amendment":
+            output = manager.prepare_amendment(
+                task_ids=args.task_ids,
+                layer=args.layer,
+                summary=args.summary,
+                owner_direction=args.owner_direction,
+            )
+        elif args.command == "finish-amendment":
+            output = manager.finish_amendment(args.amendment_id).to_dict()
+        elif args.command == "prepare-amendment-review":
+            output = manager.prepare_amendment_review(args.amendment_id)
+        elif args.command == "finish-amendment-review":
+            state, report = manager.finish_amendment_review(args.amendment_id)
+            output = {"status": state, "report": str(report)}
+        elif args.command == "prepare-amendment-retry":
+            output = manager.prepare_amendment_retry(args.amendment_id)
+        elif args.command == "amendment-status":
+            output = manager.amendment_status(args.amendment_id)
         elif args.command == "prepare-maintenance":
             output = manager.prepare_maintenance(
                 summary=args.summary,

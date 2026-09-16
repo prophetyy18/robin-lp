@@ -36,6 +36,10 @@ check the current controller status, CLI help, ID regex, and relevant JSON schem
 Do not relay imagined commands, fields, state transitions, or task identifiers.
 Use Planner only after triage identifies CONTRACT_MISMATCH, SPEC_DEFECT, or an Owner
 decision, except for an explicitly requested read-only Planner conversation.
+The separate `prepare-amendment` route is allowed when the Owner explicitly
+directs a planning change for one or more still-`PLANNED` tasks. It does not
+require triage, does not activate those tasks, and must pass an independent
+amendment review before merging.
 
 For a reproduced low-risk implementation defect that satisfies the maintenance
 boundary in `todo/WORKFLOW.md`, prefer `prepare-maintenance` over registering a new

@@ -118,6 +118,12 @@ After an approved task, the Manager explicitly chooses one dependency-complete
 `PLANNED` task and runs `ready <task>`. The controller never guesses among
 multiple candidates and never activates more than one task.
 
+An explicit Owner amendment is separate from task execution. It may update one
+or more still-`PLANNED` contracts, and—when declared—related Spec or Intent text,
+through an independent planning review. Passing that review merges only the
+planning amendment; target tasks remain `PLANNED` with their implementation
+attempt counters unchanged.
+
 Every handoff binds the task contract, base commit and candidate commit. Review of uncommitted
 files is invalid. A repaired implementation always receives a new candidate commit and a fresh
 Reviewer context.
