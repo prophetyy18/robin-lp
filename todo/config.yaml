@@ -10,9 +10,9 @@
     "context_window_tokens": 1000000,
     "allow_model_fallback": false
   },
-  "active_phase": "P01",
-  "active_task": "T014",
-  "workflow_state": "APPROVED",
+  "active_phase": "P00",
+  "active_task": "T015",
+  "workflow_state": "READY",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -144,7 +144,7 @@
     },
     "T015": {
       "phase": "P00",
-      "status": "PLANNED",
+      "status": "READY",
       "depends_on": [
         "T014"
       ],
