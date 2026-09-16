@@ -1,0 +1,48 @@
+{
+  "task_id": "T024",
+  "outcome": "BLOCKED",
+  "summary": "Cannot satisfy T024 dual-provider capability probe because the required environment variable ROBINHOOD_CHAIN_RPC_URL (Provider A: Alchemy testnet endpoint) is not set in the Developer process environment, the conda environment, the user shell rc files, the conda activate scripts, or any project .env file. The frozen task contract (todo/phases/P02-chain-access-and-discovery/T024.md) and the Owner-confirmed scope require probing BOTH the Alchemy testnet endpoint (read from this env var) and the Robinhood official public testnet RPC (https://rpc.testnet.chain.robinhood.com, Provider B) against the same acceptance checks; Provider A's URL is required by name and is the only contract surface for that provider. Per the explicit instruction in the Developer brief ('If the env var ROBINHOOD_CHAIN_RPC_URL is not set in your process environment, stop and report BLOCKED with evidence rather than fabricating a value') and per T024 must-not ('inconsistent providers'), I am not fabricating a URL, not falling back to the official endpoint as a substitute, and not partially committing code that pretends the probe ran. The capability report would be incomplete (only one of two providers would be represented) and would violate the T024 acceptance condition that both providers agree on chain_id, PoolManager bytecode hash, and StateView bytecode hash. No source code, no fixture, no test, and no protocol-artifact changes were made; the worktree remains at the approved base 42b343631427e034ed84f957ccfc40293d3334d2 plus the controller-managed todo/config.yaml edit. The Owner needs to export ROBINHOOD_CHAIN_RPC_URL=<alchemy-testnet-url> into the Developer process environment (and ensure the conda env / shell session used by tools.workflow picks it up) before T024 attempt 2 can run.",
+  "commands": [
+    {
+      "command": "env | grep -i ROBINHOOD",
+      "result": "no output (env var ROBINHOOD_CHAIN_RPC_URL is not exported in the shell)"
+    },
+    {
+      "command": "printenv | grep -i robin",
+      "result": "no output (no ROBINHOOD-prefixed variable exported anywhere in the process)"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -c \"import os; print('ROBINHOOD_CHAIN_RPC_URL:', repr(os.environ.get('ROBINHOOD_CHAIN_RPC_URL')))\"",
+      "result": "ROBINHOOD_CHAIN_RPC_URL: None (confirmed inside the project Python interpreter used by the quality gates)"
+    },
+    {
+      "command": "cat /home/lpdev/lp-worktrees/dev-t024-attempt-001/.env 2>/dev/null",
+      "result": "no output; no .env file present in the worktree (only .env.example exists, and its ROBINHOOD_CHAIN_RPC_URL entry is an empty placeholder per ADR-003)"
+    },
+    {
+      "command": "cat ~/.bashrc ~/.profile /etc/environment 2>/dev/null | grep -i robin",
+      "result": "no output; user shell rc files and /etc/environment do not define ROBINHOOD_CHAIN_RPC_URL"
+    },
+    {
+      "command": "cat /home/lpdev/miniconda3/envs/robinhood-lp/etc/conda/activate.d/*.sh 2>/dev/null | grep -i robin",
+      "result": "no output; the robinhood-lp conda env activate scripts do not export ROBINHOOD_CHAIN_RPC_URL"
+    },
+    {
+      "command": "find / -name .env 2>/dev/null",
+      "result": "/home/lpdev/lp/tools/oracle/lib/v4-core/.env and /home/lpdev/lp/tools/oracle/lib/v4-periphery/lib/v4-core/.env (both vendor submodules, each contains FOUNDRY_FUZZ_SEED=0x4444 only; no ROBINHOOD_CHAIN_RPC_URL)"
+    },
+    {
+      "command": "git -C /home/lpdev/lp-worktrees/dev-t024-attempt-001 status; git -C /home/lpdev/lp-worktrees/dev-t024-attempt-001 log --oneline -3",
+      "result": "On branch workflow/t024-attempt-001; HEAD=42b3436 chore(workflow): mark T024 ready (matches approved base 42b343631427e034ed84f957ccfc40293d3334d2). Only modification is the controller-managed todo/config.yaml. No implementation, fixture, test, or protocol-artifact changes were made."
+    }
+  ],
+  "residual_risks": [
+    "Owner must provide the Alchemy testnet RPC URL via the ROBINHOOD_CHAIN_RPC_URL env var in the Developer shell (and ensure the conda env / session used by tools.workflow inherits it) before T024 attempt 2; the env var name is the only contract surface and the URL value must never be printed, logged, echoed, or committed.",
+    "Even with Provider A reachable, T024 still requires an eth_getCode probe against PoolManager (0x8366a39cc670b4001a1121b8f6a443a643e40951) and StateView (0xf3334192d15450cdd385c8b70e03f9a6bd9e673b) on chain_id=46630; if the observed code_hash does not match the bytecode implied by v4-core commit e50237c43811bd9b526eff40f26772152a42daba (the bytecode_hash reference lives in docs/implement/protocol-artifacts/robinhood-chain-testnet.json once created, with expected_bytecode_hash populated by the Foundry SelectorOracle), the capability probe must fail closed with reason code bytecode_drift and the report must be returned as TRIAGE_REQUIRED per the Owner brief.",
+    "Provider B (https://rpc.testnet.chain.robinhood.com) must be probed with the same acceptance checks. If Provider A and Provider B disagree on chain_id, PoolManager code_hash, or StateView code_hash, the capability report fails per T024 must-not (inconsistent providers) and ingestion must not advance.",
+    "The env var surface (ROBINHOOD_CHAIN_RPC_URL) and the provider alias in the capability report must remain name-only; the URL value and any API key must not leak into developer-result.json, the capability report JSON, pytest output, logs, or any candidate commit (AGENTS.md §4, ADR-003).",
+    "The implementation gaps called out in the T024 contract (real genesis hash capture, true archive depth probing, deployment-block / deployment-tx evidence, endpoint-pinned cross-comparison, fail-closed empty-code / proxy-bytecode / unsupported-tag handling) cannot be exercised against a real endpoint until Provider A is reachable; the existing src/robinhood_lp/discovery/chain_capability.py + tests/test_chain_capability.py are only a fake-transport skeleton and must not be claimed complete until the on-chain probe is run successfully against both providers and the resulting report is pinned under docs/implement/protocol-artifacts/chain-capability-report-robinhood-testnet.json (plus the new docs/implement/protocol-artifacts/robinhood-chain-testnet.json fixture mirroring docs/implement/protocol-artifacts/robinhood-chain-mainnet.json with _meta.expected_chain_id=46630).",
+    "tools.workflow records the candidate after finish-develop; this attempt produced no candidate, no fixture, and no test changes, so on attempt 2 the Developer must re-run every quality gate (pytest -q with PYTHONPATH=src, tests/test_chain_capability.py -v, ruff check, ruff format --check, mypy src tests) with byte-identical clean output before finish-develop."
+  ],
+  "blocking_question": "ROBINHOOD_CHAIN_RPC_URL is not set in the Developer process environment, the project conda env, the user shell, or any project .env file. To unblock T024 attempt 2, please export ROBINHOOD_CHAIN_RPC_URL=<alchemy-testnet-url> (e.g. 'https://eth-...-g.alchemy.com/v2/<key>') in the Developer shell before invoking 'python -m tools.workflow prepare-develop T024' again. The URL value must stay in runtime memory only (AGENTS.md §4, ADR-003) — never commit it, paste it into a file, or include it in any handoff JSON."
+}
