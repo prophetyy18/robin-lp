@@ -142,6 +142,19 @@
       "approved_commit": "f8eff59bd839ec95624b5ec4082d71a96b6b268b",
       "latest_review": "todo/reviews/P01/T014/review-001.json"
     },
+    "T015": {
+      "phase": "P00",
+      "status": "PLANNED",
+      "depends_on": [
+        "T014"
+      ],
+      "task_file": "todo/phases/P00-engineering-baseline/T015.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
+    },
     "T020": {
       "phase": "P02",
       "status": "APPROVED",
