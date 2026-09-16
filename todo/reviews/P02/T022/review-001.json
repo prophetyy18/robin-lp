@@ -1,0 +1,157 @@
+{
+  "task_id": "T022",
+  "base_commit": "b93f3a7cada2ccbe76fb2ec444bb12a30c625785",
+  "candidate_commit": "8b219f696c5bf6aad4c29eeb01873d1e13deb549",
+  "verdict": "PASS",
+  "checks": [
+    {
+      "id": "decoder_aligns_with_pinned_artifact",
+      "status": "PASS",
+      "evidence": [
+        "src/robinhood_lp/discovery/initialize_log.py now imports MAX_SQRT_PRICE_X96, MAX_TICK, MIN_SQRT_PRICE_X96, MIN_TICK and assigns INITIALIZE_TOPIC0 from EVENT_TOPICS['Initialize']",
+        "INITIALIZE_DATA_SLOTS changed from 3 to 5 (data slots now cover fee + tickSpacing + hooks + sqrtPriceX96 + tick)",
+        "_decode_uint160 enforces uint160 fit, non-zero, and the V4 [MIN_SQRT_PRICE_X96, MAX_SQRT_PRICE_X96) domain with integer-only checks per ADR-009",
+        "decode_initialize_log rejects initial_tick outside [MIN_TICK, MAX_TICK] with InitializeDecodeError",
+        "PoolKey construction is unchanged (5 fields: currency0, currency1, fee, tick_spacing, hooks); the two new slots are surfaced as separate fields on DecodedInitialize and do not flow into to_pool_id()",
+        "Runtime check: decode_initialize_log(_encode_initialize_log(PK_STATIC)) returns sqrt_price_x96=79228162514264337593543950336 (=1<<96) and initial_tick=0; varying the slots still yields the same PoolId derived from PoolKey only"
+      ],
+      "finding": "Decoder is now consistent with the 8-field Initialize event pinned in docs/implement/protocol-artifacts/v4-core-e50237c.json; V4 domain validation is purely integer and PoolKey identity is unaffected by the new slots."
+    },
+    {
+      "id": "scanner_topic0_sourced_from_artifact",
+      "status": "PASS",
+      "evidence": [
+        "src/robinhood_lp/discovery/registry.py INITIALIZE_TOPIC0_HEX is now built from INITIALIZE_TOPIC0 (imported from .initialize_log) which itself reads EVENT_TOPICS['Initialize']",
+        "grep -n 'Initialize(bytes32,address,address,uint24,int24,address)' src/robinhood_lp/discovery/registry.py exits 1 (no 7-field hardcode remains)",
+        "Runtime: InitializeScanner.INITIALIZE_TOPIC0_HEX == '0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438' (the artifact-pinned 8-field topic0)",
+        "Static keccak call previously in registry.py (eth_hash.auto.keccak('Initialize(bytes32,address,address,uint24,int24,address)')) is deleted, not merely edited"
+      ],
+      "finding": "Scanner topic0 is now the single artifact-pinned 8-field value; the previous 7-field keccak hardcode is fully removed and there is no second source of truth."
+    },
+    {
+      "id": "registry_carries_new_fields",
+      "status": "PASS",
+      "evidence": [
+        "PoolRecord gains optional int fields sqrt_price_x96 and initial_tick (registry.py lines 86/90)",
+        "PoolRecord.to_dict() emits both new keys at the end of the dict; runtime check shows 19 keys total (17 base + 2 new)",
+        "PoolRegistry.add() copies decoded.sqrt_price_x96 and decoded.initial_tick onto a freshly minted PoolRecord (registry.py lines 184/185)",
+        "Owner statement said 'PoolRecord.to_dict() now has 15 keys' but base had 17 keys and the candidate is 19 (additive, no removal); this is a wording inaccuracy in the owner note, not a contract violation - the two new keys are present and PoolKey identity is preserved"
+      ],
+      "finding": "New derived fields are sunk into PoolRecord and surfaced via to_dict(); the additive count is 19 (17 + 2), not the owner-quoted 15, but the contract requirement (additive fields on PoolRecord, not PoolKey) is satisfied."
+    },
+    {
+      "id": "tests_initialize_scanner_22_22_pass",
+      "status": "PASS",
+      "evidence": [
+        "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_initialize_scanner.py -q -> '22 passed in 0.11s'",
+        "Was 7/22 before this attempt per owner scope; now 22/22",
+        "_encode_initialize_log now writes 5 data slots; INITIALIZE_SIG is the 8-field keccak; test_decode_rejects_short_data truncates to data[:64] which is < 160 bytes"
+      ],
+      "finding": "All 22 tests in tests/test_initialize_scanner.py pass; the 15 previously-failing tests now pass because the test fixtures encode the full 8-field payload."
+    },
+    {
+      "id": "tests_abi_artifacts_33_pass_1_pre_existing_fail",
+      "status": "PASS",
+      "evidence": [
+        "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_abi_artifacts.py -q -> '1 failed, 33 passed'",
+        "Failing test is test_artifact_byte_matches_regenerated_oracle_output (T012-era MathOracle.t.sol forge-std log_named_bool blocker; forge lib/v4-core not installed under worktree path)",
+        "git diff b93f3a7..8b219f6 -- tests/test_abi_artifacts.py src/robinhood_lp/protocol/abi_artifacts.py tools/oracle/src/SelectorOracle.sol tools/oracle/test/SelectorOracle.t.sol is empty; the candidate does not touch the T012 surface"
+      ],
+      "finding": "33/34 pass; the single failure is a pre-existing forge/MathOracle compile blocker that the T022 candidate deliberately does not touch. Owner-stated OUT OF SCOPE for T022."
+    },
+    {
+      "id": "full_pytest_counts",
+      "status": "PASS",
+      "evidence": [
+        "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q -> '1 failed, 372 passed, 6 skipped'",
+        "Failure: tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output (same pre-existing T012 forge blocker)",
+        "6 skips: 3 tests/test_oracle_drift.py forge-not-on-PATH skips + 2 tests/test_oracle_review_provenance.py gpg-verification-out-of-scope skips + 1 tests/test_protocol_ids.py unordered-vector skip"
+      ],
+      "finding": "1 failed / 372 passed / 6 skipped matches the acceptance expectation; the only failure is the pre-existing T012-era one."
+    },
+    {
+      "id": "unchanged_test_files",
+      "status": "PASS",
+      "evidence": [
+        "git diff b93f3a7..8b219f6 -- tests/test_protocol_ids.py tests/test_oracle_drift.py tests/test_oracle_review_provenance.py tests/test_rpc_adapter.py tests/test_chain_capability.py -> empty",
+        "Combined run of those five files: '84 passed, 6 skipped in 0.15s' (the same 6 skips described above)"
+      ],
+      "finding": "The five other test files are byte-identical to base and still pass with the same skip set; the candidate did not perturb them."
+    },
+    {
+      "id": "two_run_byte_identity",
+      "status": "PASS",
+      "evidence": [
+        "Two consecutive 'pytest -q' runs both yield '1 failed, 372 passed, 6 skipped'; only differences in the captured log are forge stderr timestamps and 1.47s vs 1.46s elapsed (forge build noise, not test counts)",
+        "Two consecutive ruff check runs both yield 'All checks passed!' and the captured stdout bytes are identical (diff -q -> no output)",
+        "Two consecutive ruff format --check runs both yield '173 files already formatted' and the captured stdout bytes are identical",
+        "Two consecutive mypy src tests runs both yield 'Success: no issues found in 46 source files.' and the captured stdout bytes are identical"
+      ],
+      "finding": "Test counts and linter output are byte-identical across two runs; forge stderr timestamps are non-deterministic noise but do not affect pass/fail counts."
+    },
+    {
+      "id": "scope_protected_files_unmodified",
+      "status": "PASS",
+      "evidence": [
+        "git diff b93f3a7..8b219f6 -- tests/test_abi_artifacts.py src/robinhood_lp/protocol/abi_artifacts.py src/robinhood_lp/protocol/abi.py src/robinhood_lp/protocol/ids.py tools/oracle/src/SelectorOracle.sol tools/oracle/test/SelectorOracle.t.sol docs/implement/protocol-artifacts/v4-core-e50237c.json docs/spec/protocol/PROTOCOL_FACTS.md -> empty",
+        "In particular docs/spec/protocol/PROTOCOL_FACTS.md is NOT in the candidate diff (the previously-appended paragraph was withdrawn by the developer before producing this attempt)"
+      ],
+      "finding": "Scope preservation satisfied; the eight protected files are byte-identical to base."
+    },
+    {
+      "id": "pinned_artifact_sha256",
+      "status": "PASS",
+      "evidence": [
+        "Raw file SHA-256 (uncanonicalized): 063f3f79c1ce63b3bf34d0f58cc53473ec5f6ff86929cca0b3ad20e0154aa3a3",
+        "Canonical-body SHA-256 (sort_keys=True, indent=2, trailing newline, sha256 field zeroed): b5a50257328a824f67259f4f190d2451383aada7aafc8180f6887ee5cfb9b881",
+        "Declared _meta.sha256: b5a50257328a824f67259f4f190d2451383aada7aafc8180f6887ee5cfb9b881",
+        "Declared == canonicalized body hash -> test_artifact_file_sha256_matches_declared passes"
+      ],
+      "finding": "The T021-pinned artifact is byte-equivalent under canonicalization to the owner-specified SHA-256; the canonical SHA test (no pytest.skip) passes."
+    },
+    {
+      "id": "no_secrets_in_diff",
+      "status": "PASS",
+      "evidence": [
+        "grep -iE 'password|secret|private_key|seed_phrase|api_key|bearer|credential|wallet' /tmp/candidate_diff.txt -> 0 hits"
+      ],
+      "finding": "Candidate diff contains no secret material; the signer/material-safety rule is preserved."
+    },
+    {
+      "id": "no_float_in_discovery",
+      "status": "PASS",
+      "evidence": [
+        "grep -n 'float' src/robinhood_lp/discovery/ -> only src/robinhood_lp/discovery/initialize_log.py:144 docstring text 'check purely integer — no float conversions per ADR-009.'",
+        "Zero float-typed values, math.floats, or float() conversions remain"
+      ],
+      "finding": "Domain validation is integer-only per ADR-009; the only 'float' token in the discovery package is the docstring disallowing it."
+    },
+    {
+      "id": "developer_handoff_schema",
+      "status": "PASS",
+      "evidence": [
+        "jsonschema validation of todo/evidence/P02/T022/attempt-001-developer.json against todo/schemas/developer-result.schema.json -> VALID",
+        "outcome == 'CANDIDATE_READY' and 'triage_request' is NOT present (consistent with the schema's documented invariant for CANDIDATE_READY)"
+      ],
+      "finding": "Developer handoff is schema-conformant; outcome CANDIDATE_READY is consistent with no triage_request present."
+    },
+    {
+      "id": "must_not_invariants",
+      "status": "PASS",
+      "evidence": [
+        "No factory / create-pool call exists in src/robinhood_lp/discovery/; registry reads only Initialize logs (must-not: query a factory)",
+        "Discovery is keyed by addresses via PoolKey.currency0/currency1; no token-symbol string lookups anywhere in the candidate (must-not: discover by token symbol)",
+        "_read_metadata_safe swallows metadata-call exceptions and returns None; PoolRegistry.add() still inserts the row with token_metadata_failed metadata (must-not: drop pools whose metadata call fails)"
+      ],
+      "finding": "All three T022 must-not rules are satisfied by both code path and registry semantics."
+    }
+  ],
+  "must_not_violations": [],
+  "unknowns": [],
+  "required_changes": [],
+  "residual_risks": [
+    "OUT-OF-SCOPE: tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails in this worktree because tools/oracle/lib/v4-core, tools/oracle/lib/v4-periphery (and forge-std) are not installed under the worktree path; the candidate does not touch this surface and the owner recorded it as the T012 owner's responsibility. The canonical-body SHA-256 still matches the declared value (test_artifact_file_sha256_matches_declared passes), so the artifact itself is correct.",
+    "Minor wording inaccuracy in the owner statement: 'PoolRecord.to_dict() now has 15 keys' is incorrect - the base had 17 keys and the candidate has 19 (17 + 2 additive keys). The contract intent (additive derived columns on PoolRecord, identity preserved on PoolKey) is satisfied; no code change required.",
+    "Operational: a stale __pycache__ briefly masked the registry.py fix on a verification pass; clearing src/robinhood_lp/discovery/__pycache__ restored the expected InitializeScanner.INITIALIZE_TOPIC0_HEX. CI runners with fresh checkouts should not see this. The candidate itself does not require any runtime fix."
+  ]
+}
