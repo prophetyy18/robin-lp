@@ -90,7 +90,7 @@ contract MathOracleTest is Test {
         emit log_named_uint("pa", pa);
         emit log_named_uint("pb", pb);
         emit log_named_uint("liquidity", uint256(liquidity));
-        emit log_named_bool("round_up", roundUp);
+        emit log_named_uint("round_up", roundUp ? 1 : 0);
         emit log_named_uint("amount0", a0);
     }
 
@@ -106,7 +106,7 @@ contract MathOracleTest is Test {
         emit log_named_uint("pa", pa);
         emit log_named_uint("pb", pb);
         emit log_named_uint("liquidity", uint256(liquidity));
-        emit log_named_bool("round_up", roundUp);
+        emit log_named_uint("round_up", roundUp ? 1 : 0);
         emit log_named_uint("amount1", a1);
     }
 

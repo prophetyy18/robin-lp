@@ -1,0 +1,43 @@
+{
+  "task_id": "T014",
+  "outcome": "CANDIDATE_READY",
+  "summary": "T014 implemented exactly as specified. tools/oracle/test/MathOracle.t.sol lines 93 and 109 each replaced 'emit log_named_bool(\"round_up\", roundUp);' with 'emit log_named_uint(\"round_up\", roundUp ? 1 : 0);'. No other file edited; no imports added; no forge-std version bump; no remappings.txt/foundry.toml/fixture/Python/config-yaml change. Rationale: forge-std v1.9.x no longer exposes log_named_bool; emitting the boolean as a 0/1 uint matches the surrounding log_named_uint convention for the other fields and produces vectors that parse identically. Files changed (tracked): tools/oracle/test/MathOracle.t.sol +2/-2. Pre-existing changes from prepare-develop (workflow state, untouched by developer): todo/config.yaml +3/-3 (status IN_DEVELOPMENT, attempt 1). Out-of-scope failures: none observed. Unresolved questions: none.",
+  "commands": [
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t014-attempt-001/tools/oracle && PATH=$HOME/.foundry/bin:$PATH FOUNDRY_SKIP='[\"foo.sol\"]' forge build",
+      "result": "exit_code=0; two consecutive runs (with rm -rf cache out between runs to force fresh compilation) produced byte-identical stdout/stderr after normalising compile-time/timing tokens (\\d+\\.\\d+ms, finished in \\d+\\.\\d+s). Normalized sha256 of stdout+stderr across both runs: b09133667d251100b545818b2906bff1f30f2c0113aefb425e1fa743d06548fa. The FOUNDRY_SKIP override replaces the foundry.toml skip list with a no-op filter so the .t.sol files actually compile, without editing foundry.toml. Compiler run successful (Solc 0.8.26)."
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t014-attempt-001/tools/oracle && PATH=$HOME/.foundry/bin:$PATH FOUNDRY_SKIP='[\"foo.sol\"]' forge test --match-path test/MathOracle.t.sol -vv",
+      "result": "exit_code=0; two consecutive runs (with rm -rf cache out between runs) produced byte-identical stdout/stderr after normalising timing tokens. Normalized sha256 across both runs: 470e721db98e1409f7d924efbed2e1724b467ec91006a5abc2d43c9764a06b80. Result line: 'Ran 1 test suite in Xms (Xms CPU time): 3 tests passed, 0 failed, 0 skipped (3 total tests)'. Suite breakdown: test_TickMath_boundary_vectors (9 tick2sqrt vectors + 3 sqrt2tick vectors), test_SqrtPriceMath_amount_deltas (12 _emitAmount0Delta/_emitAmount1Delta vectors with round_up emitted as 0/1), test_LiquidityAmounts_round_trip (3 vectors). The _emitAmount0Delta and _emitAmount1Delta paths emit the new log_named_uint(\"round_up\", roundUp ? 1 : 0) on lines 93 and 109."
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t014-attempt-001 && /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow validate",
+      "result": "exit_code=0; two consecutive runs produced byte-identical stdout/stderr (no volatile tokens present). sha256 of stdout+stderr for both runs: be1604dc3ed5b911857fc3c5084432b1b65769369b7ceb687b8fb34035edc25e. Output body: '{\"status\": \"OK\"}\\n'."
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t014-attempt-001 && /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow status",
+      "result": "exit_code=0; two consecutive runs produced byte-identical stdout/stderr (no volatile tokens present). sha256 of stdout+stderr for both runs: d396cf2703972f33f3345c8f5b9ac8213694f7375a25c073ebd62418f0a63903. Output body shows active_task=T014, workflow_state=IN_DEVELOPMENT, attempt=1, base_commit=e68dde745112dbc02f8891f30d4ca3e113293099, branch=workflow/t014-attempt-001."
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t014-attempt-001 && git diff --stat",
+      "result": "exit_code=0; output 'todo/config.yaml | 6 +++--- / tools/oracle/test/MathOracle.t.sol | 4 ++-- / 2 files changed, 5 insertions(+), 5 deletions(-)'. The todo/config.yaml delta is the prepare-develop state update (workflow_state=IN_DEVELOPMENT, status=IN_DEVELOPMENT, attempt=1) and was present before the developer began editing; the only substantive developer change is MathOracle.t.sol +2/-2."
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t014-attempt-001 && git diff -- tests/fixtures/",
+      "result": "exit_code=0; empty output. tests/fixtures/protocol/*.json is byte-identical to the pre-change baseline."
+    },
+    {
+      "command": "grep -n 'log_named_bool' /home/lpdev/lp-worktrees/dev-t014-attempt-001/tools/oracle/test/MathOracle.t.sol",
+      "result": "exit_code=1; zero matches (grep returns 1 when no lines match). Invariant satisfied."
+    },
+    {
+      "command": "grep -n 'log_named_uint(\"round_up\"' /home/lpdev/lp-worktrees/dev-t014-attempt-001/tools/oracle/test/MathOracle.t.sol",
+      "result": "exit_code=0; exactly two matches: '93:        emit log_named_uint(\"round_up\", roundUp ? 1 : 0);' and '109:        emit log_named_uint(\"round_up\", roundUp ? 1 : 0);'. Invariant satisfied."
+    }
+  ],
+  "residual_risks": [
+    "Build/test environment note: the worktree did not contain tools/oracle/lib/{v4-core,v4-periphery} when prepare-develop handed it off, and forge.toml has skip = [\"test/MathOracle.t.sol\", \"test/PoolIdOracle.t.sol\", \"test/SelectorOracle.t.sol\"]. To honour the 'no lib/, no foundry.toml' forbidden-edit list the developer (1) copied the lib/ from the main checkout to the worktree (these files are git-ignored per .gitignore line 49-50) and (2) used FOUNDRY_SKIP='[\"foo.sol\"]' as an environment override to bypass the config-level skip during the forge build/forge test verification runs only. Neither action modifies any tracked source. Future Developer attempts should be aware that prepare-develop is expected to run `forge install --no-commit --commit <hash> Uniswap/v4-core --commit <hash> Uniswap/v4-periphery` and decide whether the foundry.toml skip list should remain or be dropped for the targeted forge test --match-path invocation.",
+    "The lib/ copy from main to worktree is a pristine copy (same pinned commits e50237c43811bd9b526eff40f26772152a42daba and dce236d4e2057422d0791d9a973a58765eb46f65 recorded in tools/oracle/foundry.lock and docs/implement/evidence/ORACLE_MANIFEST.md). The 'Warning: lib/v4-core: dependency submodule is missing (expected e50237c43811bd9b526eff40f26772152a42daba)' printed by forge reflects the .gitmodules pointer in lib/v4-core/ pointing to a parent .git/modules path that is not materialised in the worktree; the source files themselves are intact and compile cleanly. This warning is identical to the warning printed when the same command is run in the main checkout after its submodules are de-registered."
+  ]
+}
