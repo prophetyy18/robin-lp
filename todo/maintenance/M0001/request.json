@@ -1,0 +1,16 @@
+{
+  "maintenance_id": "M0001",
+  "summary": "refactor ModifyLiquidityLogRecord(**dict) call sites and remove 4 now-unused # type: ignore[arg-type] directives",
+  "reason": "mypy src tests (the project CI gate per .github/workflows/ci.yml:60) reveals the 4 # type: ignore[arg-type] directives at lines 597/598/618/619 of tests/test_storage_schema.py are not unused -- they suppress 40 real [arg-type] errors caused by ModifyLiquidityLogRecord(**dict[str, object]) call sites. The maintenance target is the four call sites that use the dict(**)+Dataclass(**dict, ...) pattern: refactor them to construct ModifyLiquidityLogRecord with direct typed kwargs and use dataclasses.replace() for variants, matching the pattern commit a40e5d6 applied to SwapLogRecord at lines 1015/1022/1058/1061. After the refactor, the 4 # type: ignore[arg-type] directives become genuinely unused and are removed in the same repair. No production code (src/) is touched; no public interface or behaviour changes; runtime semantics are identical.",
+  "allowed_paths": [
+    "tests/test_storage_schema.py"
+  ],
+  "verification_commands": [
+    "python -m mypy src/ tests/",
+    "python -m pytest tests/test_storage_schema.py -q",
+    "python -m ruff check tests/test_storage_schema.py",
+    "python -m ruff format --check tests/test_storage_schema.py"
+  ],
+  "related_task": "T030",
+  "risk_attestation": "LOW_RISK_IMPLEMENTATION_DEFECT"
+}

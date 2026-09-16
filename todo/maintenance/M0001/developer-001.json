@@ -1,0 +1,26 @@
+{
+  "task_id": "M0001",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Refactored the four ModifyLiquidityLogRecord call sites in tests/test_storage_schema.py (formerly lines 597/598/618/619) from the dict(**) + Dataclass(**dict, ...) pattern to the Dataclass(...) + dataclasses.replace(...) pattern, mirroring the swap refactor recorded in commit a40e5d6 for SwapLogRecord. test_canonical_bytes_are_stable now builds two directly-typed ModifyLiquidityLogRecord instances with identical kwargs (preserving the 'two records with identical fields' semantic). test_canonical_bytes_change_when_a_field_changes now builds a base ModifyLiquidityLogRecord and derives the variant via replace(record_a, tick_lower=-1). All four # type: ignore[arg-type] suppressions at 597/598/618/619 were removed because they are no longer needed. No public interface, behaviour, or src/ production code was changed. dataclasses.replace was already imported (added by a40e5d6 for SwapLogRecord), so no new imports were introduced.",
+  "commands": [
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/ tests/",
+      "result": "Success: no issues found in 49 source files"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_storage_schema.py -q",
+      "result": "....................................................                     [100%]\n52 passed in 0.19s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check tests/test_storage_schema.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check tests/test_storage_schema.py",
+      "result": "1 file already formatted"
+    }
+  ],
+  "residual_risks": [
+    "Project-level 5 import-untyped warnings on robinhood_lp.* remain (no py.typed in src/robinhood_lp); these pre-date M0001 and are explicitly out of scope per the maintenance request."
+  ]
+}

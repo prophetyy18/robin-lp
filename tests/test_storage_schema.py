@@ -579,7 +579,7 @@ def test_token_metadata_is_not_required_for_event_records() -> None:
 
 def test_canonical_bytes_are_stable() -> None:
     """Two records with identical fields produce identical bytes."""
-    common: dict[str, object] = dict(
+    record_a = ModifyLiquidityLogRecord(
         chain_id=CHAIN,
         pool_id=_pool_id_bytes(),
         block_number=1,
@@ -594,13 +594,26 @@ def test_canonical_bytes_are_stable() -> None:
         liquidity_delta=0,
         salt=0,
     )
-    a = ModifyLiquidityLogRecord(**common)  # type: ignore[arg-type]
-    b = ModifyLiquidityLogRecord(**common)  # type: ignore[arg-type]
-    assert canonical_bytes(a) == canonical_bytes(b)
+    record_b = ModifyLiquidityLogRecord(
+        chain_id=CHAIN,
+        pool_id=_pool_id_bytes(),
+        block_number=1,
+        block_hash=2,
+        transaction_hash=3,
+        transaction_index=0,
+        log_index=0,
+        address=Address.zero(),
+        sender=Address.zero(),
+        tick_lower=0,
+        tick_upper=0,
+        liquidity_delta=0,
+        salt=0,
+    )
+    assert canonical_bytes(record_a) == canonical_bytes(record_b)
 
 
 def test_canonical_bytes_change_when_a_field_changes() -> None:
-    base: dict[str, object] = dict(
+    record_a = ModifyLiquidityLogRecord(
         chain_id=CHAIN,
         pool_id=_pool_id_bytes(),
         block_number=1,
@@ -615,9 +628,8 @@ def test_canonical_bytes_change_when_a_field_changes() -> None:
         liquidity_delta=0,
         salt=0,
     )
-    a = ModifyLiquidityLogRecord(**base)  # type: ignore[arg-type]
-    b = ModifyLiquidityLogRecord(**{**base, "tick_lower": -1})  # type: ignore[arg-type]
-    assert canonical_bytes(a) != canonical_bytes(b)
+    record_b = replace(record_a, tick_lower=-1)
+    assert canonical_bytes(record_a) != canonical_bytes(record_b)
 
 
 # ---------------------------------------------------------------------------
