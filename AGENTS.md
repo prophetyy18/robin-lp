@@ -57,6 +57,10 @@
   Reviewer。不得复用导致结论偏置的旧上下文。
 - 正常任务只走开发和审查。只有结构化报告明确要求时才进入 triage；不要把普通实现
   问题升级成规划阻塞。涉及 Intent 的选择必须停下等待 Owner 决定。
+- 已稳定复现、不会改变 Intent/Spec/公开接口/依赖/安全或交易行为的局部实现缺陷，
+  可以走 `Mxxxx` 维护通道。维护记录不加入产品任务图，但仍必须使用隔离 Developer、
+  exact candidate commit 和独立 Reviewer。维护需要扩大路径或改变行为时必须停止并转入
+  triage 或正式编号任务，不能借“小修”绕过合同。
 
 ## 3. V1 固定边界
 
@@ -123,7 +127,10 @@
 - 使用最小改动完成任务。保留用户已有和无关的工作区改动。
 - 新行为必须有正常、边界、无效输入和失败路径测试。需要两个异质 fixture 时不要
   用同一个 fixture 改名代替。
-- 完成前运行任务要求的测试，以及 `pytest`、Ruff format/check 和严格 mypy。
+- 完成前运行任务要求的测试，以及 `pytest`、Ruff format/check 和严格 mypy。普通测试
+  输出只要求结果和退出码稳定；只有 fixture、artifact、序列化等确定性产物才要求
+  byte-for-byte 一致。Developer 与独立 Reviewer 各运行一次已经是两次独立验证，不得
+  无理由要求每个普通门禁在同一角色内重复两遍。
 - 测试失败时查明是本次引入还是已有问题。不要删除测试、放宽容差、增加无理由
   ignore 或降低风险门槛来让 CI 通过。
 - 检查 `git diff` 和 `git diff --check`。不要提交 `.env`、Keystore、密钥、凭据、

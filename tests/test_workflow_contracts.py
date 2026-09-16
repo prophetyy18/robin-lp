@@ -24,7 +24,12 @@ def test_repository_workflow_configuration_is_valid() -> None:
     manager.validate_repository()
     config = manager.load_config()
 
-    assert len(config["tasks"]) >= 53
+    configured_contracts = {task["task_file"] for task in config["tasks"].values()}
+    discovered_contracts = {
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "todo" / "phases").glob("P*/T[0-9][0-9][0-9].md")
+    }
+    assert configured_contracts == discovered_contracts
     assert config["tasks"]["T000"]["status"] == "APPROVED"
     assert config["tasks"]["T004"]["status"] == "APPROVED"
     assert {"T000", "T004"} <= {

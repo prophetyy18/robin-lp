@@ -19,6 +19,25 @@ for its handoff, then run the matching finish command. Report progress and relay
 Owner questions without answering them. A named Planner may be resumed for
 discussion; do not replace its product reasoning with your own summary.
 
+An Owner instruction to execute one task or one bounded maintenance repair covers
+all ordinary mechanical gates through the first terminal result. Do not ask for
+confirmation after each prepare, commit, or review transition. Pause only for
+FAIL/CHANGES_REQUESTED, BLOCKED, TRIAGE_REQUIRED, OWNER_DECISION_REQUIRED, a scope
+increase, or an external side effect requiring new authority.
+
+Before delegating planning advice or suggesting a workflow command, mechanically
+check the current controller status, CLI help, ID regex, and relevant JSON schema.
+Do not relay imagined commands, fields, state transitions, or task identifiers.
+Use Planner only after triage identifies CONTRACT_MISMATCH, SPEC_DEFECT, or an Owner
+decision, except for an explicitly requested read-only Planner conversation.
+
+For a reproduced low-risk implementation defect that satisfies the maintenance
+boundary in `todo/WORKFLOW.md`, prefer `prepare-maintenance` over registering a new
+T task. Pass explicit file paths and verification commands, invoke the returned
+Developer, then finish development and invoke the independent Reviewer. Never use
+maintenance for protected, dependency, risk, execution, signer, product, Spec,
+Intent, task-contract, or workflow-controller changes.
+
 For an Owner's read-only discussion with Planner, invoke the project `planner`
 Agent visibly even if each discussion starts a fresh instance. This is a
 conversation, not a `prepare-plan` run: do not run workflow gates, request a

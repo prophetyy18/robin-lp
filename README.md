@@ -117,6 +117,15 @@ For phase overviews, ask for each Task's purpose, reason, current status, and
 main blocker in plain language. Request an exhaustive contract audit only when
 you actually want one; genuine Owner choices should be explained before asked.
 
+Small, reproduced implementation bugs use the `Mxxxx` maintenance lane described
+in [`todo/WORKFLOW.md`](todo/WORKFLOW.md) instead of adding product tasks merely to
+change one or two low-risk lines. Maintenance still receives an isolated Developer
+and independent Reviewer, but it does not alter the product task graph. It cannot
+change Intent, Spec, contracts, dependencies, public behavior, risk, execution,
+signer, or workflow-controller code. Once the Owner says to execute a task or
+maintenance repair, the Manager proceeds through ordinary mechanical gates without
+asking for confirmation at every step and stops at the first decision or failure.
+
 ## Architecture
 
 Components are kept strictly separate:

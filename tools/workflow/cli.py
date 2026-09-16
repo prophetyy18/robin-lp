@@ -54,6 +54,24 @@ def _parser() -> argparse.ArgumentParser:
     prepare_plan.add_argument("--owner-decision")
     changed = subparsers.add_parser("check-paths", help="reject changes to protected paths")
     changed.add_argument("base_commit")
+    maintenance = subparsers.add_parser(
+        "prepare-maintenance",
+        help="prepare a bounded low-risk repair outside the product task graph",
+    )
+    maintenance.add_argument("--summary", required=True)
+    maintenance.add_argument("--reason", required=True)
+    maintenance.add_argument("--path", dest="paths", action="append", required=True)
+    maintenance.add_argument("--check", dest="checks", action="append", required=True)
+    maintenance.add_argument("--related-task")
+    for name, help_text in (
+        ("finish-maintenance-develop", "validate and seal a maintenance developer result"),
+        ("prepare-maintenance-retry", "prepare a maintenance repair after review failure"),
+        ("prepare-maintenance-review", "prepare an independent maintenance review"),
+        ("finish-maintenance-review", "validate and record a maintenance review"),
+        ("maintenance-status", "show one maintenance repair's state"),
+    ):
+        command = subparsers.add_parser(name, help=help_text)
+        command.add_argument("maintenance_id")
     return parser
 
 
@@ -100,6 +118,25 @@ def main(argv: list[str] | None = None) -> None:
             output = {"status": state, "report": str(report)}
         elif args.command == "check-paths":
             output = {"changed_paths": manager.check_changed_paths(args.base_commit)}
+        elif args.command == "prepare-maintenance":
+            output = manager.prepare_maintenance(
+                summary=args.summary,
+                reason=args.reason,
+                allowed_paths=args.paths,
+                verification_commands=args.checks,
+                related_task=args.related_task,
+            )
+        elif args.command == "finish-maintenance-develop":
+            output = manager.finish_maintenance_develop(args.maintenance_id).to_dict()
+        elif args.command == "prepare-maintenance-retry":
+            output = manager.prepare_maintenance_retry(args.maintenance_id)
+        elif args.command == "prepare-maintenance-review":
+            output = manager.prepare_maintenance_review(args.maintenance_id)
+        elif args.command == "finish-maintenance-review":
+            state, report = manager.finish_maintenance_review(args.maintenance_id)
+            output = {"status": state, "report": str(report)}
+        elif args.command == "maintenance-status":
+            output = manager.maintenance_status(args.maintenance_id)
         else:  # pragma: no cover - argparse owns this boundary
             raise WorkflowError(f"unsupported command {args.command}")
     except WorkflowError as exc:

@@ -54,6 +54,14 @@ The recommended outer session permission mode is `manual`; request approval only
 for the exact `tools.workflow` command needed for the current transition. Never
 ask the user to approve `sudo`, a direct implementation edit, or a direct
 commit/merge as a workaround for a failed gate.
+For a reproduced, bounded, low-risk implementation defect outside an active task,
+use the `prepare-maintenance` route documented in `todo/WORKFLOW.md` instead of
+inventing another numbered product task. Maintenance never edits Intent, Spec,
+task contracts, workflow/controller code, dependencies, risk, execution or signer
+surfaces. One Owner instruction to execute a task or maintenance repair authorizes
+the Manager to continue through its mechanical prepare/Agent/finish/review gates
+until PASS, FAIL, BLOCKED, TRIAGE_REQUIRED or OWNER_DECISION_REQUIRED; do not pause
+for confirmation between ordinary gates.
 
 Before implementing a feature:
 

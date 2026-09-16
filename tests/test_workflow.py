@@ -170,6 +170,121 @@ def test_visible_manager_prepare_and_finish_round_trip(tmp_path: Path) -> None:
     assert manager.status()["workflow_state"] == "APPROVED"
 
 
+def _finish_seed_task_for_maintenance(repo: Path, manager: WorkflowManager) -> None:
+    config = manager.load_config()
+    config["tasks"]["T001"]["status"] = "APPROVED"
+    config["tasks"]["T001"]["approved_commit"] = _git(repo, "rev-parse", "HEAD")
+    config["active_task"] = "T001"
+    config["active_phase"] = "P00"
+    config["workflow_state"] = "APPROVED"
+    _write_json(repo / "todo" / "config.yaml", config)
+    _git(repo, "add", "todo/config.yaml")
+    _git(repo, "commit", "-m", "approve seed task")
+
+
+def test_low_risk_maintenance_round_trip_does_not_add_product_task(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _finish_seed_task_for_maintenance(repo, manager)
+    task_ids_before = set(manager.load_config()["tasks"])
+
+    prepared = manager.prepare_maintenance(
+        summary="repair local value fixture",
+        reason="the fixture contains the wrong deterministic value",
+        allowed_paths=["src/value.txt"],
+        verification_commands=["test $(cat src/value.txt) = repaired"],
+        related_task="T001",
+    )
+    assert prepared["maintenance_id"] == "M0001"
+    assert prepared["agent"] == "stage-developer"
+    development = Path(str(prepared["development_worktree"]))
+    (development / "src" / "value.txt").write_text("repaired\n", encoding="utf-8")
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "M0001",
+            "outcome": "CANDIDATE_READY",
+            "summary": "repaired the fixture",
+            "commands": [{"command": "fixture check", "result": "passed"}],
+            "residual_risks": [],
+        },
+    )
+    candidate = manager.finish_maintenance_develop("M0001")
+    assert candidate.status == "AWAITING_REVIEW"
+    assert candidate.candidate_commit is not None
+
+    review = manager.prepare_maintenance_review("M0001")
+    review_worktree = Path(str(review["review_worktree"]))
+    _write_json(
+        review_worktree / ".workflow" / "review-result.json",
+        {
+            "task_id": "M0001",
+            "base_commit": candidate.base_commit,
+            "candidate_commit": candidate.candidate_commit,
+            "verdict": "PASS",
+            "checks": [
+                {
+                    "id": "bounded-repair",
+                    "status": "PASS",
+                    "evidence": ["only src/value.txt changed"],
+                    "finding": "request satisfied",
+                }
+            ],
+            "must_not_violations": [],
+            "unknowns": [],
+            "required_changes": [],
+            "residual_risks": [],
+        },
+    )
+    state, report = manager.finish_maintenance_review("M0001")
+
+    assert state == "APPROVED"
+    assert report.is_file()
+    assert (repo / "src" / "value.txt").read_text(encoding="utf-8") == "repaired\n"
+    assert set(manager.load_config()["tasks"]) == task_ids_before
+    assert manager.maintenance_status("M0001") == {
+        "maintenance_id": "M0001",
+        "status": "APPROVED",
+    }
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "todo/config.yaml",
+        "todo/phases/P00/T001.md",
+        "tools/workflow/core.py",
+        "requirements.lock.txt",
+        "src/robinhood_lp/risk/gate.py",
+    ],
+)
+def test_maintenance_rejects_protected_or_high_risk_paths(tmp_path: Path, path: str) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _finish_seed_task_for_maintenance(repo, manager)
+
+    with pytest.raises(WorkflowError, match="high-risk or protected"):
+        manager.prepare_maintenance(
+            summary="not actually low risk",
+            reason="attempts to cross the maintenance boundary",
+            allowed_paths=[path],
+            verification_commands=["true"],
+        )
+
+
+def test_maintenance_cannot_start_while_product_task_is_active(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+
+    with pytest.raises(WorkflowError, match="T001 is unfinished"):
+        manager.prepare_maintenance(
+            summary="repair local value fixture",
+            reason="the fixture contains the wrong deterministic value",
+            allowed_paths=["src/value.txt"],
+            verification_commands=["true"],
+        )
+
+
 def test_ignored_bytecode_does_not_change_protected_snapshot(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
     manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")

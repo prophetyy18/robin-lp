@@ -18,6 +18,7 @@ from typing import Any, cast
 
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 TASK_PATTERN = re.compile(r"^T[0-9]{3}$")
+MAINTENANCE_PATTERN = re.compile(r"^M[0-9]{4}$")
 PHASE_PATTERN = re.compile(r"^P[0-9]{2}$")
 REQUIRED_AGENT_MODEL = "MiniMax-M3[1m]"
 
@@ -70,6 +71,33 @@ PROTECTED_PREFIXES = (
     "tools/workflow/",
 )
 PROTECTED_FILES = {"AGENTS.md", "CLAUDE.md", "todo/README.md", "todo/config.yaml"}
+MAINTENANCE_FORBIDDEN_PREFIXES = (
+    ".claude/",
+    ".github/",
+    "docs/intent/",
+    "docs/spec/",
+    "todo/phases/",
+    "todo/schemas/",
+    "todo/maintenance/",
+    "tools/workflow/",
+    "src/robinhood_lp/execution/",
+    "src/robinhood_lp/risk/",
+    "src/robinhood_lp/signer/",
+)
+MAINTENANCE_FORBIDDEN_FILES = PROTECTED_FILES | {
+    "pyproject.toml",
+    "requirements.in",
+    "requirements.lock.txt",
+    "tools/oracle/foundry.toml",
+    "tools/oracle/remappings.txt",
+}
+MAINTENANCE_STATES = {
+    "IN_DEVELOPMENT",
+    "AWAITING_REVIEW",
+    "CHANGES_REQUESTED",
+    "ESCALATED",
+    "BLOCKED",
+}
 
 
 class WorkflowError(RuntimeError):
@@ -143,6 +171,46 @@ class PlanRecord:
             classification=_required_string(value, "classification"),
             base_commit=_required_string(value, "base_commit"),
             candidate_commit=_required_string(value, "candidate_commit"),
+        )
+
+
+@dataclass(frozen=True)
+class MaintenanceRecord:
+    maintenance_id: str
+    status: str
+    attempt: int
+    base_commit: str
+    candidate_commit: str | None
+    branch: str
+    development_worktree: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "maintenance_id": self.maintenance_id,
+            "status": self.status,
+            "attempt": self.attempt,
+            "base_commit": self.base_commit,
+            "candidate_commit": self.candidate_commit,
+            "branch": self.branch,
+            "development_worktree": self.development_worktree,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, object]) -> MaintenanceRecord:
+        maintenance_id = _required_string(value, "maintenance_id")
+        if not MAINTENANCE_PATTERN.fullmatch(maintenance_id):
+            raise WorkflowError(f"invalid maintenance ID {maintenance_id!r}")
+        status = _required_string(value, "status")
+        if status not in MAINTENANCE_STATES:
+            raise WorkflowError(f"invalid maintenance status {status!r}")
+        return cls(
+            maintenance_id=maintenance_id,
+            status=status,
+            attempt=_required_int(value, "attempt"),
+            base_commit=_required_string(value, "base_commit"),
+            candidate_commit=_optional_string(value, "candidate_commit"),
+            branch=_required_string(value, "branch"),
+            development_worktree=_required_string(value, "development_worktree"),
         )
 
 
@@ -467,6 +535,11 @@ class WorkflowManager:
         if runtime is not None and Path(runtime.development_worktree).is_dir():
             config = self.load_config(Path(runtime.development_worktree))
         active_plan = self.load_plan(active) if isinstance(active, str) else None
+        active_maintenance = [
+            record.to_dict()
+            for record in self._maintenance_records()
+            if record.status in {"IN_DEVELOPMENT", "AWAITING_REVIEW", "CHANGES_REQUESTED"}
+        ]
         return {
             "active_phase": config.get("active_phase"),
             "active_task": active,
@@ -474,6 +547,7 @@ class WorkflowManager:
             "task_status": config["tasks"][active]["status"] if active else None,
             "attempt": runtime.to_dict() if runtime else None,
             "plan": active_plan.to_dict() if active_plan else None,
+            "active_maintenance": active_maintenance,
         }
 
     def validate_repository(self) -> None:
@@ -568,6 +642,115 @@ class WorkflowManager:
         if not path.is_file():
             return None
         return PlanRecord.from_dict(_load_json(path))
+
+    def _maintenance_path(self, maintenance_id: str) -> Path:
+        return self.runtime_dir / f"{maintenance_id}.json"
+
+    def _maintenance_request_path(self, maintenance_id: str) -> Path:
+        return self.runtime_dir / f"{maintenance_id}-request.json"
+
+    def _maintenance_records(self) -> list[MaintenanceRecord]:
+        if not self.runtime_dir.is_dir():
+            return []
+        records: list[MaintenanceRecord] = []
+        for path in sorted(self.runtime_dir.glob("M[0-9][0-9][0-9][0-9].json")):
+            records.append(MaintenanceRecord.from_dict(_load_json(path)))
+        return records
+
+    def save_maintenance(self, record: MaintenanceRecord) -> None:
+        _write_json(self._maintenance_path(record.maintenance_id), record.to_dict())
+
+    def load_maintenance(self, maintenance_id: str) -> MaintenanceRecord | None:
+        if not MAINTENANCE_PATTERN.fullmatch(maintenance_id):
+            raise WorkflowError(f"invalid maintenance ID {maintenance_id!r}")
+        path = self._maintenance_path(maintenance_id)
+        if not path.is_file():
+            return None
+        return MaintenanceRecord.from_dict(_load_json(path))
+
+    def _next_maintenance_id(self) -> str:
+        numbers: set[int] = set()
+        maintenance_root = self.repo / "todo" / "maintenance"
+        if maintenance_root.is_dir():
+            for path in maintenance_root.glob("M[0-9][0-9][0-9][0-9]"):
+                if path.is_dir() and MAINTENANCE_PATTERN.fullmatch(path.name):
+                    numbers.add(int(path.name[1:]))
+        if self.runtime_dir.is_dir():
+            for path in self.runtime_dir.glob("M[0-9][0-9][0-9][0-9].json"):
+                if MAINTENANCE_PATTERN.fullmatch(path.stem):
+                    numbers.add(int(path.stem[1:]))
+        number = max(numbers, default=0) + 1
+        if number > 9999:
+            raise WorkflowError("maintenance ID space is exhausted")
+        return f"M{number:04d}"
+
+    def _validate_maintenance_paths(self, allowed_paths: Sequence[str]) -> list[str]:
+        if not allowed_paths or len(allowed_paths) > 5:
+            raise WorkflowError("maintenance requires between one and five explicit paths")
+        normalized: list[str] = []
+        for raw in allowed_paths:
+            path = Path(raw)
+            if path.is_absolute() or raw != path.as_posix() or ".." in path.parts:
+                raise WorkflowError(f"maintenance path must be normalized and relative: {raw!r}")
+            if any(char in raw for char in "*?[]"):
+                raise WorkflowError(f"maintenance path must not contain a glob: {raw!r}")
+            if raw in MAINTENANCE_FORBIDDEN_FILES or any(
+                raw.startswith(prefix) for prefix in MAINTENANCE_FORBIDDEN_PREFIXES
+            ):
+                raise WorkflowError(f"maintenance path is high-risk or protected: {raw}")
+            resolved = self.repo / raw
+            if resolved.exists() and not resolved.is_file():
+                raise WorkflowError(f"maintenance path must identify a file: {raw}")
+            normalized.append(raw)
+        if len(set(normalized)) != len(normalized):
+            raise WorkflowError("maintenance paths must be unique")
+        return normalized
+
+    def _validate_maintenance_request(self, request: Mapping[str, Any]) -> None:
+        _validate_object_keys(
+            request,
+            required={
+                "maintenance_id",
+                "summary",
+                "reason",
+                "allowed_paths",
+                "verification_commands",
+                "related_task",
+                "risk_attestation",
+            },
+            label="maintenance request",
+        )
+        maintenance_id = request.get("maintenance_id")
+        if not isinstance(maintenance_id, str) or not MAINTENANCE_PATTERN.fullmatch(maintenance_id):
+            raise WorkflowError("maintenance request has an invalid maintenance_id")
+        for field in ("summary", "reason"):
+            if not isinstance(request.get(field), str) or not request[field].strip():
+                raise WorkflowError(f"maintenance request {field} must be non-empty")
+            if "\n" in request[field] or "\r" in request[field]:
+                raise WorkflowError(f"maintenance request {field} must be one line")
+        if len(request["summary"]) > 120 or len(request["reason"]) > 1000:
+            raise WorkflowError("maintenance summary or reason is too long")
+        request_paths = request.get("allowed_paths")
+        if not isinstance(request_paths, list) or not all(
+            isinstance(path, str) for path in request_paths
+        ):
+            raise WorkflowError("maintenance allowed_paths must be a list of strings")
+        self._validate_maintenance_paths(request_paths)
+        commands = request.get("verification_commands")
+        if (
+            not isinstance(commands, list)
+            or not commands
+            or len(commands) > 8
+            or not all(isinstance(command, str) and command.strip() for command in commands)
+        ):
+            raise WorkflowError("maintenance requires between one and eight verification commands")
+        related_task = request.get("related_task")
+        if related_task is not None and (
+            not isinstance(related_task, str) or not TASK_PATTERN.fullmatch(related_task)
+        ):
+            raise WorkflowError("maintenance related_task must be null or a valid task ID")
+        if request.get("risk_attestation") != "LOW_RISK_IMPLEMENTATION_DEFECT":
+            raise WorkflowError("maintenance requires the low-risk defect attestation")
 
     def _set_state(
         self,
@@ -796,6 +979,301 @@ class WorkflowManager:
             raise WorkflowError("triage_request proposed classification is invalid")
         if not isinstance(value.get("requested_change"), str):
             raise WorkflowError("triage_request requested_change must be a string")
+
+    def prepare_maintenance(
+        self,
+        *,
+        summary: str,
+        reason: str,
+        allowed_paths: Sequence[str],
+        verification_commands: Sequence[str],
+        related_task: str | None = None,
+    ) -> dict[str, object]:
+        """Prepare a low-risk repair without adding a numbered product task."""
+        self._ensure_clean_main()
+        config = self.load_config()
+        active = config.get("active_task")
+        if isinstance(active, str) and config["tasks"][active]["status"] not in {
+            "APPROVED",
+            "PLANNED",
+        }:
+            raise WorkflowError(f"cannot start maintenance while {active} is unfinished")
+        active_repairs = [
+            record.maintenance_id
+            for record in self._maintenance_records()
+            if record.status in {"IN_DEVELOPMENT", "AWAITING_REVIEW", "CHANGES_REQUESTED"}
+        ]
+        if active_repairs:
+            raise WorkflowError(
+                "cannot start maintenance while another repair is active: "
+                + ", ".join(active_repairs)
+            )
+        if related_task is not None:
+            task = self._task(config, related_task)
+            if task["status"] != "APPROVED":
+                raise WorkflowError("maintenance may reference only an APPROVED task")
+        paths = self._validate_maintenance_paths(allowed_paths)
+        if (
+            not verification_commands
+            or len(verification_commands) > 8
+            or not all(command.strip() for command in verification_commands)
+        ):
+            raise WorkflowError("maintenance requires between one and eight verification commands")
+        maintenance_id = self._next_maintenance_id()
+        base = _sha(self.repo)
+        request: dict[str, object] = {
+            "maintenance_id": maintenance_id,
+            "summary": summary.strip(),
+            "reason": reason.strip(),
+            "allowed_paths": paths,
+            "verification_commands": list(verification_commands),
+            "related_task": related_task,
+            "risk_attestation": "LOW_RISK_IMPLEMENTATION_DEFECT",
+        }
+        self._validate_maintenance_request(request)
+        branch = f"maintenance/{maintenance_id.lower()}-attempt-001"
+        worktree = self.worktree_root / f"maintenance-{maintenance_id.lower()}-attempt-001"
+        worktree.parent.mkdir(parents=True, exist_ok=True)
+        if worktree.exists():
+            raise WorkflowError(f"maintenance worktree path already exists: {worktree}")
+        _git(self.repo, "worktree", "add", "-b", branch, str(worktree), base)
+        record = MaintenanceRecord(
+            maintenance_id=maintenance_id,
+            status="IN_DEVELOPMENT",
+            attempt=1,
+            base_commit=base,
+            candidate_commit=None,
+            branch=branch,
+            development_worktree=str(worktree),
+        )
+        self.save_maintenance(record)
+        _write_json(self._maintenance_request_path(maintenance_id), request)
+        _write_json(worktree / ".workflow" / "maintenance-request.json", request)
+        prompt = (
+            f"Implement low-risk maintenance repair {maintenance_id}. Read the frozen request at "
+            f"{worktree / '.workflow' / 'maintenance-request.json'}. Base commit: {base}. "
+            f"Work only in {worktree}; change only the explicit allowed_paths and do not commit. "
+            f"Run the listed verification commands once; deterministic generated artifacts may "
+            f"require byte comparison, but ordinary test stdout does not. Write the standard "
+            f"developer result to {worktree / '.workflow' / 'developer-result.json'} with "
+            f"task_id={maintenance_id}. If the repair changes behavior, public interfaces, "
+            "dependencies, Intent, Spec, safety policy, or requires another path, return "
+            "TRIAGE_REQUIRED instead of widening scope."
+        )
+        return {**record.to_dict(), "agent": "stage-developer", "prompt": prompt}
+
+    def finish_maintenance_develop(self, maintenance_id: str) -> MaintenanceRecord:
+        record = self.load_maintenance(maintenance_id)
+        if record is None:
+            raise WorkflowError(f"unknown maintenance repair {maintenance_id}")
+        if record.status != "IN_DEVELOPMENT":
+            raise WorkflowError("maintenance development requires IN_DEVELOPMENT")
+        worktree = Path(record.development_worktree)
+        request = _load_json(self._maintenance_request_path(maintenance_id))
+        self._validate_maintenance_request(request)
+        result_path = worktree / ".workflow" / "developer-result.json"
+        if not result_path.is_file():
+            raise WorkflowError(f"developer result is missing: {result_path}")
+        result = _load_json(result_path)
+        self._validate_developer_result(result, maintenance_id)
+        changed = [
+            path
+            for path in _working_tree_changes(worktree)
+            if path
+            not in {
+                ".workflow/developer-result.json",
+                ".workflow/maintenance-request.json",
+            }
+        ]
+        forbidden = sorted(set(changed) - set(request["allowed_paths"]))
+        if forbidden:
+            raise WorkflowError(
+                "maintenance developer changed paths outside the request: " + ", ".join(forbidden)
+            )
+        if result["outcome"] != "CANDIDATE_READY":
+            status = "ESCALATED" if result["outcome"] == "TRIAGE_REQUIRED" else "BLOCKED"
+            updated = MaintenanceRecord(
+                maintenance_id=record.maintenance_id,
+                status=status,
+                attempt=record.attempt,
+                base_commit=record.base_commit,
+                candidate_commit=record.candidate_commit,
+                branch=record.branch,
+                development_worktree=record.development_worktree,
+            )
+            self.save_maintenance(updated)
+            return updated
+        if not changed:
+            raise WorkflowError("maintenance developer produced no requested file change")
+        relative_root = Path("todo") / "maintenance" / maintenance_id
+        _write_json(worktree / relative_root / "request.json", request)
+        _write_json(worktree / relative_root / f"developer-{record.attempt:03d}.json", result)
+        result_path.unlink()
+        (worktree / ".workflow" / "maintenance-request.json").unlink(missing_ok=True)
+        _git(worktree, "diff", "--check")
+        _git(worktree, "add", "-A")
+        _git(worktree, "commit", "-m", f"fix({maintenance_id.lower()}): {request['summary']}")
+        candidate = _sha(worktree)
+        updated = MaintenanceRecord(
+            maintenance_id=maintenance_id,
+            status="AWAITING_REVIEW",
+            attempt=record.attempt,
+            base_commit=record.base_commit,
+            candidate_commit=candidate,
+            branch=record.branch,
+            development_worktree=record.development_worktree,
+        )
+        self.save_maintenance(updated)
+        return updated
+
+    def prepare_maintenance_retry(self, maintenance_id: str) -> dict[str, object]:
+        record = self.load_maintenance(maintenance_id)
+        if record is None:
+            raise WorkflowError(f"unknown maintenance repair {maintenance_id}")
+        if record.status not in {"CHANGES_REQUESTED", "BLOCKED"}:
+            raise WorkflowError("maintenance retry requires CHANGES_REQUESTED or resolved BLOCKED")
+        worktree = Path(record.development_worktree)
+        if _git(worktree, "status", "--porcelain").stdout:
+            raise WorkflowError("maintenance worktree must be clean before retry")
+        request = _load_json(self._maintenance_request_path(maintenance_id))
+        self._validate_maintenance_request(request)
+        updated = MaintenanceRecord(
+            maintenance_id=maintenance_id,
+            status="IN_DEVELOPMENT",
+            attempt=record.attempt + 1,
+            base_commit=record.base_commit,
+            candidate_commit=None,
+            branch=record.branch,
+            development_worktree=record.development_worktree,
+        )
+        self.save_maintenance(updated)
+        prompt = (
+            f"Repair maintenance candidate {maintenance_id} after independent review. Read the "
+            f"frozen request at {worktree / 'todo' / 'maintenance' / maintenance_id / 'request.json'} "
+            f"and prior review at "
+            f"{worktree / 'todo' / 'maintenance' / maintenance_id / f'review-{record.attempt:03d}.json'}. "
+            f"This is attempt {updated.attempt}; preserve the original allowed_paths and base "
+            f"{updated.base_commit}. Work only in {worktree}, do not commit, and write the standard "
+            f"developer result to {worktree / '.workflow' / 'developer-result.json'} with "
+            f"task_id={maintenance_id}."
+        )
+        return {**updated.to_dict(), "agent": "stage-developer", "prompt": prompt}
+
+    def prepare_maintenance_review(self, maintenance_id: str) -> dict[str, object]:
+        record = self.load_maintenance(maintenance_id)
+        if record is None or record.candidate_commit is None:
+            raise WorkflowError(f"{maintenance_id} has no maintenance candidate")
+        if record.status != "AWAITING_REVIEW":
+            raise WorkflowError("maintenance review requires AWAITING_REVIEW")
+        worktree = Path(record.development_worktree)
+        if _sha(worktree) != record.candidate_commit:
+            raise WorkflowError("maintenance worktree no longer matches its candidate")
+        if _git(worktree, "status", "--porcelain").stdout:
+            raise WorkflowError("maintenance worktree must be clean before review")
+        review_worktree = (
+            self.worktree_root / f"review-{maintenance_id.lower()}-attempt-{record.attempt:03d}"
+        )
+        if review_worktree.exists():
+            raise WorkflowError(f"review worktree path already exists: {review_worktree}")
+        _git(
+            self.repo,
+            "worktree",
+            "add",
+            "--detach",
+            str(review_worktree),
+            record.candidate_commit,
+        )
+        request_path = f"todo/maintenance/{maintenance_id}/request.json"
+        prompt = (
+            f"Independently review low-risk maintenance repair {maintenance_id}. The frozen "
+            f"request is {request_path}. Base commit: {record.base_commit}. Candidate commit: "
+            f"{record.candidate_commit}. Work only in {review_worktree}. Verify the exact diff, "
+            "the maintenance eligibility boundary, allowed paths, and listed commands once. "
+            "Do not fix anything. Write the standard review result only to "
+            f"{review_worktree / '.workflow' / 'review-result.json'} with "
+            f"task_id={maintenance_id}."
+        )
+        return {
+            **record.to_dict(),
+            "agent": "stage-reviewer",
+            "review_worktree": str(review_worktree),
+            "prompt": prompt,
+        }
+
+    def finish_maintenance_review(self, maintenance_id: str) -> tuple[str, Path]:
+        record = self.load_maintenance(maintenance_id)
+        if record is None or record.candidate_commit is None:
+            raise WorkflowError(f"{maintenance_id} has no maintenance candidate")
+        review_worktree = (
+            self.worktree_root / f"review-{maintenance_id.lower()}-attempt-{record.attempt:03d}"
+        )
+        result_path = review_worktree / ".workflow" / "review-result.json"
+        if not result_path.is_file():
+            raise WorkflowError(f"review result is missing: {result_path}")
+        result = _load_json(result_path)
+        attempt = AttemptRecord(
+            task_id=maintenance_id,
+            phase="maintenance",
+            attempt=record.attempt,
+            base_commit=record.base_commit,
+            candidate_commit=record.candidate_commit,
+            branch=record.branch,
+            development_worktree=record.development_worktree,
+        )
+        state = self._validate_review_result(result, attempt)
+        reviewer_changes = [
+            path
+            for path in _working_tree_changes(review_worktree)
+            if path != ".workflow/review-result.json"
+        ]
+        if reviewer_changes:
+            raise WorkflowError("maintenance reviewer left changes outside its handoff")
+        if _sha(review_worktree) != record.candidate_commit:
+            raise WorkflowError("maintenance review worktree no longer matches candidate")
+        worktree = Path(record.development_worktree)
+        relative_root = Path("todo") / "maintenance" / maintenance_id
+        review_name = f"review-{record.attempt:03d}"
+        _write_json(worktree / relative_root / f"{review_name}.json", result)
+        report = worktree / relative_root / f"{review_name}.md"
+        report.write_text(_render_review(result), encoding="utf-8")
+        _git(
+            worktree,
+            "add",
+            str(relative_root / f"{review_name}.json"),
+            str(relative_root / f"{review_name}.md"),
+        )
+        _git(worktree, "commit", "-m", f"chore(maintenance): record {maintenance_id} review")
+        result_path.unlink()
+        _git(self.repo, "worktree", "remove", str(review_worktree), check=False)
+        if state == "APPROVED":
+            self._ensure_clean_main()
+            _git(self.repo, "merge", "--ff-only", record.branch)
+            _git(self.repo, "worktree", "remove", record.development_worktree)
+            _git(self.repo, "branch", "-d", record.branch)
+            self._maintenance_path(maintenance_id).unlink(missing_ok=True)
+            self._maintenance_request_path(maintenance_id).unlink(missing_ok=True)
+            return "APPROVED", self.repo / relative_root / f"{review_name}.md"
+        updated = MaintenanceRecord(
+            maintenance_id=maintenance_id,
+            status=state,
+            attempt=record.attempt,
+            base_commit=record.base_commit,
+            candidate_commit=record.candidate_commit,
+            branch=record.branch,
+            development_worktree=record.development_worktree,
+        )
+        self.save_maintenance(updated)
+        return state, report
+
+    def maintenance_status(self, maintenance_id: str) -> dict[str, object]:
+        record = self.load_maintenance(maintenance_id)
+        if record is not None:
+            return record.to_dict()
+        root = self.repo / "todo" / "maintenance" / maintenance_id
+        reviews = sorted(root.glob("review-*.json")) if root.is_dir() else []
+        if reviews and _load_json(reviews[-1]).get("verdict") == "PASS":
+            return {"maintenance_id": maintenance_id, "status": "APPROVED"}
+        raise WorkflowError(f"unknown maintenance repair {maintenance_id}")
 
     def _validate_review_result(self, result: Mapping[str, Any], attempt: AttemptRecord) -> str:
         _validate_object_keys(

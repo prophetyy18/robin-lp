@@ -4,7 +4,7 @@
   "additionalProperties": false,
   "required": ["task_id", "outcome", "summary", "commands", "residual_risks"],
   "properties": {
-    "task_id": {"type": "string", "pattern": "^T[0-9]{3}$"},
+    "task_id": {"type": "string", "pattern": "^(T[0-9]{3}|M[0-9]{4})$"},
     "outcome": {
       "enum": ["CANDIDATE_READY", "TRIAGE_REQUIRED", "BLOCKED"]
     },

@@ -135,6 +135,57 @@ is an exception path, not a mandatory ceremony. The planning role may return
 `NO_CHANGE_REQUIRED`; an independent Plan Reviewer can accept that evidence
 without forcing a meaningless edit.
 
+## Low-risk maintenance repairs
+
+A reproduced implementation defect may use the `Mxxxx` maintenance lane instead
+of creating another product `Txxx` task when all of these are true:
+
+- it does not change Intent, Spec, a task contract, product behavior, a public
+  interface, a dependency, a data schema, a safety/risk rule, or chain execution;
+- every editable file is known in advance (one to five explicit paths, no globs);
+- the failure and the repair have concrete verification commands;
+- it does not touch `.claude/`, `tools/workflow/`, `todo/config.yaml`, task/schema
+  files, dependency manifests, or risk/execution/signer code.
+
+The controller allocates the next `M0001`-style ID. Maintenance records live under
+`todo/maintenance/<id>/` and never enter `todo/config.yaml`, the product dependency
+graph, phase gates, or task-count tests. It still uses an isolated Developer,
+candidate commit, detached independent Reviewer, and fast-forward approval:
+
+```bash
+python -m tools.workflow prepare-maintenance \
+  --summary "replace unsupported test helper" \
+  --reason "the pinned library does not expose it" \
+  --path tests/example.py \
+  --check "python -m pytest tests/example.py -q" \
+  --related-task T012
+# Invoke the returned stage-developer visibly.
+python -m tools.workflow finish-maintenance-develop M0001
+python -m tools.workflow prepare-maintenance-review M0001
+# Invoke the returned stage-reviewer visibly.
+python -m tools.workflow finish-maintenance-review M0001
+```
+
+If review returns `CHANGES_REQUESTED`, run
+`prepare-maintenance-retry M0001`, invoke the fresh Developer, and repeat the
+finish/review gates. The original request and allowed paths remain frozen.
+
+If the repair needs another path or changes any excluded behavior, the Agent must
+return `TRIAGE_REQUIRED`; the Manager then uses normal triage/planning or a new
+numbered task. Planner is not the first stop for an ordinary implementation bug.
+
+One explicit Owner instruction to execute a task or maintenance repair authorizes
+the Manager to continue through the mechanical gates until the first terminal
+result. Do not ask again between prepare, finish, and review. Pause on FAIL,
+BLOCKED, TRIAGE_REQUIRED, OWNER_DECISION_REQUIRED, scope growth, or an external
+side effect requiring new authority.
+
+Run ordinary quality gates once in the Developer and once independently in the
+Reviewer. Compare exit status and semantic results. Byte-for-byte comparison is
+reserved for deterministic fixtures, protocol artifacts, and serialized outputs;
+pytest timing, memory addresses, and other volatile console text are not evidence
+of nondeterminism.
+
 Python never invokes Claude Code. Each `prepare-*` command returns the Agent name,
 worktree, immutable SHAs and prompt. The Manager invokes that Agent through Claude
 Code, where the owner can inspect its transcript and send follow-ups. The Agent
