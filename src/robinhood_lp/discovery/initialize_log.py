@@ -2,8 +2,13 @@
 
 The PoolManager emits ``Initialize(PoolId indexed id, Currency indexed
 currency0, Currency indexed currency1, uint24 fee, int24 tickSpacing,
-IHooks hooks)`` exactly once per pool, at the block where the pool
-is first modified. The scanner decodes that log topic by topic.
+IHooks hooks, uint160 sqrtPriceX96, int24 tick)`` exactly once per
+pool, at the block where the pool is first modified. The scanner
+decodes that log topic by topic.
+
+The 5-arg signature description above is the 8-field Initialize
+event pinned in ``docs/implement/protocol-artifacts/v4-core-e50237c.json``
+(T021 redo, byte-compared against a Foundry SelectorOracle).
 
 T022 acceptance (todo/README.md T022):
 
@@ -33,6 +38,10 @@ from dataclasses import dataclass
 
 from robinhood_lp.protocol import (
     EVENT_TOPICS,
+    MAX_SQRT_PRICE_X96,
+    MAX_TICK,
+    MIN_SQRT_PRICE_X96,
+    MIN_TICK,
     Address,
     Currency,
     PoolId,
@@ -41,16 +50,16 @@ from robinhood_lp.protocol import (
 
 #: topics[0] is the event signature, topics[1] is the indexed PoolId.
 #: topics[2] / topics[3] are the indexed Currency0 / Currency1
-#: addresses. Data carries fee, tickSpacing, hooks.
+#: addresses. Data carries fee, tickSpacing, hooks, sqrtPriceX96, tick.
 INITIALIZE_TOPIC0: bytes = EVENT_TOPICS["Initialize"]
 
 #: The 4-byte function selector for ``getHook(address)`` is not used
 #: here; the Initialize event already carries the hooks address.
 
 #: The Initialize event payload is ABI-encoded as:
-#:   (uint24 fee, int24 tickSpacing, address hooks)
-#: three 32-byte slots.
-INITIALIZE_DATA_SLOTS: int = 3
+#:   (uint24 fee, int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)
+#: five 32-byte slots.
+INITIALIZE_DATA_SLOTS: int = 5
 
 
 class InitializeDecodeError(ValueError):
@@ -74,6 +83,16 @@ class DecodedInitialize:
     tx_hash: str | None = None
     #: The log index within the transaction, set by the scanner.
     log_index: int | None = None
+    #: The pool's initial ``sqrtPriceX96`` as emitted in the
+    #: ``Initialize`` event's non-indexed data. Validated to fit the V4
+    #: ``[MIN_SQRT_PRICE_X96, MAX_SQRT_PRICE_X96)`` domain; non-zero
+    #: and non-``uint160`` values are rejected by the decoder.
+    sqrt_price_x96: int | None = None
+    #: The pool's initial ``tick`` as emitted in the ``Initialize``
+    #: event's non-indexed data. Validated to fit the V4
+    #: ``[MIN_TICK, MAX_TICK]`` domain; values outside that range are
+    #: rejected by the decoder. Signed ``int24``.
+    initial_tick: int | None = None
 
 
 def _decode_address(topic_or_word: bytes) -> Address:
@@ -116,6 +135,31 @@ def _decode_int24(word: bytes) -> int:
     return value
 
 
+def _decode_uint160(word: bytes) -> int:
+    """Decode a 32-byte slot as V4 ``sqrtPriceX96`` (``uint160``).
+
+    The V4 domain is ``[MIN_SQRT_PRICE_X96, MAX_SQRT_PRICE_X96)``:
+    zero is not a valid pool price, and ``MAX_SQRT_PRICE_X96`` would
+    invert back to the minimum tick with no headroom. We keep this
+    check purely integer — no float conversions per ADR-009.
+    """
+    if len(word) != 32:
+        raise InitializeDecodeError(
+            f"expected 32-byte slot for sqrtPriceX96, got {len(word)} bytes"
+        )
+    value = int.from_bytes(word, "big")
+    if value >= (1 << 160):
+        raise InitializeDecodeError(f"sqrtPriceX96 slot {value:#x} does not fit in uint160")
+    if value == 0:
+        raise InitializeDecodeError("sqrtPriceX96 slot is zero, which is not a valid pool price")
+    if value < MIN_SQRT_PRICE_X96 or value >= MAX_SQRT_PRICE_X96:
+        raise InitializeDecodeError(
+            f"sqrtPriceX96 slot {value} outside V4 domain "
+            f"[{MIN_SQRT_PRICE_X96}, {MAX_SQRT_PRICE_X96})"
+        )
+    return value
+
+
 def decode_initialize_log(
     topics: list[bytes],
     data: bytes,
@@ -123,9 +167,15 @@ def decode_initialize_log(
     """Decode one ``Initialize`` event log.
 
     The ``topics`` list must have at least 4 entries (event signature
-    + 3 indexed fields). The ``data`` field is 3 × 32 = 96 bytes
+    + 3 indexed fields). The ``data`` field is 5 × 32 = 160 bytes
     long; the value of the pool_id topic must equal
     ``keccak256(abi.encode(pool_key))``.
+
+    The two trailing non-indexed data slots — ``uint160 sqrtPriceX96``
+    and ``int24 tick`` — are decoded and surfaced via
+    ``DecodedInitialize.sqrt_price_x96`` / ``initial_tick``. They do
+    **not** participate in PoolId derivation; ``PoolId.to_pool_id()``
+    continues to hash only the 5-slot ``PoolKey``.
     """
     if len(topics) < 4:
         raise InitializeDecodeError(
@@ -145,6 +195,17 @@ def decode_initialize_log(
     fee = _decode_uint24(data[0:32])
     tick_spacing = _decode_int24(data[32:64])
     hooks = _decode_address(data[64:96])
+    sqrt_price_x96 = _decode_uint160(data[96:128])
+    initial_tick = _decode_int24(data[128:160])
+    # V4 also constrains the initial tick to [MIN_TICK, MAX_TICK] in
+    # the same way sqrtPriceX96 is bounded by its V4 domain; enforce
+    # it here so an obviously-out-of-range tick (e.g. an int24 value
+    # outside the V4 tick window) is rejected before reaching the
+    # registry, mirroring the V4 PoolManager revert.
+    if initial_tick < MIN_TICK or initial_tick > MAX_TICK:
+        raise InitializeDecodeError(
+            f"initial tick {initial_tick} outside V4 domain [{MIN_TICK}, {MAX_TICK}]"
+        )
 
     pool_key = PoolKey(
         currency0=currency0,
@@ -166,6 +227,8 @@ def decode_initialize_log(
     return DecodedInitialize(
         pool_key=pool_key,
         pool_id=pool_id,
+        sqrt_price_x96=sqrt_price_x96,
+        initial_tick=initial_tick,
     )
 
 

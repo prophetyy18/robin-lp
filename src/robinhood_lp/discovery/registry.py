@@ -28,6 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from robinhood_lp.discovery.initialize_log import (
+    INITIALIZE_TOPIC0,
     DecodedInitialize,
     InitializeDecodeError,
     decode_initialize_log,
@@ -79,6 +80,14 @@ class PoolRecord:
     tx_hash_first_seen: str | None = None
     log_index_first_seen: int | None = None
     occurrences: int = 1
+    #: Initial ``sqrtPriceX96`` from the first ``Initialize`` log that
+    #: produced this row. Surfaces the V4 event's non-indexed data
+    #: slot for downstream consumers; does not participate in identity.
+    sqrt_price_x96: int | None = None
+    #: Initial ``tick`` from the first ``Initialize`` log that
+    #: produced this row. Surfaces the V4 event's non-indexed data
+    #: slot for downstream consumers; does not participate in identity.
+    initial_tick: int | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -101,6 +110,8 @@ class PoolRecord:
             "token1_decimals": self.token1_metadata.decimals if self.token1_metadata else None,
             "token1_metadata_failed": self.token1_metadata is not None
             and not self.token1_metadata.is_complete(),
+            "sqrt_price_x96": self.sqrt_price_x96,
+            "initial_tick": self.initial_tick,
         }
 
 
@@ -170,6 +181,8 @@ class PoolRegistry:
                 tx_hash_first_seen=tx_hash,
                 log_index_first_seen=log_index,
                 occurrences=1,
+                sqrt_price_x96=decoded.sqrt_price_x96,
+                initial_tick=decoded.initial_tick,
             )
             self._records[decoded.pool_id] = record
             return record
@@ -252,12 +265,12 @@ class InitializeScanner:
     processed.
     """
 
-    INITIALIZE_TOPIC0_HEX = (
-        "0x"
-        + __import__("eth_hash.auto", fromlist=["keccak"])
-        .keccak(b"Initialize(bytes32,address,address,uint24,int24,address)")
-        .hex()
-    )
+    #: ``Initialize`` event topic0, sourced from the pinned
+    #: ``EVENT_TOPICS`` artifact so the scanner and decoder agree on
+    #: the byte-for-byte keccak. ``initialize_log.INITIALIZE_TOPIC0``
+    #: is the same value (re-imported here to avoid a cycle at import
+    #: time).
+    INITIALIZE_TOPIC0_HEX = "0x" + INITIALIZE_TOPIC0.hex()
 
     def __init__(
         self,

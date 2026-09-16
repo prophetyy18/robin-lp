@@ -1,0 +1,38 @@
+{
+  "task_id": "T022",
+  "outcome": "CANDIDATE_READY",
+  "summary": "T022 attempt-1 candidate ready (corrected handoff). This pass withdraws the docs/spec/protocol/PROTOCOL_FACTS.md paragraph that was appended in an earlier sub-session: per AGENTS.md §7 and the workflow controller, Developer MUST NOT modify Spec files in attempt N — only the planning path can change Specs. The withdrawn paragraph documented the 8-field Initialize event and clarified sqrtPriceX96/tick do not participate in PoolId derivation; it was a useful design note but it is not a contract deliverable for T022, and T022 acceptance does not require it. The in-scope contract deliverable (the four code/test files that align the decoder/scanner/registry/test with the T021-pinned 8-field Initialize artifact) is unchanged from the previous run. Files modified by this attempt: src/robinhood_lp/discovery/initialize_log.py (docstring; INITIALIZE_DATA_SLOTS 3->5; new _decode_uint160 with [MIN_SQRT_PRICE_X96, MAX_SQRT_PRICE_X96) and zero-rejection guards, no float per ADR-009; new sqrt_price_x96/initial_tick fields on DecodedInitialize; decode_initialize_log now reads 5 slots; tick domain-checked against [MIN_TICK, MAX_TICK]), src/robinhood_lp/discovery/registry.py (PoolRecord gains sqrt_price_x96/initial_tick fields, surfaces both in to_dict(), PoolRegistry.add() copies both from decoded, InitializeScanner.INITIALIZE_TOPIC0_HEX is now derived from EVENT_TOPICS[\"Initialize\"] via the re-imported INITIALIZE_TOPIC0 - no standalone 7-field keccak remains), tests/test_initialize_scanner.py (INITIALIZE_SIG 7->8 fields; _encode_initialize_log expands 3->5 data slots; test_decode_rejects_short_data truncates to data[:64] which is strictly less than 32*5=160 bytes), todo/config.yaml (controller bookkeeping marking T022 ready - not a developer edit). The revert step was: git checkout b93f3a7... -- docs/spec/protocol/PROTOCOL_FACTS.md which restored the file to the approved base byte-for-byte. After the revert, git diff --stat b93f3a7 shows exactly the four expected paths; docs/spec/protocol/PROTOCOL_FACTS.md is NOT in the diff. All 22 tests in tests/test_initialize_scanner.py pass. Full pytest: 1 failed / 372 passed / 6 skipped. ruff check, ruff format --check, and mypy all pass. The single pytest failure is the pre-existing T012-era test_artifact_byte_matches_regenerated_oracle_output (forge / MathOracle.t.sol compile blocker; T012 owner's responsibility, not T022).",
+  "commands": [
+    {
+      "command": "git -C /home/lpdev/lp-worktrees/dev-t022-attempt-001 checkout b93f3a7cada2ccbe76fb2ec444bb12a30c625785 -- docs/spec/protocol/PROTOCOL_FACTS.md",
+      "result": "Reverted docs/spec/protocol/PROTOCOL_FACTS.md to the approved base byte-for-byte. Subsequent git diff --stat b93f3a7 confirms the file is no longer in the worktree's diff."
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t022-attempt-001 && PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q",
+      "result": "1 failed, 372 passed, 6 skipped in 1.45s. The single failure is tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output (pre-existing T012-era forge / MathOracle.t.sol compile blocker; OUT OF SCOPE per owner direction). The 6 skips are unchanged from the pre-fix baseline (3 forge-not-on-PATH skips in tests/test_oracle_drift.py, 2 gpg-verification-out-of-scope skips in tests/test_oracle_review_provenance.py, 1 unordered-vector skip in tests/test_protocol_ids.py). All 22 tests in tests/test_initialize_scanner.py pass."
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t022-attempt-001 && /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check",
+      "result": "All checks passed! exit=0."
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t022-attempt-001 && /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check",
+      "result": "173 files already formatted. exit=0."
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t022-attempt-001 && PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src tests",
+      "result": "Success: no issues found in 46 source files. exit=0."
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t022-attempt-001 && git diff --stat b93f3a7",
+      "result": " src/robinhood_lp/discovery/initialize_log.py | 77 +++++++++++++++++++++++++---\n src/robinhood_lp/discovery/registry.py       | 25 ++++++---\n tests/test_initialize_scanner.py             | 30 +++++++++--\n todo/config.yaml                             |  6 +--\n 4 files changed, 119 insertions(+), 19 deletions(-). Exactly the four expected in-scope paths. docs/spec/protocol/PROTOCOL_FACTS.md is NOT present (withdrawn). Untracked .workflow/ directory is the developer handoff."
+    }
+  ],
+  "residual_risks": [
+    "OUT-OF-SCOPE PRE-EXISTING FAILURE (owner-recorded): tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails in this worktree because the Foundry oracle's V4 sources (tools/oracle/lib/v4-core, tools/oracle/lib/v4-periphery) have not been forge install-ed under the worktree path. The T021-pinned artifact is itself byte-for-byte correct (verified SHA-256 match). Per owner direction this failure is OUT OF SCOPE for T022 and is owned by the T012 owner who must fix tools/oracle/test/MathOracle.t.sol's forge-std log_named_bool usage. This attempt did not touch test_abi_artifacts.py, src/robinhood_lp/protocol/abi_artifacts.py, tools/oracle/src/SelectorOracle.sol, or tools/oracle/test/SelectorOracle.t.sol (verified empty diff against approved base b93f3a7). The Reviewer should record this failure as pre-existing and not attribute it to T022 attempt-1.",
+    "docs/spec/protocol/PROTOCOL_FACTS.md Spec-modification note: the Doc paragraph that was appended in the previous sub-session documented the 8-field Initialize event and clarified sqrtPriceX96/tick do not participate in PoolId derivation. That note was useful for the Reviewer's mental model but is NOT a T022 contract deliverable, and Developer is forbidden from modifying Spec files in attempt N (AGENTS.md §7). The paragraph has been withdrawn against the approved base b93f3a7. If the Spec text needs updating, that change must go through the planning path, not the Developer path.",
+    "InitializeScanner.INITIALIZE_TOPIC0_HEX previously held a hardcoded 7-field keccak; this change deletes that hardcode and sources the value from EVENT_TOPICS[\"Initialize\"] (the same artifact that initialize_log.INITIALIZE_TOPIC0 sources from). Verified at runtime that InitializeScanner.INITIALIZE_TOPIC0_HEX now equals '0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438' (the artifact-pinned 8-field topic0). A stale __pycache__ briefly masked the fix on a verification pass in this worktree; clearing src/robinhood_lp/discovery/__pycache__ restored the expected value. CI runners with fresh checkouts should not see this; the stale cache only affects in-place edits to .py files.",
+    "The new PoolRecord fields sqrt_price_x96 and initial_tick are Optional[int]. A pool registered from synthetic DecodedInitialize fixtures (test_registry_conflicting_pool_id_fails_closed, test_scanner_counts_conflicts) constructs DecodedInitialize without the new fields, so they default to None - existing test assertions are not perturbed. T023 eligibility code reads only pool_key, token0_metadata, token1_metadata, pool_id so the additive fields do not leak into T023."
+  ],
+  "blocking_question": null
+}

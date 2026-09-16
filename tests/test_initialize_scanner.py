@@ -34,7 +34,7 @@ from robinhood_lp.discovery import (
 from robinhood_lp.protocol import Address, ChainId, Currency, PoolId, PoolKey
 from robinhood_lp.rpc import RpcAdapter, RpcConfig, RpcEndpoint
 
-INITIALIZE_SIG = keccak(b"Initialize(bytes32,address,address,uint24,int24,address)")
+INITIALIZE_SIG = keccak(b"Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)")
 
 
 # ---------------------------------------------------------------------------
@@ -42,11 +42,31 @@ INITIALIZE_SIG = keccak(b"Initialize(bytes32,address,address,uint24,int24,addres
 # ---------------------------------------------------------------------------
 
 
-def _encode_initialize_log(pk: PoolKey, pool_id: PoolId | None = None) -> tuple[list[bytes], bytes]:
+#: ``sqrtPriceX96`` value used by tests that don't care about the price.
+#: 2**96 corresponds to a 1:1 price; it sits comfortably above the
+#: V4 ``MIN_SQRT_PRICE_X96`` (4_295_128_739) so the decoder accepts it
+#: without exercising the boundary check.
+_DEFAULT_SQRT_PRICE_X96: int = 1 << 96
+#: ``tick`` value used by tests that don't care about the tick.
+_DEFAULT_INITIAL_TICK: int = 0
+
+
+def _encode_initialize_log(
+    pk: PoolKey,
+    pool_id: PoolId | None = None,
+    *,
+    sqrt_price_x96: int = _DEFAULT_SQRT_PRICE_X96,
+    initial_tick: int = _DEFAULT_INITIAL_TICK,
+) -> tuple[list[bytes], bytes]:
     """Build the canonical Initialize log topics + data for a PoolKey.
 
     If ``pool_id`` is omitted, it is derived from the PoolKey. Pass
     an explicit one to construct conflicting-event test cases.
+
+    The 8-field Initialize event signature
+    ``Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)``
+    encodes five non-indexed data slots:
+    ``(fee, tickSpacing, hooks, sqrtPriceX96, tick)`` = 5 * 32 = 160 bytes.
     """
     if pool_id is None:
         pool_id = pk.to_pool_id()
@@ -60,6 +80,8 @@ def _encode_initialize_log(pk: PoolKey, pool_id: PoolId | None = None) -> tuple[
         pk.fee.to_bytes(32, "big")
         + pk.tick_spacing.to_bytes(32, "big", signed=True)
         + pk.hooks.value.to_bytes(32, "big")
+        + sqrt_price_x96.to_bytes(32, "big")
+        + initial_tick.to_bytes(32, "big", signed=True)
     )
     return topics, data
 
@@ -151,8 +173,10 @@ def test_decode_rejects_wrong_topic0() -> None:
 
 def test_decode_rejects_short_data() -> None:
     topics, data = _encode_initialize_log(PK_STATIC)
+    # 8-field Initialize data is 5 * 32 = 160 bytes; any length
+    # strictly less than that is rejected with the standard message.
     with pytest.raises(InitializeDecodeError, match="Initialize data must be"):
-        decode_initialize_log(topics, data[:32])
+        decode_initialize_log(topics, data[:64])
 
 
 def test_decode_rejects_inconsistent_pool_id() -> None:
