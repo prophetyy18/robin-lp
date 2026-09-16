@@ -163,7 +163,7 @@ superseding decisions are new ADRs that explicitly reference the prior one.
 
 | ID | Title | Status |
 | --- | --- | --- |
-| ADR-001 | Web3 client & concurrency model | accepted |
+| ADR-001 | Web3 client & concurrency model | superseded by ADR-011 |
 | ADR-002 | Storage & query format | accepted |
 | ADR-003 | Configuration & secrets handling | accepted |
 | ADR-004 | Integer / decimal precision policy | accepted |
@@ -172,6 +172,8 @@ superseding decisions are new ADRs that explicitly reference the prior one.
 | ADR-007 | Continuous integration provider | accepted |
 | ADR-008 | Binding document precedence | accepted |
 | ADR-009 | Display / Decimal boundary | Owner (Direction 1) | 2026-09-15 |
+| ADR-010 | Free dual-provider historical ingestion | accepted |
+| ADR-011 | Project-owned bounded JSON-RPC transport | accepted |
 
 ## 5. Open decisions (not blocking research)
 
@@ -181,7 +183,8 @@ Two product choices are already closed: both 5-minute rules use T053-qualified,
 point-in-time USDG prices; pre-testnet preliminary paper validates implementation only,
 while formal live evidence requires post-testnet paper/shadow.
 
-- verified deployment/finality/archive behavior for each Robinhood environment (T024);
+- deployment/finality/archive/range behavior is capability-probed per endpoint and
+  re-probed for each material ingestion configuration (T024, ADR-010, T032);
 - verified hook source and semantics for the user-selected PoolKey
   (T023, T043);
 - storage engine and expected data volume/retention (refined in ADR-002 as

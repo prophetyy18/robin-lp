@@ -4,8 +4,10 @@
 
 **Entry:** Phase 2 exit gate and storage ADR approved.
 
-**Exit gate:** a fixed range survives interruption, overlap, corruption, and
-synthetic reorg tests while producing zero unexplained gaps.
+**Exit gate:** a fixed range survives interruption, overlap, corruption, provider
+failover, budget exhaustion, and synthetic reorg tests while producing zero
+unexplained gaps; its report separates RPC calls, HTTP requests, bytes, rows,
+provider units, and storage size.
 
 **Phase prohibitions:** no in-place destruction of raw history, future-state calls,
 silent schema coercion, interpolation, or completion based only on “no rows”.

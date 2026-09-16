@@ -107,7 +107,9 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
   inconsistent coverage; cross-provider comparison during ingestion.
 - **Owner:** T020 (rpc adapter) + T034 (data quality)
 - **Residual risk:** Provider-level MitM during ingestion. Reduced by
-  running two independent providers and halting on disagreement.
+  cross-endpoint comparison and halting on disagreement. Distinct endpoint brands
+  are not assumed to be operationally independent; T034 records known common
+  upstream infrastructure, so correlated compromise remains explicit residual risk.
 - **Evidence:** `tests/test_no_signing_paths.py` denies write paths;
   T020 acceptance covers retry exhaustion and partial response.
 

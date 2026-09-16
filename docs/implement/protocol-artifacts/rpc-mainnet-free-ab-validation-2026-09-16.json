@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-09-16T12:37:26Z",
+  "purpose": "Read-only validation of the owner-selected free A+B historical-data path",
+  "comparison_block": 64513873,
+  "comparison_block_hash": "0xd63b2393ca001f9926f132d9a0bd88bd0d46d08b92a97ae749b7eda5495a21b0",
+  "common": {
+    "chain_id": 4663,
+    "genesis_hash": "0xaad15f3d702aaea00caf3e9bb56395efe9127bc3b31b24921abf1eee3409305c",
+    "safe_block": 64506786,
+    "finalized_block": 64503007,
+    "pool_manager_address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+    "pool_manager_code_bytes": 24009,
+    "pool_manager_sha256": "6eb21c69298b064e37fcf8089a941ae096fe08c0f179b2d399567aef1b10585b",
+    "state_view_address": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
+    "state_view_code_bytes": 3531,
+    "state_view_sha256": "60cd24035661345b74c14895a641420f2598f910e376fb3f115bbd6bf504c8c0"
+  },
+  "endpoints": {
+    "robinhood-official-mainnet": {
+      "url_source": "R23",
+      "credential_persisted": false,
+      "explicit_user_agent_required_in_this_probe_environment": true,
+      "selective_empty_log_ranges_tested_blocks": [10, 100, 1000, 10000, 100000],
+      "largest_selective_empty_log_range_accepted_blocks": 100000,
+      "historical_state_1000000_blocks_behind": "unavailable"
+    },
+    "alchemy-free-mainnet": {
+      "url_source": "ROBINHOOD_MAINNET_RPC_URL",
+      "credential_persisted": false,
+      "selective_empty_log_ranges_tested_blocks": [10, 100, 1000, 10000, 100000],
+      "largest_log_range_accepted_blocks": 10,
+      "larger_log_range_error_code": -32600,
+      "historical_state_1000000_blocks_behind": "available"
+    }
+  },
+  "result_bearing_historical_probe": {
+    "observed_at_utc": "2026-09-16T12:52:15Z",
+    "pool_manager_earliest_code_block_via_alchemy": 9070,
+    "alchemy_archive_binary_search_calls": 26,
+    "robinhood_official_initialize_range": [9070, 109069],
+    "robinhood_official_initialize_count": 16,
+    "robinhood_official_response_bytes": 15216,
+    "cross_provider_comparison_range": [92581, 92590],
+    "robinhood_official_log_count": 1,
+    "alchemy_log_count": 1,
+    "normalized_logs_equal": true,
+    "normalized_logs_sha256": "6105c3da6a78bd6908f758bb6adbeeea50f0433355645d598afed27f9012357d"
+  },
+  "limitations": [
+    "The log filters used an absent poolId and returned zero rows; this validates range acceptance, not result-bearing response capacity or event completeness.",
+    "The observed provider behavior is mutable and must be re-probed for an ingestion run.",
+    "No credential-bearing endpoint URL, API key, raw authorization header, or .env value is stored in this artifact."
+  ],
+  "sources": [
+    "https://docs.robinhood.com/chain/connecting/",
+    "https://www.alchemy.com/docs/chains/robinhood-chain/robinhood-chain-api-endpoints/eth-get-logs"
+  ]
+}

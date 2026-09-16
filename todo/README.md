@@ -253,6 +253,15 @@ do not pin the mutable URLs below as if they were versions.
 - **R21 — Dependency security:** [OSV-Scanner](https://google.github.io/osv-scanner/)
   and [GitHub dependency review](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependency-review).
 - **R22 — Property-based testing:** [Hypothesis documentation](https://hypothesis.readthedocs.io/).
+- **R23 — Robinhood Chain endpoints:** [official connection documentation](https://docs.robinhood.com/chain/connecting/)
+  for the public mainnet RPC, its rate-limited/non-production status, and the recommendation
+  to use an archive provider for historical reads.
+- **R24 — Alchemy Robinhood `eth_getLogs`:** [official method documentation](https://www.alchemy.com/docs/chains/robinhood-chain/robinhood-chain-api-endpoints/eth-get-logs)
+  for the 10-block Free-tier range and per-call CU value; runtime probes remain authoritative
+  for the configured endpoint.
+- **R25 — Alchemy plan limits:** [official pricing documentation](https://www.alchemy.com/docs/reference/pricing-plans)
+  for the current account-wide Free CU allowance and archive-data inclusion; runtime usage
+  and the operator's remaining allowance remain authoritative.
 
 ## 6. Unresolved decisions and assigned resolution points
 
@@ -266,7 +275,11 @@ Do not guess these in an earlier task:
   runtime code hashes, archive/finality/range behavior and endpoint agreement. No address or
   chain behavior is accepted merely because it appears in a documentation artifact.
 - T023/T043 determine the selected PoolKey's actual Hook identity and semantics.
-- T031 measures data volume and confirms storage/partition/retention parameters under ADR-002.
+- T031 measures data volume and confirms storage/partition/retention parameters under ADR-002;
+  T032 implements ADR-010 capability-driven A+B routing and records preflight versus actual
+  calls, HTTP requests, provider units, bytes, rows, and elapsed time. A first dataset starts
+  at the selected pool's Initialize block; only a qualified local checkpoint permits a later
+  run to ingest a short suffix without replaying the complete prefix.
 - T053 selects and versions qualified USDG quote sources and availability-time semantics. The
   confirmed 5-minute rules use this point-in-time USDG price, not raw activity-pool relative
   price alone.
