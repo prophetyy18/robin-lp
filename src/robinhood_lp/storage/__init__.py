@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from robinhood_lp.storage.decode_log import LogDecodeContext, decode_log
 from robinhood_lp.storage.schema import (
     CURRENT_DECODE_VERSION,
     CURRENT_SCHEMA_VERSION,
@@ -27,12 +28,14 @@ __all__ = [
     "CURRENT_SCHEMA_VERSION",
     "DonateLogRecord",
     "InitializeLogRecord",
+    "LogDecodeContext",
     "ModifyLiquidityLogRecord",
     "ProtocolFeeUpdatedLogRecord",
     "ReceiptContext",
     "SwapLogRecord",
     "TransactionContext",
     "canonical_bytes",
+    "decode_log",
     "from_canonical_bytes",
     "migrate_to_current",
     "normalized_content_hash",

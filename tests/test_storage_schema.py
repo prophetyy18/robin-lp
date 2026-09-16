@@ -30,6 +30,7 @@ verified to round-trip byte-exactly through ``canonical_bytes``.
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import Any
 
 import pytest
 
@@ -41,6 +42,9 @@ from robinhood_lp.protocol import (
     PoolId,
     PoolKey,
 )
+from robinhood_lp.protocol.abi_artifacts import EVENT_TOPICS
+from robinhood_lp.protocol.events import BlockRef, TransactionRef
+from robinhood_lp.storage.decode_log import LogDecodeContext, decode_log
 from robinhood_lp.storage.schema import (
     CURRENT_DECODE_VERSION,
     CURRENT_SCHEMA_VERSION,
@@ -1303,3 +1307,321 @@ def test_acquisition_envelope_round_trips_and_is_excluded_from_normalized_hash()
     payload.pop("unknown_fields", None)
     canonical = _json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     assert normalized_content_hash(record) == hashlib.sha256(canonical).digest()
+
+
+# ---------------------------------------------------------------------------
+# Full typed reconstruction from raw JSON-RPC bytes (T030 still-open)
+# ---------------------------------------------------------------------------
+
+
+CHAIN_FOR_DECODE = ChainId(4663)
+_POOL_ID_INT = 0xAABBCCDDEEFF00112233445566778899AABBCCDDEEFF0011223344556677889
+_POOL_ID_BYTES = (0).to_bytes(32, "big")  # placeholder; overwritten per-test
+
+
+def _ctx_for_decode(
+    *,
+    endpoint_alias: str = "robinhood_public",
+    raw_response: dict[str, Any] | None = None,
+    log_index: int = 0,
+    transaction_index: int = 0,
+    block_number: int = 100,
+    block_hash: int = 0xAA,
+    transaction_hash: int = 0xBB,
+    removed: bool = False,
+) -> LogDecodeContext:
+    """Build a LogDecodeContext with sensible defaults."""
+    return LogDecodeContext(
+        chain_id=CHAIN_FOR_DECODE,
+        block_number=block_number,
+        block_hash=block_hash,
+        transaction_hash=transaction_hash,
+        transaction_index=transaction_index,
+        log_index=log_index,
+        address=Address.from_hex("0x" + "44" * 20),
+        removed=removed,
+        acquisition=AcquisitionProvenance(
+            endpoint_alias=endpoint_alias,
+            retrieval_time="2026-09-16T00:00:00+00:00",
+        ),
+        raw_response=raw_response
+        if raw_response is not None
+        else {"jsonrpc": "2.0", "id": 1, "result": []},
+    )
+
+
+def _build_raw_log(
+    topic0: bytes,
+    extra_topics: list[bytes],
+    data: bytes,
+    *,
+    removed: bool = False,
+) -> dict[str, Any]:
+    return {
+        "address": "0x" + "44" * 20,
+        "topics": ["0x" + t.hex() for t in [topic0, *extra_topics]],
+        "data": "0x" + data.hex(),
+        "blockNumber": "0x64",
+        "transactionHash": "0x" + "bb" * 32,
+        "transactionIndex": "0x0",
+        "blockHash": "0x" + "aa" * 32,
+        "logIndex": "0x0",
+        "removed": removed,
+    }
+
+
+def test_decode_initialize_event() -> None:
+    """T030 still-open: full typed reconstruction for the Initialize event.
+
+    The decoder takes raw JSON-RPC topics + data and produces a typed
+    ``InitializeLogRecord`` whose pool_id matches the indexed topic and
+    whose raw bytes survive on the record (raw_topics / raw_data / raw).
+    """
+    pool_id_bytes = _POOL_ID_INT.to_bytes(32, "big")
+    curr0 = int.from_bytes(b"\x22" * 20, "big").to_bytes(32, "big")
+    curr1 = int.from_bytes(b"\x33" * 20, "big").to_bytes(32, "big")
+    data = (
+        (3000).to_bytes(32, "big")
+        + (60).to_bytes(32, "big", signed=True)
+        + (0).to_bytes(32, "big")
+        + ((1 << 160) - 1).to_bytes(32, "big")
+        + (0).to_bytes(32, "big", signed=True)
+    )
+    raw_log = _build_raw_log(EVENT_TOPICS["Initialize"], [pool_id_bytes, curr0, curr1], data)
+    record = decode_log(raw_log, _ctx_for_decode())
+    assert isinstance(record, InitializeLogRecord)
+    assert record.pool_id.value == _POOL_ID_INT
+    # Raw bytes survive verbatim — never overwritten by typed values.
+    assert record.raw_topics[0] == EVENT_TOPICS["Initialize"]
+    assert record.raw_topics[1] == pool_id_bytes
+    assert record.raw_data == data
+    assert record.raw["data"] == "0x" + data.hex()
+
+
+def test_decode_modify_liquidity_event() -> None:
+    """ModifyLiquidity: signed liquidity_delta must keep its sign and int width."""
+    pool_id_bytes = _POOL_ID_INT.to_bytes(32, "big")
+    sender_topic = int.from_bytes(b"\x11" * 20, "big").to_bytes(32, "big")
+    data = (
+        (-100).to_bytes(32, "big", signed=True)
+        + (100).to_bytes(32, "big", signed=True)
+        + (-(10**18)).to_bytes(32, "big", signed=True)
+        + (0xDEADBEEF).to_bytes(32, "big")
+    )
+    raw_log = _build_raw_log(EVENT_TOPICS["ModifyLiquidity"], [pool_id_bytes, sender_topic], data)
+    record = decode_log(raw_log, _ctx_for_decode())
+    assert isinstance(record, ModifyLiquidityLogRecord)
+    assert record.tick_lower == -100
+    assert record.tick_upper == 100
+    assert record.liquidity_delta == -(10**18)
+    assert record.salt == 0xDEADBEEF
+    assert record.sender.value == int.from_bytes(b"\x11" * 20, "big")
+    # Signed int preserved as int (no float coercion).
+    assert isinstance(record.liquidity_delta, int)
+
+
+def test_decode_swap_event_preserves_signed_amounts() -> None:
+    """Swap: signed amount0 / amount1 keep their sign and exact int width.
+
+    Both extremes of int128 are accepted by the decoder; no value is
+    truncated to a float.
+    """
+    pool_id_bytes = _POOL_ID_INT.to_bytes(32, "big")
+    sender_topic = int.from_bytes(b"\x11" * 20, "big").to_bytes(32, "big")
+    data = (
+        (-(2**127)).to_bytes(32, "big", signed=True)
+        + ((2**127) - 1).to_bytes(32, "big", signed=True)
+        + ((1 << 160) - 1).to_bytes(32, "big")
+        + ((1 << 128) - 1).to_bytes(32, "big")
+        + (-(2**23)).to_bytes(32, "big", signed=True)
+        + ((1 << 24) - 1).to_bytes(32, "big")
+    )
+    raw_log = _build_raw_log(EVENT_TOPICS["Swap"], [pool_id_bytes, sender_topic], data)
+    record = decode_log(raw_log, _ctx_for_decode())
+    assert isinstance(record, SwapLogRecord)
+    assert record.amount0 == -(2**127)
+    assert record.amount1 == (2**127) - 1
+    assert record.sqrt_price_x96 == (1 << 160) - 1
+    assert record.liquidity == (1 << 128) - 1
+    assert record.tick == -(2**23)
+    assert record.fee == (1 << 24) - 1
+    assert isinstance(record.amount0, int)
+    assert isinstance(record.amount1, int)
+
+
+def test_decode_donate_event() -> None:
+    """Donate: signed-or-uint amounts decode as int with exact width."""
+    pool_id_bytes = _POOL_ID_INT.to_bytes(32, "big")
+    sender_topic = int.from_bytes(b"\x11" * 20, "big").to_bytes(32, "big")
+    data = (10**6).to_bytes(32, "big") + (20**6).to_bytes(32, "big")
+    raw_log = _build_raw_log(EVENT_TOPICS["Donate"], [pool_id_bytes, sender_topic], data)
+    record = decode_log(raw_log, _ctx_for_decode())
+    assert isinstance(record, DonateLogRecord)
+    assert record.amount0 == 10**6
+    assert record.amount1 == 20**6
+
+
+def test_decode_protocol_fee_updated_event() -> None:
+    """ProtocolFeeUpdated(bytes32,uint24): exact uint24 width enforced."""
+    pool_id_bytes = _POOL_ID_INT.to_bytes(32, "big")
+    data = (0x000ABC).to_bytes(32, "big")
+    raw_log = _build_raw_log(EVENT_TOPICS["ProtocolFeeUpdated"], [pool_id_bytes], data)
+    record = decode_log(raw_log, _ctx_for_decode())
+    assert isinstance(record, ProtocolFeeUpdatedLogRecord)
+    assert record.protocol_fee == 0x000ABC
+    assert isinstance(record.protocol_fee, int)
+
+
+def test_decode_protocol_fee_updated_rejects_uint24_overflow() -> None:
+    """The decoder rejects ``protocol_fee`` values that exceed 24 bits."""
+    pool_id_bytes = _POOL_ID_INT.to_bytes(32, "big")
+    data = (1 << 24).to_bytes(32, "big")  # exceeds uint24
+    raw_log = _build_raw_log(EVENT_TOPICS["ProtocolFeeUpdated"], [pool_id_bytes], data)
+    with pytest.raises(ValueError, match="protocol_fee"):
+        decode_log(raw_log, _ctx_for_decode())
+
+
+def test_decode_swap_rejects_fee_overflow() -> None:
+    """A ``Swap`` event whose ``fee`` field exceeds uint24 is rejected."""
+    pool_id_bytes = _POOL_ID_INT.to_bytes(32, "big")
+    sender_topic = int.from_bytes(b"\x11" * 20, "big").to_bytes(32, "big")
+    data = (
+        (0).to_bytes(32, "big", signed=True)
+        + (0).to_bytes(32, "big", signed=True)
+        + (0).to_bytes(32, "big")
+        + (0).to_bytes(32, "big")
+        + (0).to_bytes(32, "big", signed=True)
+        + (1 << 24).to_bytes(32, "big")  # exceeds uint24
+    )
+    raw_log = _build_raw_log(EVENT_TOPICS["Swap"], [pool_id_bytes, sender_topic], data)
+    with pytest.raises(ValueError, match="Swap.fee"):
+        decode_log(raw_log, _ctx_for_decode())
+
+
+def test_decode_rejects_unknown_topic0() -> None:
+    """A topic0 the framework does not consume is rejected."""
+    raw_log = {
+        "topics": ["0x" + ("00" * 32)],
+        "data": "0x",
+        "logIndex": "0x0",
+    }
+    with pytest.raises(ValueError, match="topic0"):
+        decode_log(raw_log, _ctx_for_decode())
+
+
+def test_decode_rejects_wrong_topic_count_for_event() -> None:
+    """ModifyLiquidity expects 1 topic0 + 2 indexed topics. A blob with
+    only 1 topic is rejected."""
+    raw_log = {
+        "topics": ["0x" + EVENT_TOPICS["ModifyLiquidity"].hex()],
+        "data": "0x",
+        "logIndex": "0x0",
+    }
+    with pytest.raises(ValueError, match="expected 3 topics"):
+        decode_log(raw_log, _ctx_for_decode())
+
+
+def test_decode_rejects_data_length_mismatch() -> None:
+    """A ``Swap`` blob with the wrong number of data slots is rejected."""
+    pool_id_bytes = _POOL_ID_INT.to_bytes(32, "big")
+    sender_topic = int.from_bytes(b"\x11" * 20, "big").to_bytes(32, "big")
+    bad_data = b"\x00" * 32  # 1 slot, Swap needs 6
+    raw_log = _build_raw_log(EVENT_TOPICS["Swap"], [pool_id_bytes, sender_topic], bad_data)
+    with pytest.raises(ValueError, match="data blob must be"):
+        decode_log(raw_log, _ctx_for_decode())
+
+
+def test_decode_preserves_raw_response_wrapper() -> None:
+    """The original JSON-RPC response wrapper survives on the record
+    alongside the typed fields and the raw per-log dict."""
+    pool_id_bytes = _POOL_ID_INT.to_bytes(32, "big")
+    sender_topic = int.from_bytes(b"\x11" * 20, "big").to_bytes(32, "big")
+    data = (10**6).to_bytes(32, "big") + (20**6).to_bytes(32, "big")
+    raw_log = _build_raw_log(EVENT_TOPICS["Donate"], [pool_id_bytes, sender_topic], data)
+    wrapper = {"jsonrpc": "2.0", "id": 7, "result": [raw_log]}
+    record = decode_log(raw_log, _ctx_for_decode(raw_response=wrapper))
+    assert record.raw["_jsonrpc_response_wrapper"] == wrapper
+
+
+def test_decode_propagates_removed_flag() -> None:
+    """The decoder honours ``ctx.removed`` so reorged logs carry
+    ``removed=True`` on the returned record."""
+    pool_id_bytes = _POOL_ID_INT.to_bytes(32, "big")
+    sender_topic = int.from_bytes(b"\x11" * 20, "big").to_bytes(32, "big")
+    data = (10**6).to_bytes(32, "big") + (20**6).to_bytes(32, "big")
+    raw_log = _build_raw_log(EVENT_TOPICS["Donate"], [pool_id_bytes, sender_topic], data)
+    record = decode_log(raw_log, _ctx_for_decode(removed=True))
+    assert record.removed is True
+
+
+def test_decode_event_key_uses_t011_identity() -> None:
+    """Decoded records expose the T011 ``EventKey`` via ``event_key()``.
+
+    T030 still-open: 'dependency verification against T011 EventKey
+    / BlockRef / TransactionRef / PoolIdentity surface'.
+    """
+    pool_id_bytes = _POOL_ID_INT.to_bytes(32, "big")
+    sender_topic = int.from_bytes(b"\x11" * 20, "big").to_bytes(32, "big")
+    data = (10**6).to_bytes(32, "big") + (20**6).to_bytes(32, "big")
+    raw_log = _build_raw_log(EVENT_TOPICS["Donate"], [pool_id_bytes, sender_topic], data)
+    record = decode_log(
+        raw_log,
+        _ctx_for_decode(block_hash=0xCAFE, transaction_hash=0xBABE, log_index=3),
+    )
+    expected = EventKey(chain_id=CHAIN_FOR_DECODE, block_hash=0xCAFE, tx_hash=0xBABE, log_index=3)
+    assert record.event_key() == expected
+    # The T011 ``block_ref()`` and ``transaction_ref()`` helpers also
+    # surface on the EventKey.
+    assert record.event_key().block_ref() == BlockRef(
+        chain_id=CHAIN_FOR_DECODE, block_hash=0xCAFE, block_number=None
+    )
+    assert record.event_key().transaction_ref() == TransactionRef(
+        chain_id=CHAIN_FOR_DECODE, tx_hash=0xBABE
+    )
+
+
+# ---------------------------------------------------------------------------
+# Provenance: credential-bearing URL prohibition (T030 acceptance)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "alias",
+    [
+        "https://x.example.com",
+        "alice@example.com",
+        "rpc?apiKey=secret",
+        "path/with/slashes",
+        "has space",
+        "http://user:pass@host:1234/path",
+        "rpc.example.com/?apiKey=secret",
+    ],
+)
+def test_acquisition_alias_rejects_credential_bearing_url(alias: str) -> None:
+    """T030 must-not / acceptance: a credential-bearing URL is never
+    accepted as an endpoint alias. Both ``userinfo`` and secret query
+    markers fail at the schema boundary."""
+    with pytest.raises(ValueError):
+        AcquisitionProvenance(endpoint_alias=alias)
+
+
+def test_canonical_bytes_exclude_jsonrpc_response_wrapper_from_content_hash() -> None:
+    """Two records of the same chain event fetched with different
+    JSON-RPC response wrappers (different ``id`` values) still produce
+    the same normalized content hash. The wrapper is observational and
+    must not leak into content identity."""
+    pool_id_bytes = _POOL_ID_INT.to_bytes(32, "big")
+    sender_topic = int.from_bytes(b"\x11" * 20, "big").to_bytes(32, "big")
+    data = (10**6).to_bytes(32, "big") + (20**6).to_bytes(32, "big")
+    raw_log = _build_raw_log(EVENT_TOPICS["Donate"], [pool_id_bytes, sender_topic], data)
+    wrapper_a = {"jsonrpc": "2.0", "id": 1, "result": [raw_log]}
+    wrapper_b = {"jsonrpc": "2.0", "id": 2, "result": [raw_log]}
+    record_a = decode_log(
+        raw_log, _ctx_for_decode(endpoint_alias="robinhood_public", raw_response=wrapper_a)
+    )
+    record_b = decode_log(
+        raw_log, _ctx_for_decode(endpoint_alias="alchemy_free", raw_response=wrapper_b)
+    )
+    assert normalized_content_hash(record_a) == normalized_content_hash(record_b)
+    # But the canonical bytes retain both the wrapper and the alias.
+    assert canonical_bytes(record_a) != canonical_bytes(record_b)
