@@ -12,7 +12,7 @@
   },
   "active_phase": "P02",
   "active_task": "T024",
-  "workflow_state": "AWAITING_REVIEW",
+  "workflow_state": "APPROVED",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -187,7 +187,7 @@
     },
     "T024": {
       "phase": "P02",
-      "status": "AWAITING_REVIEW",
+      "status": "APPROVED",
       "depends_on": [
         "T002",
         "T020",
@@ -196,9 +196,9 @@
       "task_file": "todo/phases/P02-chain-access-and-discovery/T024.md",
       "attempt": 2,
       "base_commit": "42b343631427e034ed84f957ccfc40293d3334d2",
-      "candidate_commit": null,
-      "approved_commit": null,
-      "latest_review": null
+      "candidate_commit": "74ed236fbea6419904b60f1be10623d4880396ab",
+      "approved_commit": "74ed236fbea6419904b60f1be10623d4880396ab",
+      "latest_review": "todo/reviews/P02/T024/review-002.json"
     },
     "T025": {
       "phase": "P02",

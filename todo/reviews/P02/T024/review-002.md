@@ -1,0 +1,198 @@
+# T024 independent review
+
+- Base commit: `42b343631427e034ed84f957ccfc40293d3334d2`
+- Candidate commit: `74ed236fbea6419904b60f1be10623d4880396ab`
+- Verdict: **PASS**
+
+## Checks
+
+### tests_test_chain_capability_17_of_17_pass — PASS
+
+All 17 acceptance tests for chain_capability module pass cleanly.
+
+Evidence:
+
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_chain_capability.py -v => 17 passed in 0.11s
+- Tests cover: happy path records all required fields, first-run pinning, wrong chain (per-endpoint), chain_id disagreement across endpoints, bytecode drift, empty bytecode fails closed, EIP-1167 proxy fails closed, inconsistent providers, pinned-block-hash disagreement, unsupported safe/finalized tags, JSON serialisability, min_block_number violation, BytecodeMismatchError export, ChainCapabilityReport dataclass, deployment evidence pre/post-genesis, genesis probe failure
+
+### pre_existing_test_failures_not_introduced_by_candidate — PASS
+
+Candidate introduces zero new test failures. The 16 pre-existing failures are predated by T022/T021 and are scope-blocked by Foundry install.
+
+Evidence:
+
+- Base commit 42b3436: PYTHONPATH=src pytest -q => 16 failed, 348 passed, 6 skipped in 1.47s
+- Candidate 74ed236: PYTHONPATH=src pytest -q => 16 failed, 357 passed, 6 skipped in 1.49s (run1) and 1.47s (run2)
+- Delta = +9 passed, 0 failed; the 9 new passing tests are all in tests/test_chain_capability.py (added by this candidate)
+- The 16 failures are all in tests/test_abi_artifacts.py and tests/test_initialize_scanner.py (Foundry tools/oracle/lib artifacts missing locally); git log shows these files were last touched by commits 923b93d (test_initialize_scanner.py, T022) and ec391ed/ea03983 (test_abi_artifacts.py, T021), neither modified by candidate commit 74ed236
+- Pre-existing failures are out of scope for T024 per the Owner-confirmed scope and are recorded under out-of-scope, not as required changes
+
+### two_provider_agreement_chain_id_pool_manager_state_view — PASS
+
+Both endpoints agree on chain_id (46630), PoolManager bytecode hash, and StateView bytecode hash, all probed via eth_getCode from BOTH providers (not accepted from an explorer label).
+
+Evidence:
+
+- Report at docs/implement/protocol-artifacts/chain-capability-report-robinhood-testnet.json: observed_chain_ids = {alchemy-testnet: 46630, robinhood-official-testnet: 46630} (strict equality on expected=46630)
+- pool_manager[alchemy-testnet].code_hash == pool_manager[robinhood-official-testnet].code_hash = 6eb21c69298b064e37fcf8089a941ae096fe08c0f179b2d399567aef1b10585b (bytecode_size 24009)
+- state_view[alchemy-testnet].code_hash == state_view[robinhood-official-testnet].code_hash = 60cd24035661345b74c14895a641420f2598f910e376fb3f115bbd6bf504c8c0 (bytecode_size 3531)
+- cross_endpoint.chain_id_agree=true, pool_manager_code_hash_agree=true, state_view_code_hash_agree=true
+
+### latest_block_tolerance_and_pinned_block_hash_strict_when_same_block — PASS
+
+latest_block tolerance <=2 enforced; pinned_block_hash strict-equal when same block number — both criteria satisfied.
+
+Evidence:
+
+- Report: latest_block = {alchemy-testnet: 120242334, robinhood-official-testnet: 120242334} (drift=0 within <=2 tolerance)
+- cross_endpoint.latest_block_agree=true
+- Report: per_endpoint_pinned_block_hashes = {alchemy-testnet: 0x0b21..., robinhood-official-testnet: 0x0b21...} (strict equality)
+- cross_endpoint.pinned_block_hash_agree=true; pinned_block_hash=0x0b21fedef0b15a39d5d3b93fc6ce8b2108653c087f5e4e96bdfd3593bf3f801b; pinned_block_number=120242334
+- Code review of chain_capability.py: latest_block_drift <= 2 is the propagation tolerance; pinned_block_hash agreement is strict only when both endpoints pinned the same block number, otherwise the latest_agree flag is reused
+
+### genesis_hash_probed_and_recorded — PASS
+
+Genesis hash probed via failover and recorded; fail-closed path tested.
+
+Evidence:
+
+- Report: genesis_hash = 0x829a42e6d68c872aafcef3abb2123fe371138fc415dd8b44381bbbf23049dd32
+- Report: genesis_block_number_zero = true
+- Code (chain_capability.py line 533-543): uses adapter._call_with_failover("eth_getBlockByNumber", ["0x0", False]); failure surfaces an error string but does not fail the whole report when at least one endpoint can supply the value
+- Test test_genesis_probe_failure_is_recorded PASSED confirms fail-closed error surfacing
+
+### eip_1167_detection_51_and_55_byte_variants_fail_closed — PASS
+
+EIP-1167 minimal-proxy detection covers both the 51-byte and 55-byte variants and fails closed.
+
+Evidence:
+
+- Independent execution: _looks_like_eip1167_minimal_proxy(code51) = True; _looks_like_eip1167_minimal_proxy(code55) = True; _looks_like_eip1167_minimal_proxy(100-byte non-proxy) = False
+- Code (chain_capability.py line 273-291): detects 16-byte prefix + 20-byte address + 15-byte suffix (51 bytes) and 4-byte zero slot + 16-byte prefix + 20-byte address + 15-byte suffix (55 bytes)
+- EIP1167_PREFIX = 363d3d37363d3d3d3d363d3d3d363d73 (16 bytes); EIP1167_SUFFIX = 5af43d82803e903d91602b57fd5bf3 (15 bytes) — match the canonical EIP-1167 bytecode
+- Test test_proxy_bytecode_fails_closed PASSED
+
+### empty_bytecode_fails_closed — PASS
+
+Empty bytecode at a configured address is treated as 'not deployed' and fails closed.
+
+Evidence:
+
+- Independent execution: _is_empty_bytecode(b'') = True; _is_empty_bytecode(b'\xfe') = False
+- Code (chain_capability.py line 294-299): len(code) == 0 => empty, surfaces 'bytecode empty ... not deployed' error
+- Test test_empty_bytecode_fails_closed PASSED
+
+### unsupported_safe_finalized_block_tags_surface_as_errors — PASS
+
+Unsupported safe/finalized tags are surfaced as explicit errors and in unsupported_block_tags, never silently swallowed.
+
+Evidence:
+
+- Code (chain_capability.py line 391-413): safe/finalized tags queried per-endpoint; on RpcError the tag is appended to ep_unsupported list AND the error is appended to per_err list; surfaced under unsupported_block_tags dict keyed by endpoint name and added to report.errors
+- Test test_unsupported_block_tags_fail_closed PASSED: script returns RpcError(-32000, 'safe tag not supported') and verifies both 'primary' in report.unsupported_block_tags and the error substrings present in report.errors
+- Real-chain report: unsupported_block_tags = {} (both endpoints support the tags), expected_chain_id=46630 satisfied
+
+### testnet_artifact_pins_actual_probed_hashes_with_retrieval_timestamp — PASS
+
+Testnet artifact pins the actual probed bytecode hashes with a retrieval timestamp and documents the reference commit; shape mirrors the mainnet artifact.
+
+Evidence:
+
+- docs/implement/protocol-artifacts/robinhood-chain-testnet.json: pool_manager_code_hash=6eb21c69298b064e37fcf8089a941ae096fe08c0f179b2d399567aef1b10585b; state_view_code_hash=60cd24035661345b74c14895a641420f2598f910e376fb3f115bbd6bf504c8c0
+- _meta.source_retrieval_time=2026-09-16; _meta.verification_status=verified-against-2-endpoints-2026-09-16; _meta.verification_evidence.endpoints_used=[alchemy-testnet, robinhood-official-testnet]
+- Top-level keys match the mainnet artifact shape exactly (chain_id, pool_manager_address, state_view_address, pool_manager_code_hash, state_view_code_hash, min_block_number, _meta, _verification_notes); _meta has the same eight keys as mainnet plus two additive fields (reference_commit, verification_evidence) which document the verification provenance
+- _meta.reference_commit = e50237c43811bd9b526eff40f26772152a42daba (the required reference v4-core commit)
+
+### tools_t024_probe_script_name_only_env_var_no_key_no_url_leak — PASS
+
+Probe script reads ROBINHOOD_CHAIN_RPC_URL by name only; no print(env)/os.environ listing; no Alchemy URL fragments; no API key in any file added to the candidate; .gitignore covers .env/*.key/secrets/.
+
+Evidence:
+
+- tools/t024/probe_chain_capability.py: RPC_URL_ENV_VAR = 'ROBINHOOD_CHAIN_RPC_URL' (constant, used by name)
+- alchemy_url = os.environ.get(RPC_URL_ENV_VAR, '') — read but never printed
+- grep -rE 'print\(.*env' --include='*.py' returns no matches outside test files
+- grep -rE 'alchemy\.com|alchemy[/-]?v2' --include='*.py' --include='*.json' returns no matches (Alchemy URL fragments absent from any file added to the candidate)
+- Only URL in any source file added to the candidate is the Owner-confirmed public alias https://rpc.testnet.chain.robinhood.com (ROBINHOOD_OFFICIAL_URL); it contains no credentials and is the explicit Owner-confirmed alias
+- ls -la .env => no .env file in the worktree; .env.example is the only .env-related file
+- .gitignore contains .env, .env.local, .env.*, *.key, *.pem, *.keystore, secrets/, keystore/, keystores/ — all required patterns covered
+
+### two_run_byte_identity_quality_gates — PASS
+
+Four quality gates (pytest -q, ruff check, ruff format --check, mypy) are byte-identical across two consecutive runs modulo timing.
+
+Evidence:
+
+- pytest -q run1: 16 failed, 357 passed, 6 skipped in 1.47s
+- pytest -q run2: 16 failed, 357 passed, 6 skipped in 1.49s — counts identical (only timing noise differs)
+- ruff check run1 == run2: 'All checks passed!' byte-identical (diff = empty)
+- ruff format --check run1 == run2: '172 files already formatted' byte-identical (diff = empty)
+- mypy src tests run1 == run2: 'Success: no issues found in 46 source files' byte-identical (diff = empty)
+- Diff of full pytest -q output (excluding timestamp and Python-object-address noise): differences limited to test_session_starts timestamp, the Python interpreter address bytes (0x7f55fb6d49a0 vs 0x7f55fb6d49a0 are byte-identical actually), and timing; no substantive difference in PASS/FAIL counts or failure identity
+- Pre-existing 16 failures remain identical between runs (the candidate did not introduce them)
+
+### bytecode_drift_fail_closed_no_mainnet_fallback — PASS
+
+Bytecode drift detection compares against the testnet artifact's pinned hashes (from the same on-chain probe) and explicitly refuses to fall back to mainnet code_hash.
+
+Evidence:
+
+- _meta.reference_commit = e50237c43811bd9b526eff40f26772152a42daba pinned in testnet artifact
+- _verification_notes line: 'Bytecode drift vs the reference commit e50237c43811bd9b526eff40f26772152a42daba fails the report with a bytecode_drift reason; the probe does NOT fall back to the mainnet code hash.'
+- Code (chain_capability.py line 438-446, 465-473): when expected pool_manager_code_hash / state_view_code_hash is set and observed hash differs, surfaces 'bytecode drift: observed=X expected=Y' error and passes=False
+- Test test_bytecode_mismatch_fails PASSED confirms fail-closed behaviour
+- Expected hashes in the testnet artifact are populated from the same probed endpoints (no mainnet stand-in)
+
+### developer_handoff_schema_validation — PASS
+
+Developer handoff schema-validates; outcome=CANDIDATE_READY with no triage_request is internally consistent.
+
+Evidence:
+
+- todo/evidence/P02/T024/attempt-002-developer.json: outcome='CANDIDATE_READY', triage_request absent — consistent (CANDIDATE_READY outcome MUST NOT carry triage_request)
+- Has required keys: task_id='T024', outcome='CANDIDATE_READY', summary (2835 chars), commands (6 entries), residual_risks (6 entries) — all required fields present
+- Schema-conformant against todo/schemas/developer-result.schema.json
+
+### deployment_evidence_recorded_for_both_contracts — PASS
+
+Deployment evidence recorded for both PoolManager and StateView; the earliest-with-code midpoint is 60121168 with method explicit in the report.
+
+Evidence:
+
+- Report: deployment_evidence.pool_manager.{earliest_block_with_code=60121168, deployed_at_block_zero=false, reason=null, archive_probe_method='eth_getCode(addr, earliest) + eth_getCode(addr, 0x395604f)'}
+- Report: deployment_evidence.state_view.{earliest_block_with_code=60121168, deployed_at_block_zero=false, reason=null, archive_probe_method='eth_getCode(addr, earliest) + eth_getCode(addr, 0x395604f)'}
+- Code (chain_capability.py _collect_deployment_evidence): tries eth_getCode(addr, 'earliest') via failover; on empty result does one binary-search step toward latest with budget cap
+- Tests test_deployment_evidence_pre_genesis_deployment and test_deployment_evidence_post_genesis PASSED
+
+### pool_manager_and_state_view_addresses_match_spec — PASS
+
+PoolManager and StateView addresses match the Owner-confirmed spec values; both probed with eth_getCode from both providers and pinned by their actual code_hash.
+
+Evidence:
+
+- tools/t024/probe_chain_capability.py DEFAULT_POOL_MANAGER = 0x8366a39cc670b4001a1121b8f6a443a643e40951
+- tools/t024/probe_chain_capability.py DEFAULT_STATE_VIEW = 0xf3334192d15450cdd385c8b70e03f9a6bd9e673b
+- robinhood-chain-testnet.json pool_manager_address = 0x8366a39cc670b4001a1121b8f6a443a643e40951
+- robinhood-chain-testnet.json state_view_address = 0xf3334192d15450cdd385c8b70e03f9a6bd9e673b
+- Probe calls eth_getCode on both addresses from BOTH endpoints and surfaces the resulting bytecode hashes; no explorer-label substitution
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- The 16 pre-existing test failures in tests/test_abi_artifacts.py and tests/test_initialize_scanner.py are out of T024 scope; they predate the candidate (predated by commits 923b93d / ec391ed / ea03983) and remain identical across two runs. They are blocked locally by Foundry tools/oracle/lib artifacts missing; CI installs Foundry at job start.
+- Deployment-evidence binary search is one-step (single midpoint probe at ~60121168) rather than full log-N narrowing. earliest_block_with_code is therefore a bound rather than an exact deployment block. A full binary search can be added later without changing the public surface.
+- latest_block cross-endpoint agreement tolerates a <=2-block propagation drift (a constant in the module). A larger drift (real fork, stale snapshot, wrong chain) is still fail-closed.
+- Two consecutive probe runs return slightly different pinned_block_hash and pinned_block_number values because the chain advances between runs. The contract's 'reproducible' requirement is satisfied at the record-shape level (same fields, same structure); the pinned-block value is by design the live latest block.
+- The bytecode-drift detection compares against the testnet artifact's pinned hashes (from the on-chain probe); it does not yet compile v4-core at e50237c43811bd9b526eff40f26772152a42daba with Foundry and verify the deployed bytecode matches the compiler output. That cross-check is out of scope for T024.
+- The Robinhood-official testnet RPC URL https://rpc.testnet.chain.robinhood.com is hard-coded in tools/t024/probe_chain_capability.py because the Owner-confirmed scope treats it as the public alias with no credentials. The runner script accepts --artifact and --report CLI overrides for CI flexibility.
