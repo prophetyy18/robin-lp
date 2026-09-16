@@ -21,6 +21,7 @@ TASK_PATTERN = re.compile(r"^T[0-9]{3}$")
 MAINTENANCE_PATTERN = re.compile(r"^M[0-9]{4}$")
 PHASE_PATTERN = re.compile(r"^P[0-9]{2}$")
 REQUIRED_AGENT_MODEL = "MiniMax-M3[1m]"
+MAX_DEVELOPMENT_CONTINUATIONS = 1
 
 STATES = {
     "PLANNED",
@@ -121,6 +122,7 @@ class AttemptRecord:
     candidate_commit: str | None
     branch: str
     development_worktree: str
+    continuation_count: int = 0
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -131,10 +133,18 @@ class AttemptRecord:
             "candidate_commit": self.candidate_commit,
             "branch": self.branch,
             "development_worktree": self.development_worktree,
+            "continuation_count": self.continuation_count,
         }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> AttemptRecord:
+        continuation_count = value.get("continuation_count", 0)
+        if (
+            not isinstance(continuation_count, int)
+            or isinstance(continuation_count, bool)
+            or continuation_count < 0
+        ):
+            raise WorkflowError("continuation_count must be a non-negative integer")
         return cls(
             task_id=_required_string(value, "task_id"),
             phase=_required_string(value, "phase"),
@@ -143,6 +153,7 @@ class AttemptRecord:
             candidate_commit=_optional_string(value, "candidate_commit"),
             branch=_required_string(value, "branch"),
             development_worktree=_required_string(value, "development_worktree"),
+            continuation_count=continuation_count,
         )
 
 
@@ -183,6 +194,7 @@ class MaintenanceRecord:
     candidate_commit: str | None
     branch: str
     development_worktree: str
+    continuation_count: int = 0
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -193,6 +205,7 @@ class MaintenanceRecord:
             "candidate_commit": self.candidate_commit,
             "branch": self.branch,
             "development_worktree": self.development_worktree,
+            "continuation_count": self.continuation_count,
         }
 
     @classmethod
@@ -203,6 +216,13 @@ class MaintenanceRecord:
         status = _required_string(value, "status")
         if status not in MAINTENANCE_STATES:
             raise WorkflowError(f"invalid maintenance status {status!r}")
+        continuation_count = value.get("continuation_count", 0)
+        if (
+            not isinstance(continuation_count, int)
+            or isinstance(continuation_count, bool)
+            or continuation_count < 0
+        ):
+            raise WorkflowError("continuation_count must be a non-negative integer")
         return cls(
             maintenance_id=maintenance_id,
             status=status,
@@ -211,6 +231,7 @@ class MaintenanceRecord:
             candidate_commit=_optional_string(value, "candidate_commit"),
             branch=_required_string(value, "branch"),
             development_worktree=_required_string(value, "development_worktree"),
+            continuation_count=continuation_count,
         )
 
 
@@ -623,6 +644,9 @@ class WorkflowManager:
     def _protected_snapshot_path(self, task_id: str) -> Path:
         return self.runtime_dir / f"{task_id}-protected.json"
 
+    def _continuation_path(self, task_id: str) -> Path:
+        return self.runtime_dir / f"{task_id}-continuation.json"
+
     def save_attempt(self, attempt: AttemptRecord) -> None:
         _write_json(self._attempt_path(attempt.task_id), attempt.to_dict())
 
@@ -850,6 +874,109 @@ class WorkflowManager:
         before = _load_json(self._protected_snapshot_path(task_id))
         return self._finish_develop(attempt, result, before)
 
+    def continue_develop(
+        self,
+        task_id: str,
+        *,
+        max_turns_exhausted: bool = False,
+    ) -> dict[str, object]:
+        """Start a fresh Developer without changing the task attempt or worktree."""
+        attempt = self.load_attempt(task_id)
+        if attempt is None:
+            raise WorkflowError(f"{task_id} has no prepared development attempt")
+        worktree = Path(attempt.development_worktree)
+        config = self.load_config(worktree)
+        task = self._task(config, task_id)
+        if task["status"] != "IN_DEVELOPMENT" or attempt.candidate_commit is not None:
+            raise WorkflowError(
+                "development continuation requires an unfinished IN_DEVELOPMENT attempt"
+            )
+        before = _load_json(self._protected_snapshot_path(task_id))
+        after = _snapshot(_protected_paths(worktree), worktree)
+        if before != after:
+            raise WorkflowError(
+                "developer modified a protected workflow, Intent, Spec, or task file"
+            )
+        checkpoint = self._load_or_create_continuation_checkpoint(
+            task_id,
+            worktree,
+            max_turns_exhausted=max_turns_exhausted,
+        )
+        if attempt.continuation_count >= MAX_DEVELOPMENT_CONTINUATIONS:
+            raise WorkflowError(
+                f"development continuation limit reached for {task_id}; preserve the worktree "
+                "and ask the Owner whether to expand the cumulative budget or triage task scope"
+            )
+        updated = AttemptRecord(
+            task_id=attempt.task_id,
+            phase=attempt.phase,
+            attempt=attempt.attempt,
+            base_commit=attempt.base_commit,
+            candidate_commit=None,
+            branch=attempt.branch,
+            development_worktree=attempt.development_worktree,
+            continuation_count=attempt.continuation_count + 1,
+        )
+        self.save_attempt(updated)
+        _write_json(self._continuation_path(task_id), checkpoint)
+        checkpoint_path = worktree / ".workflow" / "developer-continuation.json"
+        _write_json(checkpoint_path, checkpoint)
+        (worktree / ".workflow" / "developer-result.json").unlink(missing_ok=True)
+        task_file = config["tasks"][task_id]["task_file"]
+        prompt = (
+            f"Continue exactly {task_id} in the existing attempt {attempt.attempt}. The frozen "
+            f"contract is {task_file}; approved base is {attempt.base_commit}. Work only in "
+            f"{worktree}. Read the prior checkpoint at {checkpoint_path}, then inspect the actual "
+            "git diff and test state because the worktree is authoritative. Do not commit or "
+            "start over. Before finishing, write the required structured developer result to "
+            f"{worktree / '.workflow' / 'developer-result.json'}."
+        )
+        return {**updated.to_dict(), "agent": "stage-developer", "prompt": prompt}
+
+    def _load_or_create_continuation_checkpoint(
+        self,
+        task_id: str,
+        worktree: Path,
+        *,
+        max_turns_exhausted: bool,
+    ) -> dict[str, Any]:
+        result_path = worktree / ".workflow" / "developer-result.json"
+        if result_path.is_file():
+            result = _load_json(result_path)
+            self._validate_developer_result(result, task_id)
+            if result["outcome"] != "CONTINUATION_REQUIRED":
+                raise WorkflowError(
+                    "developer result is terminal; use the matching finish command instead"
+                )
+            return result
+        if not max_turns_exhausted:
+            raise WorkflowError(
+                "continuation requires a CONTINUATION_REQUIRED handoff or the explicit "
+                "--max-turns-exhausted flag"
+            )
+        changed_paths = [
+            path
+            for path in _working_tree_changes(worktree)
+            if not path.startswith(".workflow/") and path != "todo/config.yaml"
+        ]
+        return {
+            "task_id": task_id,
+            "outcome": "CONTINUATION_REQUIRED",
+            "summary": "The previous Developer exhausted maxTurns before writing a handoff.",
+            "commands": [],
+            "residual_risks": [
+                "The fresh Developer must reconstruct progress from the actual worktree and rerun "
+                "all required checks before producing a candidate."
+            ],
+            "continuation": {
+                "reason": "TURN_BUDGET",
+                "completed_work": [],
+                "remaining_work": ["Inspect the retained worktree and complete the task contract."],
+                "next_actions": ["Review git diff and current test state before making new edits."],
+                "changed_paths": changed_paths,
+            },
+        }
+
     def _finish_develop(
         self,
         attempt: AttemptRecord,
@@ -860,6 +987,10 @@ class WorkflowManager:
         worktree = Path(attempt.development_worktree)
         config = self.load_config(worktree)
         self._validate_developer_result(result, task_id)
+        if result["outcome"] == "CONTINUATION_REQUIRED":
+            raise WorkflowError(
+                "continuation handoff requires continue-develop, not finish-develop"
+            )
         after = _snapshot(_protected_paths(worktree), worktree)
         if before != after:
             raise WorkflowError(
@@ -884,6 +1015,8 @@ class WorkflowManager:
             self._set_state(config, task_id, state, base_commit=attempt.base_commit)
             _write_json(worktree / "todo" / "config.yaml", config)
             (worktree / ".workflow" / "developer-result.json").unlink(missing_ok=True)
+            (worktree / ".workflow" / "developer-continuation.json").unlink(missing_ok=True)
+            self._continuation_path(task_id).unlink(missing_ok=True)
             _git(worktree, "add", "-A")
             _git(worktree, "commit", "-m", f"chore(workflow): record {task_id} {state.lower()}")
             self.save_attempt(attempt)
@@ -896,6 +1029,7 @@ class WorkflowManager:
         if not changed:
             raise WorkflowError("developer produced no candidate changes")
         (worktree / ".workflow" / "developer-result.json").unlink(missing_ok=True)
+        (worktree / ".workflow" / "developer-continuation.json").unlink(missing_ok=True)
         _git(worktree, "add", "-A")
         _git(
             worktree,
@@ -912,22 +1046,29 @@ class WorkflowManager:
             candidate_commit=candidate,
             branch=attempt.branch,
             development_worktree=attempt.development_worktree,
+            continuation_count=attempt.continuation_count,
         )
         self.save_attempt(attempt)
         self._protected_snapshot_path(task_id).unlink(missing_ok=True)
+        self._continuation_path(task_id).unlink(missing_ok=True)
         return attempt
 
     def _validate_developer_result(self, result: Mapping[str, Any], task_id: str) -> None:
         _validate_object_keys(
             result,
             required={"task_id", "outcome", "summary", "commands", "residual_risks"},
-            optional={"blocking_question", "triage_request"},
+            optional={"blocking_question", "triage_request", "continuation"},
             label="developer result",
         )
         if result.get("task_id") != task_id:
             raise WorkflowError("developer result task_id does not match")
         outcome = result.get("outcome")
-        if outcome not in {"CANDIDATE_READY", "TRIAGE_REQUIRED", "BLOCKED"}:
+        if outcome not in {
+            "CANDIDATE_READY",
+            "CONTINUATION_REQUIRED",
+            "TRIAGE_REQUIRED",
+            "BLOCKED",
+        }:
             raise WorkflowError("developer result has invalid outcome")
         if not isinstance(result.get("summary"), str):
             raise WorkflowError("developer result summary must be a string")
@@ -951,6 +1092,35 @@ class WorkflowManager:
             raise WorkflowError("developer result blocking_question must be a string or null")
         if outcome == "TRIAGE_REQUIRED":
             self._validate_triage_request(result.get("triage_request"))
+        elif "triage_request" in result:
+            raise WorkflowError("triage_request is allowed only for TRIAGE_REQUIRED")
+        if outcome == "CONTINUATION_REQUIRED":
+            self._validate_continuation(result.get("continuation"))
+            if result.get("blocking_question") is not None:
+                raise WorkflowError("continuation must not include a blocking question")
+        elif "continuation" in result:
+            raise WorkflowError("continuation is allowed only for CONTINUATION_REQUIRED")
+
+    def _validate_continuation(self, value: object) -> None:
+        if not isinstance(value, dict):
+            raise WorkflowError("CONTINUATION_REQUIRED must include continuation")
+        _validate_object_keys(
+            value,
+            required={
+                "reason",
+                "completed_work",
+                "remaining_work",
+                "next_actions",
+                "changed_paths",
+            },
+            label="continuation",
+        )
+        if value.get("reason") != "TURN_BUDGET":
+            raise WorkflowError("continuation reason must be TURN_BUDGET")
+        for key in ("completed_work", "remaining_work", "next_actions", "changed_paths"):
+            _validate_string_list(value.get(key), f"continuation {key}")
+        if not value["remaining_work"] or not value["next_actions"]:
+            raise WorkflowError("continuation must identify remaining work and next actions")
 
     def _validate_triage_request(self, value: object) -> None:
         if not isinstance(value, dict):
@@ -1076,12 +1246,18 @@ class WorkflowManager:
             raise WorkflowError(f"developer result is missing: {result_path}")
         result = _load_json(result_path)
         self._validate_developer_result(result, maintenance_id)
+        if result["outcome"] == "CONTINUATION_REQUIRED":
+            raise WorkflowError(
+                "continuation handoff requires continue-maintenance-develop, not "
+                "finish-maintenance-develop"
+            )
         changed = [
             path
             for path in _working_tree_changes(worktree)
             if path
             not in {
                 ".workflow/developer-result.json",
+                ".workflow/developer-continuation.json",
                 ".workflow/maintenance-request.json",
             }
         ]
@@ -1100,8 +1276,11 @@ class WorkflowManager:
                 candidate_commit=record.candidate_commit,
                 branch=record.branch,
                 development_worktree=record.development_worktree,
+                continuation_count=record.continuation_count,
             )
             self.save_maintenance(updated)
+            (worktree / ".workflow" / "developer-continuation.json").unlink(missing_ok=True)
+            self._continuation_path(maintenance_id).unlink(missing_ok=True)
             return updated
         if not changed:
             raise WorkflowError("maintenance developer produced no requested file change")
@@ -1109,6 +1288,7 @@ class WorkflowManager:
         _write_json(worktree / relative_root / "request.json", request)
         _write_json(worktree / relative_root / f"developer-{record.attempt:03d}.json", result)
         result_path.unlink()
+        (worktree / ".workflow" / "developer-continuation.json").unlink(missing_ok=True)
         (worktree / ".workflow" / "maintenance-request.json").unlink(missing_ok=True)
         _git(worktree, "diff", "--check")
         _git(worktree, "add", "-A")
@@ -1122,9 +1302,72 @@ class WorkflowManager:
             candidate_commit=candidate,
             branch=record.branch,
             development_worktree=record.development_worktree,
+            continuation_count=record.continuation_count,
         )
         self.save_maintenance(updated)
+        self._continuation_path(maintenance_id).unlink(missing_ok=True)
         return updated
+
+    def continue_maintenance_develop(
+        self,
+        maintenance_id: str,
+        *,
+        max_turns_exhausted: bool = False,
+    ) -> dict[str, object]:
+        """Start a fresh Developer in the same unfinished maintenance attempt."""
+        record = self.load_maintenance(maintenance_id)
+        if record is None:
+            raise WorkflowError(f"unknown maintenance repair {maintenance_id}")
+        if record.status != "IN_DEVELOPMENT" or record.candidate_commit is not None:
+            raise WorkflowError(
+                "maintenance continuation requires an unfinished IN_DEVELOPMENT attempt"
+            )
+        worktree = Path(record.development_worktree)
+        request = _load_json(self._maintenance_request_path(maintenance_id))
+        self._validate_maintenance_request(request)
+        changed = [
+            path for path in _working_tree_changes(worktree) if not path.startswith(".workflow/")
+        ]
+        forbidden = sorted(set(changed) - set(request["allowed_paths"]))
+        if forbidden:
+            raise WorkflowError(
+                "maintenance developer changed paths outside the request: " + ", ".join(forbidden)
+            )
+        checkpoint = self._load_or_create_continuation_checkpoint(
+            maintenance_id,
+            worktree,
+            max_turns_exhausted=max_turns_exhausted,
+        )
+        if record.continuation_count >= MAX_DEVELOPMENT_CONTINUATIONS:
+            raise WorkflowError(
+                f"development continuation limit reached for {maintenance_id}; preserve the "
+                "worktree and ask the Owner whether to expand the cumulative budget or escalate"
+            )
+        updated = MaintenanceRecord(
+            maintenance_id=record.maintenance_id,
+            status=record.status,
+            attempt=record.attempt,
+            base_commit=record.base_commit,
+            candidate_commit=None,
+            branch=record.branch,
+            development_worktree=record.development_worktree,
+            continuation_count=record.continuation_count + 1,
+        )
+        self.save_maintenance(updated)
+        _write_json(self._continuation_path(maintenance_id), checkpoint)
+        checkpoint_path = worktree / ".workflow" / "developer-continuation.json"
+        _write_json(checkpoint_path, checkpoint)
+        (worktree / ".workflow" / "developer-result.json").unlink(missing_ok=True)
+        prompt = (
+            f"Continue low-risk maintenance repair {maintenance_id} in existing attempt "
+            f"{record.attempt}. Read the frozen request at "
+            f"{worktree / '.workflow' / 'maintenance-request.json'} and the prior checkpoint at "
+            f"{checkpoint_path}. Inspect the actual git diff and test state because the worktree "
+            f"is authoritative. Preserve the original allowed_paths and base {record.base_commit}. "
+            f"Work only in {worktree}, do not commit, and write the standard developer result to "
+            f"{worktree / '.workflow' / 'developer-result.json'} with task_id={maintenance_id}."
+        )
+        return {**updated.to_dict(), "agent": "stage-developer", "prompt": prompt}
 
     def prepare_maintenance_retry(self, maintenance_id: str) -> dict[str, object]:
         record = self.load_maintenance(maintenance_id)

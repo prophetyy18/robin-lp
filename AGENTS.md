@@ -42,6 +42,9 @@
 - Developer 每次以全新上下文在独立 worktree 中只实现一个 `READY` 任务。不得修改
   Intent、Spec、任务合同、审查记录、审查 Agent 或批准状态；规格不足时返回
   `TRIAGE_REQUIRED` 和证据，不自行决定分类。
+- Developer 单会话预算不足但任务本身未阻塞时，可以返回
+  `CONTINUATION_REQUIRED`。控制器保持同一 task、attempt、branch、worktree 和
+  `IN_DEVELOPMENT` 状态，再启动一个全新上下文续跑；这不是重试、triage 或审批。
 - Reviewer 每次以全新上下文在 candidate commit 的 detached worktree 中审查。它可以
   运行验证命令，但不得修改、修复、提交或推送任何内容。
 - Plan Reviewer 在 exact planning base/candidate 上独立检查合同或 Spec 修正；允许有证据
