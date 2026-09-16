@@ -1,0 +1,32 @@
+{
+  "task_id": "T015",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Replaced the brittle ==53 catalog-count assertion in tests/test_workflow_contracts.py::test_repository_workflow_configuration_is_valid with the contractually-required lower-bound form >=53. The other three assertions in the same test (T000/T004 APPROVED seeds, subset check) remain verbatim. files_changed: tests/test_workflow_contracts.py +1/-1 (single line replaced). rationale: T015's deliverable is exactly one Python assertion edit so the test catalog-count invariant scales with future contract additions (T015 included) while preserving the historical T000-T004 APPROVED-seed invariants. The T014-induced regression is gone: pytest -q reports 373 passed, 6 skipped, 0 failed (was 372 passed/1 failed with T014 in place). A pre-existing worktree environmental issue (tools/oracle/lib is .gitignore'd and absent from this dev worktree, but populated in the main checkout) caused test_artifact_byte_matches_regenerated_oracle_output to fail on the first full-suite run; resolved by symlinking tools/oracle/lib -> /home/lpdev/lp/tools/oracle/lib (the symlink is gitignored and not in the candidate diff). After that fix, full suite: 373 passed, 6 skipped, 0 failed. The four quality gates (pytest tests/test_workflow_contracts.py -v, pytest -q, ruff check, ruff format --check, mypy src tests) all exit 0 and produce byte-identical normalised output across two consecutive runs. The workflow's protected-paths snapshot (105 files) is unchanged before vs after my work. out_of_scope_failures: the missing forge-deps under tools/oracle/lib/ in this dev worktree is a pre-existing environmental gap unrelated to T015; recorded here for visibility. unresolved_questions: none.",
+  "commands": [
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t015-attempt-001 && /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_workflow_contracts.py -v",
+      "result": "exit_code=0; 4 passed in 0.06s (run1) / 0.04s (run2); byte-identical between runs after normalising the elapsed-time token `in [0-9.]+s`; run1 stdout sha256=bbc503d5d7dd327c38c27eb20bff1fea5a41dfade05c514ccb27a1342bb421c9; run2 stdout sha256=6cf6bcff529429e22101db45f1ef98154e6697ba822cdf989d0432a218bd9db5; the only difference between the two captures is the per-run elapsed-seconds token; all four tests in test_workflow_contracts.py pass, including test_repository_workflow_configuration_is_valid"
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t015-attempt-001 && /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q",
+      "result": "exit_code=0; 373 passed, 6 skipped, 0 failed in 1.80s (run1) / 1.85s (run2); byte-identical between runs after normalising the elapsed-time token; run1 stdout sha256=52bfb731a5b82f35815b563612fc7302783166f330c92f2f68614f55228c0baa; run2 stdout sha256=56b3e49349130148e34e370d86bb54b525f3c1fb06c2c6e8d34f5d1ba4c9224a; the only difference between the two captures is the per-run elapsed-seconds token; the T014-induced test_repository_workflow_configuration_is_valid regression is resolved and no other test regressed"
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t015-attempt-001 && /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check",
+      "result": "exit_code=0; stdout `All checks passed!`; byte-identical between runs; run1 sha256=82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18; run2 sha256=82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t015-attempt-001 && /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check",
+      "result": "exit_code=0; stdout `177 files already formatted`; byte-identical between runs; run1 sha256=be05eba385c4aa3cfc2f02c3191dfad1969b9e462fadc2cbb394fe03f409ff03; run2 sha256=be05eba385c4aa3cfc2f02c3191dfad1969b9e462fadc2cbb394fe03f409ff03"
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t015-attempt-001 && PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src tests",
+      "result": "exit_code=0; stdout `Success: no issues found in 46 source files`; byte-identical between runs; run1 sha256=a97cee1ee1bdb5e2d1ca7098f7b33a6c6a21263225643192fdeb78654687ed89; run2 sha256=a97cee1ee1bdb5e2d1ca7098f7b33a6c6a21263225643192fdeb78654687ed89"
+    }
+  ],
+  "residual_risks": [
+    "The gitignored tools/oracle/lib symlink lives only in the dev worktree; on a fresh host without /home/lpdev/lp/tools/oracle/lib populated, the abi_artifacts oracle test will fail. The candidate commit and diff are unaffected since lib/ is .gitignore'd.",
+    "todo/config.yaml in the worktree shows the standard prepare-develop transition (workflow_state READY->IN_DEVELOPMENT, T015 status READY->IN_DEVELOPMENT, attempt 0->1). The finish-develop gate will overwrite this with AWAITING_REVIEW on commit. Nothing in the developer's edit touched this file; the workflow's protected-paths snapshot diff confirmed 0 protected-file content changes between before and after my work (105 files identical).",
+    "No import, dependency, helper, formatting, or other test_* function changes were made; the edit is exactly one line replaced, exactly +1/-1 in tests/test_workflow_contracts.py."
+  ]
+}
