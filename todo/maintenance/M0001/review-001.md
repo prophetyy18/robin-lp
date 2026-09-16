@@ -1,0 +1,102 @@
+# M0001 independent review
+
+- Base commit: `a40e5d6aed16e443c245aa65285f6805db89b4b3`
+- Candidate commit: `ce14c0d4479e4e88823dce90179f7bf3bdb1517b`
+- Verdict: **PASS**
+
+## Checks
+
+### diff_scope_tests_only — PASS
+
+The developer's implementation change is confined to the single allowed_path tests/test_storage_schema.py. The two todo/maintenance/M0001/*.json files are workflow controller artifacts (the request and the developer result envelope), which the workflow spec describes as part of the prepare/finish gates and not as implementation paths subject to the allowed_paths boundary.
+
+Evidence:
+
+- git diff a40e5d6 ce14c0d4 --stat shows 3 files changed
+- Implementation file changed: tests/test_storage_schema.py (28 insertions, 8 deletions)
+- Workflow tracking artifacts (added by the prepare/finish gates, not the developer implementation): todo/maintenance/M0001/request.json (the frozen request itself, 16 lines) and todo/maintenance/M0001/developer-001.json (the developer candidate result, 26 lines)
+- No src/, docs/, tools/, .claude/, pyproject.toml, requirements.lock.txt, environment.yml, todo/config.yaml, or other task-contract file modified
+
+### refactor_pattern_matches_swapproc_a40e5d6 — PASS
+
+The two target tests now construct ModifyLiquidityLogRecord with direct typed kwargs and use dataclasses.replace for the variant, exactly the pattern a40e5d6 applied to SwapLogRecord. The 4 previously suppressing ignore comments are no longer needed because the new call sites give mypy the typed kwargs it required.
+
+Evidence:
+
+- In test_canonical_bytes_are_stable (candidate lines 581-617): the dict[str, object] common: dict[str, object] = dict(...) + ModifyLiquidityLogRecord(**common) # type: ignore[arg-type] (x2) pattern was replaced by two direct ModifyLiquidityLogRecord(...) calls (record_a and record_b) using typed kwargs; assertion is now canonical_bytes(record_a) == canonical_bytes(record_b)
+- In test_canonical_bytes_change_when_a_field_changes (candidate lines 619-634): the dict[str, object] base: dict[str, object] = dict(...) + ModifyLiquidityLogRecord(**base) # type: ignore[arg-type] / ModifyLiquidityLogRecord(**{**base, "tick_lower": -1}) # type: ignore[arg-type] pattern was replaced by record_a = ModifyLiquidityLogRecord(...) + record_b = replace(record_a, tick_lower=-1); assertion is unchanged
+- All 4 # type: ignore[arg-type] directives at former lines 597/598/618/619 were removed (verified: git grep -n 'type: ignore\[arg-type\]' tests/test_storage_schema.py returns no results in the candidate)
+- dataclasses.replace was already imported at line 32 (added by a40e5d6 for the SwapLogRecord refactor); no new imports were introduced
+- Pattern mirrors the prior SwapLogRecord refactor recorded in commit a40e5d6 for the same test file
+
+### ci_gate_mypy_src_tests — PASS
+
+Project CI mypy gate is green on the candidate commit with 0 errors in 49 source files, confirming the four # type: ignore[arg-type] suppressions were genuinely unused after the refactor.
+
+Evidence:
+
+- Command: /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/ tests/
+- Result: 'Success: no issues found in 49 source files'
+- This matches the mypy invocation recorded in .github/workflows/ci.yml line 60 (mypy src tests) and the developer evidence (Success: no issues found in 49 source files)
+- Pre-existing 5 import-untyped warnings on robinhood_lp.* (no py.typed in src/) are absent from the mypy output, so the candidate did not regress baseline
+
+### behaviour_preserved_pytest — PASS
+
+Runtime behaviour is preserved: the new construction sites produce byte-identical and intentionally-different canonical_bytes outputs as the previous dict(**) call sites did.
+
+Evidence:
+
+- Command: /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_storage_schema.py -q
+- Result: '52 passed in 0.15s'
+- test_canonical_bytes_are_stable and test_canonical_bytes_change_when_a_field_changes both pass; record_a and record_b are constructed with identical fields (preserving the 'two records with identical fields produce identical bytes' semantic) and record_b = replace(record_a, tick_lower=-1) yields a different canonical_bytes output (preserving the 'change when a field changes' semantic)
+- All other 50 tests in tests/test_storage_schema.py continue to pass
+
+### ruff_check — PASS
+
+Lint is clean on the candidate file.
+
+Evidence:
+
+- Command: /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check tests/test_storage_schema.py
+- Result: 'All checks passed!'
+- Matches the developer evidence and the ruff check step in .github/workflows/ci.yml line 50-52
+
+### ruff_format_check — PASS
+
+Formatting is clean on the candidate file.
+
+Evidence:
+
+- Command: /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check tests/test_storage_schema.py
+- Result: '1 file already formatted'
+- Matches the developer evidence and the ruff format step in .github/workflows/ci.yml line 54-56
+
+### maintenance_eligibility_boundary — PASS
+
+The candidate stays strictly within the maintenance eligibility boundary. The repair is a localised test-file refactor that removes four now-unused type suppressions and matches an already-established pattern in the same file (a40e5d6's SwapLogRecord refactor).
+
+Evidence:
+
+- Risk attestation in request.json: LOW_RISK_IMPLEMENTATION_DEFECT
+- No changes to Intent, Spec, task contract, public interface, dependency, data schema, safety/risk rule, or chain execution (only a test file refactor that removes suppressions and improves type ergonomics)
+- allowed_paths in the frozen request is exactly ["tests/test_storage_schema.py"]; the developer's only implementation file change is that path
+- No edits to .claude/, tools/workflow/, todo/config.yaml, task/schema files, dependency manifests (pyproject.toml/requirements.lock.txt/environment.yml), or risk/execution/signer code (verified via git diff stat)
+- No edits to any other Txxx task contract under todo/tasks/
+- The two todo/maintenance/M0001/*.json files in the diff are workflow controller envelopes (frozen request + developer candidate result), not implementation paths
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- Pre-existing 5 import-untyped warnings on robinhood_lp.* (no py.typed in src/robinhood_lp) are unchanged by this candidate; they are explicitly out of scope per the maintenance request and predate M0001.
+- The candidate commit also touches todo/maintenance/M0001/request.json and todo/maintenance/M0001/developer-001.json; these are workflow controller artifacts (the frozen request and the developer candidate envelope) and not implementation paths under the allowed_paths boundary. They were not produced by the developer's implementation edit itself but are part of the workflow's record of the maintenance attempt.
