@@ -1,0 +1,26 @@
+{
+  "task_id": "T032",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented attempt 002 of T032 (capability-driven checkpointed historical ingestion) and resolved the residual lint findings from the prior continuation. New ingestion package (planner, router, runner, capability, checkpoint, probe, errors) plus per-interval run_intervals / retry_ledger / run_manifest_deviations / run_manifest_checksum columns on the durable storage manifest, with three test modules and a shared fixture file. Cold-start history vs warm incremental topology is enforced by the planner; the checkpoint refuses to advance past failed or uncovered intervals; one pool-filtered topic0 OR query covers Initialize/ModifyLiquidity/Swap/Donate plus inherited ProtocolFeeUpdated; Alchemy Free is gated by its measured plan/budget; Robinhood public RPC handles adaptive split on response-size/timeout/5xx/429/range-too-large/single-block-overflow; explicit non-secret application User-Agent; one non-hydrated block header per distinct event block. Final quality gates: 539 passed / 6 skipped, ruff clean, mypy clean across 73 source files, no whitespace errors.",
+  "commands": [
+    {
+      "command": "pytest tests/ -q --ignore=tests/test_workflow.py --ignore=tests/test_abi_artifacts.py --ignore=tests/test_workflow_contracts.py",
+      "result": "539 passed, 6 skipped in 2.46s (all pre-existing skips; no new skips introduced by T032)"
+    },
+    {
+      "command": "ruff check src/ tests/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "mypy src/ tests/",
+      "result": "Success: no issues found in 73 source files"
+    },
+    {
+      "command": "git diff --check",
+      "result": "no whitespace errors"
+    }
+  ],
+  "residual_risks": [
+    "Manifest store augmentation (insert_run_interval, append_retry, append_deviation, get_durable_checkpoint, get_run_manifest extensions, list_retries, list_deviations) was implemented under storage/manifest.py inside this worktree; these additions are confined to the existing tables and do not touch schema migrations for previously-approved phases."
+  ]
+}

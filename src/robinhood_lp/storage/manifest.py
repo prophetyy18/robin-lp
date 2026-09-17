@@ -69,7 +69,7 @@ from typing import Any, Final
 #: Current manifest schema version. Bumped whenever the SQLite schema
 #: changes incompatibly. A reader that opens a manifest DB whose
 #: version is higher than this constant refuses to load it.
-MANIFEST_SCHEMA_VERSION: Final[int] = 1
+MANIFEST_SCHEMA_VERSION: Final[int] = 2
 
 _DDL: Final[tuple[str, ...]] = (
     """
@@ -193,6 +193,99 @@ _DDL: Final[tuple[str, ...]] = (
         last_successful_block INTEGER NOT NULL,
         updated_at TEXT NOT NULL,
         PRIMARY KEY (chain_id, contract_address, event_name)
+    )
+    """,
+    # ----------------------------------------------------------------
+    # T032 — capability-driven historical ingestion (range planner,
+    # durable checkpoint, retry ledger, run manifest). These tables
+    # extend the same SQLite store and survive the same crash-recovery
+    # protocol as the T031 tables.
+    # ----------------------------------------------------------------
+    """
+    CREATE TABLE IF NOT EXISTS durable_checkpoints (
+        chain_id INTEGER NOT NULL,
+        contract_address TEXT NOT NULL,
+        pool_id TEXT NOT NULL,
+        qualified_start_block INTEGER NOT NULL,
+        qualified_end_block INTEGER NOT NULL,
+        qualified_end_block_hash TEXT NOT NULL,
+        schema_version INTEGER NOT NULL,
+        decode_version INTEGER NOT NULL,
+        capability_snapshot_id TEXT NOT NULL,
+        manifest_checksum TEXT NOT NULL,
+        topology TEXT NOT NULL,
+        pool_init_block INTEGER NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (chain_id, contract_address, pool_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS run_manifests (
+        run_id TEXT PRIMARY KEY,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        chain_id INTEGER NOT NULL,
+        contract_address TEXT NOT NULL,
+        pool_id TEXT NOT NULL,
+        pool_init_block INTEGER NOT NULL,
+        requested_start_block INTEGER NOT NULL,
+        requested_end_block INTEGER NOT NULL,
+        topology TEXT NOT NULL,
+        capability_snapshot_json TEXT NOT NULL,
+        budget_snapshot_json TEXT NOT NULL,
+        preflight_completed_at TEXT NOT NULL,
+        logical_rpc_calls INTEGER NOT NULL DEFAULT 0,
+        http_requests INTEGER NOT NULL DEFAULT 0,
+        response_bytes INTEGER NOT NULL DEFAULT 0,
+        normalized_rows INTEGER NOT NULL DEFAULT 0,
+        provider_units INTEGER NOT NULL DEFAULT 0,
+        elapsed_ms INTEGER NOT NULL DEFAULT 0,
+        complete INTEGER NOT NULL DEFAULT 0,
+        halt_reason TEXT,
+        schema_version INTEGER NOT NULL,
+        decode_version INTEGER NOT NULL,
+        manifest_checksum TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS run_intervals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL,
+        from_block INTEGER NOT NULL,
+        to_block INTEGER NOT NULL,
+        endpoint_alias TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('scanned_empty','successful','failed','cancelled')),
+        reason_code TEXT,
+        rows INTEGER NOT NULL DEFAULT 0,
+        response_bytes INTEGER NOT NULL DEFAULT 0,
+        logical_rpc_calls INTEGER NOT NULL DEFAULT 0,
+        http_requests INTEGER NOT NULL DEFAULT 0,
+        failover_from TEXT,
+        pinned_block_hash TEXT,
+        recorded_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS retry_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        endpoint_alias TEXT NOT NULL,
+        method TEXT NOT NULL,
+        from_block INTEGER NOT NULL,
+        to_block INTEGER NOT NULL,
+        reason_code TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        recorded_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS run_manifest_deviations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL,
+        deviation_kind TEXT NOT NULL,
+        detail_json TEXT NOT NULL,
+        recorded_at TEXT NOT NULL
     )
     """,
 )
@@ -829,6 +922,351 @@ class ManifestStore:
         if row is None:
             return None
         return int(row["last_successful_block"])
+
+    # ----- T032: durable checkpoints, retry ledger, run manifest -------
+
+    def upsert_durable_checkpoint(
+        self,
+        *,
+        chain_id: int,
+        contract_address: str,
+        pool_id: str,
+        qualified_start_block: int,
+        qualified_end_block: int,
+        qualified_end_block_hash: str,
+        schema_version: int,
+        decode_version: int,
+        capability_snapshot_id: str,
+        manifest_checksum: str,
+        topology: str,
+        pool_init_block: int,
+    ) -> None:
+        """Advance the per-pool durable checkpoint monotonically.
+
+        The qualified_end_block only moves forward. A re-run that
+        re-fetches an already-checkpointed range must not move the
+        checkpoint backwards; the SQL ``MAX`` enforces monotonic
+        advance. The qualified_end_block_hash is only updated when
+        the qualified_end_block actually advances — otherwise the
+        previously-recorded hash stays in place.
+        """
+        validate_endpoint_alias("", field="durable_checkpoint.contract_address")
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO durable_checkpoints (
+                    chain_id, contract_address, pool_id,
+                    qualified_start_block, qualified_end_block,
+                    qualified_end_block_hash, schema_version,
+                    decode_version, capability_snapshot_id,
+                    manifest_checksum, topology, pool_init_block,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chain_id, contract_address, pool_id) DO UPDATE SET
+                    qualified_start_block = MIN(
+                        durable_checkpoints.qualified_start_block,
+                        excluded.qualified_start_block
+                    ),
+                    qualified_end_block = MAX(
+                        durable_checkpoints.qualified_end_block,
+                        excluded.qualified_end_block
+                    ),
+                    qualified_end_block_hash = CASE
+                        WHEN excluded.qualified_end_block >
+                             durable_checkpoints.qualified_end_block
+                        THEN excluded.qualified_end_block_hash
+                        ELSE durable_checkpoints.qualified_end_block_hash
+                    END,
+                    schema_version = excluded.schema_version,
+                    decode_version = excluded.decode_version,
+                    capability_snapshot_id = excluded.capability_snapshot_id,
+                    manifest_checksum = excluded.manifest_checksum,
+                    topology = excluded.topology,
+                    pool_init_block = excluded.pool_init_block,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    chain_id,
+                    contract_address,
+                    pool_id,
+                    qualified_start_block,
+                    qualified_end_block,
+                    qualified_end_block_hash,
+                    schema_version,
+                    decode_version,
+                    capability_snapshot_id,
+                    manifest_checksum,
+                    topology,
+                    pool_init_block,
+                    _now_iso(),
+                ),
+            )
+
+    def get_durable_checkpoint(
+        self,
+        *,
+        chain_id: int,
+        contract_address: str,
+        pool_id: str,
+    ) -> dict[str, Any] | None:
+        with self.read() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM durable_checkpoints
+                WHERE chain_id = ? AND contract_address = ? AND pool_id = ?
+                """,
+                (chain_id, contract_address, pool_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def insert_run_manifest(
+        self,
+        *,
+        run_id: str,
+        started_at: str,
+        completed_at: str | None,
+        chain_id: int,
+        contract_address: str,
+        pool_id: str,
+        pool_init_block: int,
+        requested_start_block: int,
+        requested_end_block: int,
+        topology: str,
+        capability_snapshot_json: str,
+        budget_snapshot_json: str,
+        preflight_completed_at: str,
+        logical_rpc_calls: int,
+        http_requests: int,
+        response_bytes: int,
+        normalized_rows: int,
+        provider_units: int,
+        elapsed_ms: int,
+        complete: bool,
+        halt_reason: str | None,
+        schema_version: int,
+        decode_version: int,
+        manifest_checksum: str | None,
+    ) -> None:
+        """Insert or update one run manifest row.
+
+        The counter fields (logical_rpc_calls, http_requests,
+        response_bytes, normalized_rows, provider_units,
+        elapsed_ms) are incremented via
+        :meth:`increment_run_metrics` during the run; the
+        ``ON CONFLICT`` clause preserves any previously-recorded
+        counter values when the runner re-inserts to set the
+        completion timestamp / halt reason / manifest checksum.
+        """
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO run_manifests (
+                    run_id, started_at, completed_at, chain_id,
+                    contract_address, pool_id, pool_init_block,
+                    requested_start_block, requested_end_block,
+                    topology, capability_snapshot_json,
+                    budget_snapshot_json, preflight_completed_at,
+                    logical_rpc_calls, http_requests, response_bytes,
+                    normalized_rows, provider_units, elapsed_ms,
+                    complete, halt_reason, schema_version,
+                    decode_version, manifest_checksum
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    completed_at = excluded.completed_at,
+                    complete = excluded.complete,
+                    halt_reason = excluded.halt_reason,
+                    manifest_checksum = excluded.manifest_checksum
+                """,
+                (
+                    run_id,
+                    started_at,
+                    completed_at,
+                    chain_id,
+                    contract_address,
+                    pool_id,
+                    pool_init_block,
+                    requested_start_block,
+                    requested_end_block,
+                    topology,
+                    capability_snapshot_json,
+                    budget_snapshot_json,
+                    preflight_completed_at,
+                    logical_rpc_calls,
+                    http_requests,
+                    response_bytes,
+                    normalized_rows,
+                    provider_units,
+                    elapsed_ms,
+                    1 if complete else 0,
+                    halt_reason,
+                    schema_version,
+                    decode_version,
+                    manifest_checksum,
+                ),
+            )
+
+    def increment_run_metrics(
+        self,
+        *,
+        run_id: str,
+        logical_rpc_calls: int = 0,
+        http_requests: int = 0,
+        response_bytes: int = 0,
+        normalized_rows: int = 0,
+        provider_units: int = 0,
+        elapsed_ms: int = 0,
+    ) -> None:
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE run_manifests SET
+                    logical_rpc_calls = logical_rpc_calls + ?,
+                    http_requests = http_requests + ?,
+                    response_bytes = response_bytes + ?,
+                    normalized_rows = normalized_rows + ?,
+                    provider_units = provider_units + ?,
+                    elapsed_ms = elapsed_ms + ?
+                WHERE run_id = ?
+                """,
+                (
+                    logical_rpc_calls,
+                    http_requests,
+                    response_bytes,
+                    normalized_rows,
+                    provider_units,
+                    elapsed_ms,
+                    run_id,
+                ),
+            )
+
+    def get_run_manifest(self, run_id: str) -> dict[str, Any] | None:
+        with self.read() as conn:
+            row = conn.execute("SELECT * FROM run_manifests WHERE run_id = ?", (run_id,)).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def insert_run_interval(
+        self,
+        *,
+        run_id: str,
+        from_block: int,
+        to_block: int,
+        endpoint_alias: str,
+        state: str,
+        reason_code: str | None,
+        rows: int,
+        response_bytes: int,
+        logical_rpc_calls: int,
+        http_requests: int,
+        failover_from: str | None,
+        pinned_block_hash: str | None,
+    ) -> None:
+        validate_endpoint_alias(endpoint_alias)
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO run_intervals (
+                    run_id, from_block, to_block, endpoint_alias,
+                    state, reason_code, rows, response_bytes,
+                    logical_rpc_calls, http_requests, failover_from,
+                    pinned_block_hash, recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    from_block,
+                    to_block,
+                    endpoint_alias,
+                    state,
+                    reason_code,
+                    rows,
+                    response_bytes,
+                    logical_rpc_calls,
+                    http_requests,
+                    failover_from,
+                    pinned_block_hash,
+                    _now_iso(),
+                ),
+            )
+
+    def list_run_intervals(self, run_id: str) -> list[dict[str, Any]]:
+        with self.read() as conn:
+            rows = conn.execute(
+                "SELECT * FROM run_intervals WHERE run_id = ? ORDER BY id",
+                (run_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def append_retry(
+        self,
+        *,
+        run_id: str,
+        attempt: int,
+        endpoint_alias: str,
+        method: str,
+        from_block: int,
+        to_block: int,
+        reason_code: str,
+        outcome: str,
+    ) -> None:
+        validate_endpoint_alias(endpoint_alias)
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO retry_ledger (
+                    run_id, attempt, endpoint_alias, method,
+                    from_block, to_block, reason_code, outcome,
+                    recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    attempt,
+                    endpoint_alias,
+                    method,
+                    from_block,
+                    to_block,
+                    reason_code,
+                    outcome,
+                    _now_iso(),
+                ),
+            )
+
+    def list_retries(self, run_id: str) -> list[dict[str, Any]]:
+        with self.read() as conn:
+            rows = conn.execute(
+                "SELECT * FROM retry_ledger WHERE run_id = ? ORDER BY id",
+                (run_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def append_deviation(
+        self,
+        *,
+        run_id: str,
+        deviation_kind: str,
+        detail_json: str,
+    ) -> None:
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO run_manifest_deviations (
+                    run_id, deviation_kind, detail_json, recorded_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (run_id, deviation_kind, detail_json, _now_iso()),
+            )
+
+    def list_deviations(self, run_id: str) -> list[dict[str, Any]]:
+        with self.read() as conn:
+            rows = conn.execute(
+                "SELECT * FROM run_manifest_deviations WHERE run_id = ? ORDER BY id",
+                (run_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
 
 __all__ = [
