@@ -1,4 +1,4 @@
-"""T032 — Capability-driven historical ingestion for a single PoolKey.
+"""T032 / T035 — Capability-driven historical ingestion for a single PoolKey.
 
 This package ties together:
 
@@ -8,16 +8,29 @@ This package ties together:
   ledger);
 - the A+B router (Robinhood wide-range primary, Alchemy Free
   failover within measured capability and remaining budget);
+- the production :class:`EndpointClient` driven by the read-only
+  :class:`RpcAdapter` (T035);
+- the production :class:`RpcBlockHeaderSource` that fetches
+  non-hydrated block headers as JSON-RPC batches and dedupes
+  per distinct event block (T035, ADR-012);
 - the durable checkpoint + retry ledger + run manifest writer;
 - the orchestrator runner.
 
-All deliverables from the T032 contract are covered. The package
-depends on the T030 decode surface and the T031 storage writer /
-manifest store.
+All deliverables from the T032 and T035 contracts are covered. The
+package depends on the T030 decode surface and the T031 storage
+writer / manifest store.
 """
 
 from __future__ import annotations
 
+from robinhood_lp.ingestion.block_header_source import (
+    DEFAULT_HEADER_BATCH_SIZE,
+    BlockHeader,
+    BlockHeaderFetchError,
+    BlockHeaderMetrics,
+    BlockHeaderSink,
+    RpcBlockHeaderSource,
+)
 from robinhood_lp.ingestion.capability import (
     DEFAULT_ALCHEMY_MAX_BLOCKS_PER_GET_LOGS,
     DEFAULT_MAX_RESPONSE_BYTES,
@@ -33,6 +46,10 @@ from robinhood_lp.ingestion.checkpoint import (
     DurableCheckpointState,
     load_durable_checkpoint,
     upsert_durable_checkpoint,
+)
+from robinhood_lp.ingestion.endpoint_client import (
+    USER_AGENT_REJECTED_REASONS,
+    RpcEndpointClient,
 )
 from robinhood_lp.ingestion.errors import (
     REASON_BUDGET_EXHAUSTED,
@@ -113,7 +130,11 @@ from robinhood_lp.ingestion.runner import (
 __all__ = [
     "ALIAS_ALCHEMY_FREE",
     "ALIAS_ROBINHOOD_PUBLIC",
+    "BlockHeader",
     "BlockHeaderCache",
+    "BlockHeaderFetchError",
+    "BlockHeaderMetrics",
+    "BlockHeaderSink",
     "BlockHeaderSource",
     "BudgetExhaustedError",
     "BudgetLedger",
@@ -126,6 +147,7 @@ __all__ = [
     "CoverageDecision",
     "DEFAULT_ALCHEMY_MAX_BLOCKS_PER_GET_LOGS",
     "DEFAULT_FAILOVER_ORDER",
+    "DEFAULT_HEADER_BATCH_SIZE",
     "DEFAULT_MAX_BLOCKS_PER_PARTITION",
     "DEFAULT_MAX_RESPONSE_BYTES",
     "DEFAULT_OPERATOR_BUDGET",
@@ -173,12 +195,15 @@ __all__ = [
     "RemainingBudget",
     "Router",
     "RouterConfig",
+    "RpcBlockHeaderSource",
+    "RpcEndpointClient",
     "STATE_CANCELLED",
     "STATE_FAILED",
     "STATE_SCANNED_EMPTY",
     "STATE_SUCCESSFUL",
     "TOPOLOGY_COLD_START",
     "TOPOLOGY_WARM_INCREMENTAL",
+    "USER_AGENT_REJECTED_REASONS",
     "build_pool_topic_filter",
     "build_topic0_filter",
     "classify_coverage",

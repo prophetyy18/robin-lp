@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-09-17T00:00:00Z",
+  "purpose": "Machine-readable provider-facts artifact for T035 (real-mainnet ingestion closure). Sourced from the planning-layer record docs/spec/protocol/PROVIDER_FACTS.md and the read-only probes recorded against the two qualified Robinhood Chain mainnet endpoints.",
+  "chain": {
+    "chain_id": 4663,
+    "name": "Robinhood Chain mainnet",
+    "observed_head_block_at_probe": 65392511
+  },
+  "endpoint_aliases": {
+    "primary": "robinhood-official-mainnet",
+    "secondary": "alchemy-free-mainnet"
+  },
+  "reference_target": {
+    "pool_id": "0x6c614c38c65fea492f4cb2b90fd664f924a7b828c7384620662217e2e2df43ed",
+    "pool_key": {
+      "currency0": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+      "currency0_decimals": 6,
+      "currency0_symbol": "USDG",
+      "currency1": "0x7dbf38976f6d3b9c529e7d9484a71898b409ee6a",
+      "currency1_decimals": 18,
+      "currency1_symbol": "ZZZ",
+      "fee": 28001,
+      "tick_spacing": 280,
+      "hooks": "0x0"
+    },
+    "pool_manager_address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+    "state_view_address": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
+    "reference_range_blocks_inclusive": [54946237, 55946237],
+    "reference_range_block_count": 1000001,
+    "reference_range_fully_finalized": true
+  },
+  "result_bearing_measurement": {
+    "single_pool_filtered_range_query_covered_full_range": true,
+    "eth_get_logs_topics_filter": "five_topic0_OR + topic1_poolId",
+    "eth_get_logs_response_event_count": 3739,
+    "eth_get_logs_response_distinct_block_count": 3266,
+    "event_breakdown": {
+      "Initialize": 1,
+      "ModifyLiquidity": 578,
+      "Swap": 3159,
+      "ProtocolFeeUpdated": 1,
+      "Donate": 0
+    }
+  },
+  "rejected_paths": {
+    "full_chain_range_five_topic0_OR_query_outcome": "timed_out",
+    "full_chain_range_five_topic0_OR_error_code": -32000,
+    "single_event_full_range_query_outcome": "rejected",
+    "single_event_full_range_error_code": -32000,
+    "single_event_full_range_error_message_substring": "logs matched by query exceeds limit of 10000"
+  },
+  "eth_get_logs_block_timestamp_field": {
+    "value_observed": "0x0",
+    "usable_as_time_source": false,
+    "reason": "field held 0x0 on every returned log in the result-bearing probe; block time must be read from the non-hydrated block header"
+  },
+  "throttling": {
+    "rapid_sequential_calls_outcome": "http_429",
+    "retry_classification": "transient"
+  },
+  "secondary_endpoint_capability": {
+    "alias": "alchemy-free-mainnet",
+    "eth_get_logs_accepted_blocks_per_call_observed_about": 10,
+    "carry_main_scan": false,
+    "participates_in": ["sampled_cross_validation", "block_pinned_state_reads"],
+    "historical_state_call_about_one_million_blocks_behind": "available"
+  },
+  "primary_endpoint_capability": {
+    "alias": "robinhood-official-mainnet",
+    "eth_get_logs_accepted_blocks_per_call_observed_about": 1000001,
+    "carry_main_scan": true,
+    "historical_state_call_at_reference_depth": "unavailable",
+    "block_pinned_state_routing_rule": "must be issued to an endpoint able to serve historical state at that depth"
+  },
+  "json_rpc_batch_support": {
+    "eth_getBlockByNumber_batch_supported_on_primary": true,
+    "eth_getBlockByNumber_batch_supported_on_secondary": true,
+    "logical_call_vs_http_batch_rule": "a JSON-RPC batch counts as one HTTP request and as the number of logical RPC calls it carries; a batch never counts as fewer logical RPC calls"
+  },
+  "consequences_for_acquisition_shape": {
+    "one_pool_filtered_range_query_per_planned_sub_range": true,
+    "events_persisted_with_block_transaction_log_position": true,
+    "state_rebuilt_locally_downstream": true,
+    "one_eth_get_logs_call_per_block": false,
+    "one_eth_getBlockByNumber_call_per_scanned_block": false,
+    "header_for_block_without_pool_event": false,
+    "eth_call_during_acquisition": false,
+    "header_logical_calls_dedup_per_distinct_event_block": true,
+    "header_logical_calls_issued_as_json_rpc_batches": true,
+    "header_time_source": "eth_getBlockByNumber (non-hydrated)",
+    "block_timestamp_field_rejected_as_time_source": true,
+    "wall_clock_substitute_for_block_time": false
+  },
+  "credential_policy": {
+    "credential_bearing_url_stored": false,
+    "api_key_stored": false,
+    "raw_authorization_header_stored": false,
+    "environment_file_value_stored": false
+  },
+  "limitations": [
+    "Every value above is a mutable observation of a third-party endpoint, not a contract constant. Re-probe before claiming any new range is complete (ADR-010 re-probe triggers).",
+    "The result-bearing measurement covers one pool and one finalized range; it is not a constant density, capacity, rate-limit, or retention guarantee for other pools, ranges, endpoints, or horizons.",
+    "The secondary endpoint's ~10-block eth_getLogs capability is observed, not assumed; the T032 preflight probe re-measures it before each run.",
+    "T036, not T035, owns the qualification of a reference dataset that proves the call-volume bound on a real bounded range."
+  ],
+  "sources": [
+    "R23: https://docs.robinhood.com/chain/connecting/",
+    "R24: https://www.alchemy.com/docs/chains/robinhood-chain/robinhood-chain-api-endpoints/eth-get-logs",
+    "R25: https://www.alchemy.com/docs/reference/pricing-plans",
+    "ADR-010: docs/spec/architecture/adr/ADR-010-free-dual-provider-ingestion.md",
+    "ADR-011: docs/spec/architecture/adr/ADR-011-project-owned-json-rpc-transport.md",
+    "ADR-012: docs/spec/architecture/adr/ADR-012-header-time-persistence-and-call-volume.md",
+    "PROVIDER_FACTS: docs/spec/protocol/PROVIDER_FACTS.md"
+  ],
+  "t035_dependent_facts": [
+    "single_pool_filtered_range_query_covered_full_range",
+    "eth_get_logs_block_timestamp_field.value_observed",
+    "rejected_paths.full_chain_range_five_topic0_OR_query_outcome",
+    "rejected_paths.single_event_full_range_query_outcome",
+    "throttling.rapid_sequential_calls_outcome",
+    "secondary_endpoint_capability.eth_get_logs_accepted_blocks_per_call_observed_about",
+    "json_rpc_batch_support.eth_getBlockByNumber_batch_supported_on_primary",
+    "json_rpc_batch_support.eth_getBlockByNumber_batch_supported_on_secondary",
+    "primary_endpoint_capability.historical_state_call_at_reference_depth",
+    "secondary_endpoint_capability.historical_state_call_about_one_million_blocks_behind"
+  ]
+}

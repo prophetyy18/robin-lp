@@ -52,6 +52,13 @@ def _build_swap_table(rows: int, event_name: str = "Swap") -> pa.Table:
         columns["chain_id"].append(4663)
         columns["block_number"].append(10 + i)
         columns["block_hash"].append(b"\x00" * 32)
+        # T035 / ADR-012: every persisted event row carries the integer
+        # block timestamp and the parent hash. The measurement helper
+        # populates both with the per-row offset the synthetic table
+        # uses for ``block_number`` so the helper continues to round-
+        # trip the production ``parquet_schema_for`` shape.
+        columns["block_timestamp"].append(1_700_000_000 + i)
+        columns["parent_hash"].append(b"\x00" * 32)
         columns["transaction_hash"].append(b"\x00" * 32)
         columns["transaction_index"].append(0)
         columns["log_index"].append(i)

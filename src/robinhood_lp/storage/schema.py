@@ -55,7 +55,7 @@ from robinhood_lp.protocol import Address, ChainId, EventKey, PoolId
 #: changes. The bump is recorded in every record's ``schema_version``
 #: field so a future decoder can branch on it.
 #:
-#: v1 → v2 migration (this task):
+#: v1 → v2 migration:
 #: - added ``AcquisitionProvenance`` observational envelope
 #:   (endpoint alias, retrieval time, request interval, HTTP batch
 #:   metadata);
@@ -65,11 +65,21 @@ from robinhood_lp.protocol import Address, ChainId, EventKey, PoolId
 #:   ``IProtocolFees.ProtocolFeeUpdated(bytes32,uint24)`` event
 #:   (ADR-010 §"Required data boundary").
 #:
-#: v1 records load successfully through ``migrate_to_current``; the
-#: legacy ``source_endpoint``/``ingestion_time`` fields are still
+#: v2 → v3 migration (T035, ADR-012):
+#: - every log record now carries the integer ``block_timestamp``
+#:   (uint64, the on-chain UNIX-seconds block time the non-hydrated
+#:   block header reports) and the ``parent_hash`` (uint256, the
+#:   parent block hash the same header reports). The runner fills
+#:   these from the dedup'd ``block_headers`` manifest table before
+#:   persisting the record; v2 records migrated forward default to
+#:   ``0`` and the framework treats them as legacy rows whose header
+#:   was not retained at decode time.
+#:
+#: v1 and v2 records load successfully through ``migrate_to_current``;
+#: the legacy ``source_endpoint``/``ingestion_time`` fields are still
 #: carried for back-compat but new code writes the structured
 #: ``acquisition`` field instead.
-CURRENT_SCHEMA_VERSION: int = 2
+CURRENT_SCHEMA_VERSION: int = 3
 
 #: Bump whenever the V4 artifacts (``EVENT_TOPICS`` /
 #: ``FUNCTION_SELECTORS`` / PoolId hashing) change. The bump is
@@ -155,6 +165,40 @@ def _validate_alias(alias: str, *, field: str) -> str:
                 f"(contains {needle!r}); use a short opaque token instead"
             )
     return alias
+
+
+def _validate_block_timestamp(value: int, *, field: str) -> int:
+    """Validate ``block_timestamp`` fits the uint64 width and is non-negative.
+
+    T035 / ADR-012 require the integer block timestamp the
+    non-hydrated ``eth_getBlockByNumber`` header returns. Wall-clock
+    and provider ``blockTimestamp`` substitutions are rejected
+    elsewhere; this validator is the field-level safety net.
+    """
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise TypeError(f"{field}: must be int, got {type(value).__name__}")
+    if value < 0:
+        raise ValueError(f"{field}: must be non-negative, got {value}")
+    if value >= (1 << 64):
+        raise ValueError(f"{field}: exceeds uint64 width, got {value}")
+    return value
+
+
+def _validate_parent_hash(value: int, *, field: str) -> int:
+    """Validate ``parent_hash`` fits the uint256 width and is non-negative.
+
+    The parent hash the non-hydrated header reports is the 32-byte
+    previous-block hash. ``0`` is reserved as the legacy / migrated
+    placeholder for v1 / v2 records whose header was not retained
+    at decode time.
+    """
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise TypeError(f"{field}: must be int, got {type(value).__name__}")
+    if value < 0:
+        raise ValueError(f"{field}: must be non-negative, got {value}")
+    if value >= (1 << 256):
+        raise ValueError(f"{field}: exceeds uint256 width, got {value}")
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +410,14 @@ class InitializeLogRecord:
     log_index: int
     address: Address  # PoolManager address
 
+    # ---- T035 / ADR-012: block header time + parent hash --------------
+    # Both fields default to ``0`` so legacy v1 / v2 records migrate
+    # forward without losing bytes; the runner enriches every freshly
+    # persisted record from the dedup'd ``block_headers`` manifest
+    # table before the partition writer commits.
+    block_timestamp: int = 0
+    parent_hash: int = 0
+
     # Re-org / removed flag from ``eth_getLogs``; True for log entries
     # the chain rolled back. Default False for fresh records.
     removed: bool = False
@@ -417,6 +469,10 @@ class ModifyLiquidityLogRecord:
     tick_upper: int
     liquidity_delta: int
     salt: int
+
+    # ---- T035 / ADR-012: block header time + parent hash --------------
+    block_timestamp: int = 0
+    parent_hash: int = 0
 
     removed: bool = False
 
@@ -470,6 +526,10 @@ class SwapLogRecord:
     tick: int
     fee: int  # the on-chain recorded effective fee, in hundredths of a bip
 
+    # ---- T035 / ADR-012: block header time + parent hash --------------
+    block_timestamp: int = 0
+    parent_hash: int = 0
+
     removed: bool = False
 
     decode_version: int = CURRENT_DECODE_VERSION
@@ -510,6 +570,10 @@ class DonateLogRecord:
     sender: Address
     amount0: int
     amount1: int
+
+    # ---- T035 / ADR-012: block header time + parent hash --------------
+    block_timestamp: int = 0
+    parent_hash: int = 0
 
     removed: bool = False
 
@@ -564,6 +628,10 @@ class ProtocolFeeUpdatedLogRecord:
     log_index: int
     address: Address
     protocol_fee: int  # uint24 — packed [token0Fee:12 | token1Fee:12]
+
+    # ---- T035 / ADR-012: block header time + parent hash --------------
+    block_timestamp: int = 0
+    parent_hash: int = 0
 
     removed: bool = False
 
@@ -697,6 +765,8 @@ def migrate_to_current(blob: bytes) -> Any:
         )
     if schema_version < 2:
         data = _migrate_v1_to_v2(data)
+    if schema_version < 3:
+        data = _migrate_v2_to_v3(data)
     # Build the dataclass-ready payload: strip envelope, materialise
     # the acquisition envelope, and route unknown top-level keys into
     # ``unknown_fields``.
@@ -750,6 +820,33 @@ def _migrate_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
     elif isinstance(data["acquisition"], dict):
         # Already a v2-shaped acquisition: leave it.
         pass
+    return data
+
+
+def _migrate_v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
+    """Apply the v2 → v3 migration (T035, ADR-012).
+
+    The v2 record shape did not carry ``block_timestamp`` or
+    ``parent_hash``; those fields arrive from the dedup'd
+    ``block_headers`` manifest table on every freshly persisted
+    event. v2 records migrated forward default to ``0`` for both;
+    a record whose block_timestamp is still ``0`` after migration
+    is a legacy row whose header was not retained at decode time
+    and the downstream consumer treats it accordingly.
+    """
+    log_record_classes = {
+        "InitializeLogRecord",
+        "ModifyLiquidityLogRecord",
+        "SwapLogRecord",
+        "DonateLogRecord",
+        "ProtocolFeeUpdatedLogRecord",
+    }
+    class_name = data.get("__class__")
+    if class_name in log_record_classes:
+        if "block_timestamp" not in data:
+            data["block_timestamp"] = 0
+        if "parent_hash" not in data:
+            data["parent_hash"] = 0
     return data
 
 

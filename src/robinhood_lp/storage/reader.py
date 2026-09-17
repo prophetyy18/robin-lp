@@ -316,6 +316,12 @@ def _row_to_dataclass_dict(row: dict[str, Any], event_name: str) -> Any:
         "chain_id": _int_wrapper(int(row["chain_id"])),
         "block_number": int(row["block_number"]),
         "block_hash": _b("block_hash", length=32),
+        # T035 / ADR-012: every persisted event carries the integer
+        # block timestamp and parent hash. Legacy v1/v2 partitions
+        # produced before the v3 schema bump write ``0`` for both
+        # and ``migrate_to_current`` preserves the migration default.
+        "block_timestamp": int(row.get("block_timestamp") or 0),
+        "parent_hash": _b("parent_hash", length=32) if row.get("parent_hash") else 0,
         "transaction_hash": _b("transaction_hash", length=32),
         "transaction_index": int(row["transaction_index"]),
         "log_index": int(row["log_index"]),

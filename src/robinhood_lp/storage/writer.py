@@ -180,6 +180,15 @@ def _record_to_row(record: _LogRecord) -> dict[str, Any]:
         "chain_id": ek.chain_id.value,
         "block_number": record.block_number,
         "block_hash": record.block_hash.to_bytes(32, "big"),
+        # T035 / ADR-012: every persisted event must carry the
+        # integer block timestamp and the parent block hash. The
+        # runner populates these from the dedup'd ``block_headers``
+        # manifest table before the record reaches the writer. A
+        # legacy v1/v2 record migrated forward carries ``0`` for
+        # both — the writer does not refuse that, it simply
+        # persists the same value.
+        "block_timestamp": int(record.block_timestamp),
+        "parent_hash": record.parent_hash.to_bytes(32, "big"),
         "transaction_hash": record.transaction_hash.to_bytes(32, "big"),
         "transaction_index": record.transaction_index,
         "log_index": record.log_index,

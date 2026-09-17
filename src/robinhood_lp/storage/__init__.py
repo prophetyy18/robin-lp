@@ -6,6 +6,7 @@ from robinhood_lp.storage.decode_log import LogDecodeContext, decode_log
 from robinhood_lp.storage.manifest import (
     MANIFEST_SCHEMA_VERSION,
     AccountingInterval,
+    BlockHeaderInconsistencyError,
     ConflictingObservation,
     ManifestStore,
     PartitionBounds,
@@ -63,6 +64,7 @@ __all__ = [
     "AcquisitionProvenance",
     "AppendResult",
     "BlockContext",
+    "BlockHeaderInconsistencyError",
     "BoundsMismatchError",
     "CURRENT_DECODE_VERSION",
     "CURRENT_SCHEMA_VERSION",

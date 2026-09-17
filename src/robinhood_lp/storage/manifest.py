@@ -69,7 +69,12 @@ from typing import Any, Final
 #: Current manifest schema version. Bumped whenever the SQLite schema
 #: changes incompatibly. A reader that opens a manifest DB whose
 #: version is higher than this constant refuses to load it.
-MANIFEST_SCHEMA_VERSION: Final[int] = 2
+#:
+#: v2 → v3 (T035): added the ``block_headers`` table (one deduplicated
+#: row per distinct event block; ADR-012). The DDL is additive so
+#: existing v2 databases open cleanly and the new table is created
+#: on next access.
+MANIFEST_SCHEMA_VERSION: Final[int] = 3
 
 _DDL: Final[tuple[str, ...]] = (
     """
@@ -193,6 +198,29 @@ _DDL: Final[tuple[str, ...]] = (
         last_successful_block INTEGER NOT NULL,
         updated_at TEXT NOT NULL,
         PRIMARY KEY (chain_id, contract_address, event_name)
+    )
+    """,
+    # ----------------------------------------------------------------
+    # T035 — block header evidence table (ADR-012). One deduplicated
+    # row per distinct event block, keyed by (chain_id, block_hash).
+    # The header record carries the integer block_number, the
+    # 32-byte parent_hash, and the integer timestamp the time
+    # carrier set requires. ``block_timestamp`` is the column name
+    # mandated by the T035 contract (Parquet column carries the
+    # same name); ``fetched_at`` records the retrieval time so a
+    # later reader can reason about when this block was last
+    # observed by the ingestion pipeline.
+    # ----------------------------------------------------------------
+    """
+    CREATE TABLE IF NOT EXISTS block_headers (
+        chain_id INTEGER NOT NULL,
+        block_hash TEXT NOT NULL,
+        block_number INTEGER NOT NULL,
+        parent_hash TEXT NOT NULL,
+        block_timestamp INTEGER NOT NULL,
+        fetched_at TEXT NOT NULL,
+        endpoint_alias TEXT NOT NULL,
+        PRIMARY KEY (chain_id, block_hash)
     )
     """,
     # ----------------------------------------------------------------
@@ -1268,9 +1296,214 @@ class ManifestStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    # ----- T035: block header evidence table (ADR-012) ---------------
+
+    def upsert_block_header(
+        self,
+        conn: sqlite3.Connection | None = None,
+        *,
+        chain_id: int,
+        block_hash: int,
+        block_number: int,
+        parent_hash: int,
+        block_timestamp: int,
+        endpoint_alias: str,
+        fetched_at: str | None = None,
+    ) -> bool:
+        """Insert (or no-op update of) one block header row.
+
+        The primary key is ``(chain_id, block_hash)`` so the table is
+        naturally deduplicated: a re-run over an overlapping range
+        that re-observes the same block hash lands on the same row
+        without producing duplicates. The block_number, parent_hash,
+        and block_timestamp must agree with the prior row when the
+        block_hash is already present; a divergence raises
+        :class:`BlockHeaderInconsistencyError`.
+
+        Returns True when a new row was inserted, False when the
+        block_hash was already present (idempotent re-observation).
+
+        ``conn`` may be ``None`` to open a short-lived transaction; the
+        caller may also pass an open transaction so the header upsert
+        rides along with another write (e.g. an event-batch commit).
+        """
+        validate_endpoint_alias(endpoint_alias)
+        if fetched_at is None:
+            fetched_at = _now_iso()
+        if block_number < 0:
+            raise ValueError(f"block_number: must be >= 0, got {block_number}")
+        if block_timestamp < 0 or block_timestamp >= (1 << 64):
+            raise ValueError(f"block_timestamp: must fit uint64, got {block_timestamp}")
+        if parent_hash < 0 or parent_hash >= (1 << 256):
+            raise ValueError(f"parent_hash: must fit uint256, got {parent_hash}")
+        block_hash_hex = _hex(block_hash)
+        parent_hash_hex = _hex(parent_hash)
+        if conn is None:
+            with self.transaction() as active:
+                return self._upsert_block_header_in_tx(
+                    active,
+                    chain_id=chain_id,
+                    block_hash_hex=block_hash_hex,
+                    block_number=block_number,
+                    parent_hash_hex=parent_hash_hex,
+                    block_timestamp=block_timestamp,
+                    endpoint_alias=endpoint_alias,
+                    fetched_at=fetched_at,
+                )
+        return self._upsert_block_header_in_tx(
+            conn,
+            chain_id=chain_id,
+            block_hash_hex=block_hash_hex,
+            block_number=block_number,
+            parent_hash_hex=parent_hash_hex,
+            block_timestamp=block_timestamp,
+            endpoint_alias=endpoint_alias,
+            fetched_at=fetched_at,
+        )
+
+    def _upsert_block_header_in_tx(
+        self,
+        active: sqlite3.Connection,
+        *,
+        chain_id: int,
+        block_hash_hex: str,
+        block_number: int,
+        parent_hash_hex: str,
+        block_timestamp: int,
+        endpoint_alias: str,
+        fetched_at: str,
+    ) -> bool:
+        existing = active.execute(
+            "SELECT block_number, parent_hash, block_timestamp "
+            "FROM block_headers WHERE chain_id = ? AND block_hash = ?",
+            (chain_id, block_hash_hex),
+        ).fetchone()
+        if existing is not None:
+            prior_number, prior_parent_hex, prior_ts = (
+                int(existing[0]),
+                str(existing[1]),
+                int(existing[2]),
+            )
+            if prior_number != block_number:
+                raise BlockHeaderInconsistencyError(
+                    f"block_hash {block_hash_hex} already recorded at "
+                    f"block_number {prior_number}; refusing to overwrite "
+                    f"with block_number {block_number}"
+                )
+            if prior_parent_hex != parent_hash_hex:
+                raise BlockHeaderInconsistencyError(
+                    f"block_hash {block_hash_hex} already recorded with "
+                    f"parent_hash {prior_parent_hex}; refusing to "
+                    f"overwrite with parent_hash {parent_hash_hex}"
+                )
+            if prior_ts != block_timestamp:
+                raise BlockHeaderInconsistencyError(
+                    f"block_hash {block_hash_hex} already recorded with "
+                    f"block_timestamp {prior_ts}; refusing to overwrite "
+                    f"with block_timestamp {block_timestamp}"
+                )
+            # Idempotent re-observation: refresh the audit fields.
+            active.execute(
+                """
+                UPDATE block_headers
+                SET fetched_at = ?, endpoint_alias = ?
+                WHERE chain_id = ? AND block_hash = ?
+                """,
+                (fetched_at, endpoint_alias, chain_id, block_hash_hex),
+            )
+            return False
+        active.execute(
+            """
+            INSERT INTO block_headers (
+                chain_id, block_hash, block_number, parent_hash,
+                block_timestamp, fetched_at, endpoint_alias
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                chain_id,
+                block_hash_hex,
+                block_number,
+                parent_hash_hex,
+                block_timestamp,
+                fetched_at,
+                endpoint_alias,
+            ),
+        )
+        return True
+
+    def get_block_header(
+        self,
+        *,
+        chain_id: int,
+        block_hash: int,
+    ) -> dict[str, Any] | None:
+        with self.read() as conn:
+            row = conn.execute(
+                "SELECT * FROM block_headers WHERE chain_id = ? AND block_hash = ?",
+                (chain_id, _hex(block_hash)),
+            ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def list_block_headers(
+        self,
+        *,
+        chain_id: int | None = None,
+        block_number_min: int | None = None,
+        block_number_max: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """List block_headers rows ordered by block_number, then block_hash.
+
+        ``chain_id`` filters by chain; ``block_number_min`` /
+        ``block_number_max`` filter by inclusive block_number range.
+        Empty filters return every row.
+        """
+        clauses: list[str] = []
+        params: list[int] = []
+        if chain_id is not None:
+            clauses.append("chain_id = ?")
+            params.append(chain_id)
+        if block_number_min is not None:
+            clauses.append("block_number >= ?")
+            params.append(block_number_min)
+        if block_number_max is not None:
+            clauses.append("block_number <= ?")
+            params.append(block_number_max)
+        query = "SELECT * FROM block_headers"
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY block_number, block_hash"
+        with self.read() as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_block_headers(self, *, chain_id: int | None = None) -> int:
+        query = "SELECT COUNT(*) FROM block_headers"
+        params: tuple[int, ...] = ()
+        if chain_id is not None:
+            query += " WHERE chain_id = ?"
+            params = (chain_id,)
+        with self.read() as conn:
+            row = conn.execute(query, params).fetchone()
+        if row is None:
+            return 0
+        return int(row[0])
+
+
+class BlockHeaderInconsistencyError(RuntimeError):
+    """Raised when an existing block_headers row disagrees with the
+    freshly observed header on ``block_number``, ``parent_hash``, or
+    ``block_timestamp``. Per ADR-012 the row is not overwritten; a
+    same-height fork produces a different ``block_hash`` and is
+    persisted as a separate row. A divergence on the same
+    ``block_hash`` is a protocol violation and halts qualification.
+    """
+
 
 __all__ = [
     "AccountingInterval",
+    "BlockHeaderInconsistencyError",
     "ConflictingObservation",
     "MANIFEST_SCHEMA_VERSION",
     "ManifestStore",

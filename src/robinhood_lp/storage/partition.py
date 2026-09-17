@@ -233,6 +233,16 @@ SHARED_PARQUET_FIELDS: Final[tuple[pa.Field, ...]] = (
     pa.field("chain_id", pa.int64(), nullable=False),
     pa.field("block_number", pa.int64(), nullable=False),
     pa.field("block_hash", pa.binary(HASH_BYTES), nullable=False),
+    # ---- Block header time / parent hash (T035, ADR-012) ------------
+    # ``block_timestamp`` is uint64: the V4 / Ethereum block timestamp
+    # is a UNIX-seconds integer. ``parent_hash`` is the 32-byte
+    # previous-block hash. Both are required on every event row so a
+    # downstream consumer can re-order events in chain time and
+    # re-check the header against the stored block_hash without
+    # touching the manifest header table.
+    pa.field("block_timestamp", pa.uint64(), nullable=False),
+    pa.field("parent_hash", pa.binary(HASH_BYTES), nullable=False),
+    # ---- Transaction + receipt identity ------------------------------
     pa.field("transaction_hash", pa.binary(HASH_BYTES), nullable=False),
     pa.field("transaction_index", pa.int32(), nullable=False),
     pa.field("log_index", pa.int32(), nullable=False),
