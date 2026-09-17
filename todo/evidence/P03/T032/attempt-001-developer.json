@@ -1,0 +1,24 @@
+{
+  "task_id": "T032",
+  "outcome": "TRIAGE_REQUIRED",
+  "summary": "T032 合同正文标记 FROZEN_FROM_BASELINE_6C31778 + 顶部追加 2026-09-16 Owner amendment。按 Owner 决定 #5（binding direction）必须先经 planning route 把 frozen + amendment 合并为单一合同正文，再开始 implementation。本次 attempt 不做 implementation，转入 TRIAGE_REQUIRED 让 triager 分类为 CONTRACT_MISMATCH 后进入 planning。",
+  "commands": [
+    {
+      "command": "git status --porcelain (executed during this attempt)",
+      "result": "no changes; todo/phases/P03-ingestion-and-storage/T032.md and todo/config.yaml untouched"
+    }
+  ],
+  "residual_risks": [
+    "T032 合同 Owner decision 合并需求: ADR-010 A+B capability-driven 路由（Decision 4）、scanned-empty vs failed vs cancelled/skipped 三态边界、reason codes for budget exhaustion、attempt 1 不留 implementation evidence"
+  ],
+  "triage_request": {
+    "observed_problem": "T032 合同正文标记 FROZEN_FROM_BASELINE_6C31778 + 顶部追加 2026-09-16 Owner amendment。按 Owner 决定 #5（binding direction，/tmp/owner_decision_T032.txt 记录），workflow 必须经 planning route（Planner → Plan Reviewer）把 frozen 与 amendment 合并为单一合同正文，再开始 implementation。amendment 内容覆盖：ADR-010 Robinhood-public + Alchemy-Free capability-driven 路由、不假设 10,000-block provider cap、One pool-filtered topic0 OR query 覆盖 4 个 V4 事件 + ProtocolFeeUpdated、Robinhood 公共 RPC 作初始 wide-range log source、Alchemy Free 作 archive/block-pinned 与 sampled verification、Either endpoint may fail over only within measured capability and remaining budget、Robinhood 请求必须带 explicit non-secret application User-Agent、冷启动从所选池 Initialize 块扫到 end、每个 distinct event block 取一条非水合 block header、only previously qualified local checkpoint 允许 suffix-only ingestion。Decision 4 补充：scanned_empty / failed / cancelled/skipped 三态边界 + reason codes + 不存在局部跳过后仍完整的硬约束。Developer 不得自行选择只执行旧合同或只执行 amendment；当前 contract 的双层表达不直接可执行。",
+    "evidence": [
+      "todo/phases/P03-ingestion-and-storage/T032.md",
+      "/tmp/owner_decision_T032.txt",
+      "docs/spec/architecture/adr/ADR-010-free-dual-provider-ingestion.md"
+    ],
+    "proposed_classification": "CONTRACT_MISMATCH",
+    "requested_change": "由 Planner 把 2026-09-16 Owner amendment 合并进 T032 的 Outcome / Deliverables / Acceptance / Must-not / References 段落，去除顶部 amendment block 与 FROZEN_FROM_BASELINE marker 的双层表达；Implementation status 明确 T032 = capability-driven historical ingestion with A+B routing、preflight probe 持久化 per-endpoint capabilities 与 call/CU/time budget、One pool-filtered topic0 OR query 覆盖 Initialize/ModifyLiquidity/Swap/Donate/ProtocolFeeUpdated（topic1 固定为该 PoolKey 的 poolId）、Robinhood public RPC 作 initial wide-range log source 带 explicit non-secret application User-Agent、Alchemy Free 作 archive/block-pinned 与 sampled verification、Either endpoint may fail over only within measured capability and remaining budget、cold-start 从所选池 Initialize 块扫到 end、warm run 仅在已有 qualified checkpoint 时走 suffix-only ingestion、每个 distinct event block 取一条非水合 block header、不下载 hydrated blocks / 全部 transactions / 全部 receipts。Decision 4 合并：scanned_empty（RPC 成功且响应合法且日志数组为空 + 区间证据）/ failed（RPC/HTTP/超时/403/429/预算耗尽/响应无效/不可交叉验证）/ cancelled/skipped 三态边界 + reason code 枚举 + 不存在局部跳过后仍完整 + checkpoint 不得越过 failed/uncovered interval + 预算耗尽产生明确 reason code 并 complete=false。Must-not 段落补充 advanced split / range / response-size / timeout / throttling / single-block overflow 自适应切分硬约束。References 段落确保 ADR-002 / ADR-010 / ADR-011 均列出。然后由独立 Plan Reviewer 校验修改是否完整、一致、未削弱验收。"
+  }
+}
