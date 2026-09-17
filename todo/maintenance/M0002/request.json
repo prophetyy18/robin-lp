@@ -1,0 +1,20 @@
+{
+  "maintenance_id": "M0002",
+  "summary": "silence 5 mypy import-untyped + 3 reviewer residual-risk fixes (T033 hash bounds + T034 dead code/hygiene)",
+  "reason": "Five mypy 'missing library stubs or py.typed marker' warnings come from PEP 561 gap (src/robinhood_lp ships annotations but no py.typed). Project CI 'mypy src tests' default-severity does not fail; adding empty src/robinhood_lp/py.typed opts into PEP 561 without touching pyproject.toml. Bundled residual risks: (a) RawPartitionReader._check_bounds_against_file in src/robinhood_lp/storage/reader.py checks min/max block NUMBER only; manifest also carries min/max block HASH which must be checked (P04 entry condition for hash-drifted boundary blocks); (b) src/robinhood_lp/quality/sample_selection.py has _stable_pick_int dead code at line 238, RequiredSamples.window_count() off-by-2 vs docstring, four selection_inputs_dict() methods omitting manifest_checksum; (c) surfacing manifest_checksum closes the cross-stage contract between T034 sample_selection and T032 ingestion capability_snapshot. New file + 2 modified + matching tests/test_storage_reader.py.",
+  "allowed_paths": [
+    "src/robinhood_lp/py.typed",
+    "src/robinhood_lp/storage/reader.py",
+    "src/robinhood_lp/quality/sample_selection.py",
+    "tests/test_storage_reader.py"
+  ],
+  "verification_commands": [
+    "python -m mypy src/ tests/",
+    "python -m pytest tests/ -q --ignore=tests/test_workflow.py --ignore=tests/test_abi_artifacts.py --ignore=tests/test_workflow_contracts.py",
+    "python -m ruff format --check src/ tests/",
+    "python -m ruff check src/ tests/",
+    "git diff --check"
+  ],
+  "related_task": "T030",
+  "risk_attestation": "LOW_RISK_IMPLEMENTATION_DEFECT"
+}

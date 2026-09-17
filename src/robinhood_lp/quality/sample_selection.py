@@ -116,12 +116,14 @@ class PerRunSample:
     pool_manager_code_hash: str
     state_view_code_hash: str
     selection_inputs: Mapping[str, Any] = field(default_factory=dict)
+    manifest_checksum: str = ""
 
     def selection_inputs_dict(self) -> dict[str, Any]:
         return {
             "pool_id": self.pool_id.to_hex(),
             "fixed_block_number": self.fixed_block_number,
             "chain_id": self.chain_id,
+            "manifest_checksum": self.manifest_checksum,
         }
 
 
@@ -136,6 +138,7 @@ class PerPartitionSample:
     opening_window: tuple[int, int]
     trailing_window: tuple[int, int]
     selection_inputs: Mapping[str, Any] = field(default_factory=dict)
+    manifest_checksum: str = ""
 
     def selection_inputs_dict(self) -> dict[str, Any]:
         return {
@@ -143,6 +146,7 @@ class PerPartitionSample:
             "partition_id": self.partition_id,
             "start_block": self.start_block,
             "end_block": self.end_block,
+            "manifest_checksum": self.manifest_checksum,
         }
 
 
@@ -156,12 +160,14 @@ class PerEventTypeSample:
     smallest_event_key: EventKey
     window: tuple[int, int]
     selection_inputs: Mapping[str, Any] = field(default_factory=dict)
+    manifest_checksum: str = ""
 
     def selection_inputs_dict(self) -> dict[str, Any]:
         return {
             "pool_id": self.pool_id.to_hex(),
             "event_name": self.event_name,
             "smallest_event_key": _serialise_event_key(self.smallest_event_key),
+            "manifest_checksum": self.manifest_checksum,
         }
 
 
@@ -174,11 +180,13 @@ class PerFailoverSample:
     pre_window: tuple[int, int]
     post_window: tuple[int, int]
     selection_inputs: Mapping[str, Any] = field(default_factory=dict)
+    manifest_checksum: str = ""
 
     def selection_inputs_dict(self) -> dict[str, Any]:
         return {
             "pool_id": self.pool_id.to_hex(),
             "failover_at_block": self.failover_at_block,
+            "manifest_checksum": self.manifest_checksum,
         }
 
 
@@ -199,16 +207,20 @@ class RequiredSamples:
 
     def window_count(self) -> int:
         """Return the total number of distinct 10-block windows the
-        selection produced."""
-        count = 2  # opening + trailing of the per-run fixed block? No — per-run is chain-only.
-        # The per-run sample itself does not produce 10-block windows.
-        # Per-partition: 2 windows each.
-        count += 2 * len(self.per_partition)
-        # Per-event-type: 1 window each.
-        count += len(self.per_event_type)
-        # Per-failover: 2 windows each (pre + post), but mergeable.
-        count += 2 * len(self.per_failover)
-        return count
+        selection produced.
+
+        The per-run sample does not produce 10-block windows (it only
+        compares chain-level metadata at one fixed block). The total
+        is therefore the sum of:
+
+        - per-partition: 2 windows each (opening + trailing);
+        - per-event-type: 1 window each;
+        - per-failover: 2 windows each (pre + post, mergeable).
+
+        This matches the four selection categories that produce
+        A+B-comparable windows.
+        """
+        return 2 * len(self.per_partition) + len(self.per_event_type) + 2 * len(self.per_failover)
 
     def result_bearing_count(self) -> int:
         """Return the number of distinct result-bearing windows.
@@ -233,23 +245,6 @@ def _serialise_event_key(key: EventKey) -> dict[str, Any]:
         "tx_hash": key.transaction_ref().to_hash_hex(),
         "log_index": key.log_index,
     }
-
-
-def _stable_pick_int(*parts: str, lo: int, hi: int) -> int:
-    """Deterministically pick an integer in ``[lo, hi]`` from a hash
-    of the inputs.
-
-    Used as the fixed-block selector for the per-run sample. The
-    function is pure: it never reads from a random source or wall
-    clock.
-    """
-    if hi < lo:
-        raise ValueError(f"_stable_pick_int: hi ({hi}) < lo ({lo})")
-    payload = "|".join(parts).encode("utf-8")
-    digest = hashlib.sha256(payload).digest()
-    n = int.from_bytes(digest[:8], "big")
-    span = hi - lo + 1
-    return lo + (n % span)
 
 
 def select_per_run_sample(
@@ -291,6 +286,7 @@ def select_per_run_sample(
         pool_manager_code_hash="",
         state_view_code_hash="",
         selection_inputs=selection_inputs,
+        manifest_checksum=manifest_checksum,
     )
 
 
@@ -300,6 +296,7 @@ def select_per_partition_sample(
     partition_id: str,
     start_block: int,
     end_block: int,
+    manifest_checksum: str = "",
 ) -> PerPartitionSample:
     """Build a per-partition sample.
 
@@ -323,6 +320,7 @@ def select_per_partition_sample(
         "partition_id": partition_id,
         "start_block": start_block,
         "end_block": end_block,
+        "manifest_checksum": manifest_checksum,
     }
     return PerPartitionSample(
         pool_id=pool_id,
@@ -332,6 +330,7 @@ def select_per_partition_sample(
         opening_window=(start_block, opening_end),
         trailing_window=(trailing_start, end_block),
         selection_inputs=selection_inputs,
+        manifest_checksum=manifest_checksum,
     )
 
 
@@ -340,6 +339,7 @@ def select_per_event_type_sample(
     pool_id: PoolId,
     event_name: str,
     smallest_event_key: EventKey,
+    manifest_checksum: str = "",
 ) -> PerEventTypeSample:
     """Build a per-event-type sample.
 
@@ -351,6 +351,7 @@ def select_per_event_type_sample(
         "pool_id": pool_id.to_hex(),
         "event_name": event_name,
         "smallest_event_key": _serialise_event_key(smallest_event_key),
+        "manifest_checksum": manifest_checksum,
     }
     return PerEventTypeSample(
         pool_id=pool_id,
@@ -358,6 +359,7 @@ def select_per_event_type_sample(
         smallest_event_key=smallest_event_key,
         window=window,
         selection_inputs=selection_inputs,
+        manifest_checksum=manifest_checksum,
     )
 
 
@@ -365,6 +367,7 @@ def select_per_failover_sample(
     *,
     pool_id: PoolId,
     failover_at_block: int,
+    manifest_checksum: str = "",
 ) -> PerFailoverSample:
     """Build a per-failover sample.
 
@@ -390,6 +393,7 @@ def select_per_failover_sample(
     selection_inputs = {
         "pool_id": pool_id.to_hex(),
         "failover_at_block": failover_at_block,
+        "manifest_checksum": manifest_checksum,
     }
     return PerFailoverSample(
         pool_id=pool_id,
@@ -397,6 +401,7 @@ def select_per_failover_sample(
         pre_window=pre_window,
         post_window=post_window,
         selection_inputs=selection_inputs,
+        manifest_checksum=manifest_checksum,
     )
 
 
@@ -438,6 +443,7 @@ def select_required_samples(
             partition_id=pid,
             start_block=start,
             end_block=end,
+            manifest_checksum=manifest_checksum,
         )
         for (pid, start, end) in partitions
     )
@@ -448,13 +454,18 @@ def select_required_samples(
             pool_id=pool_id,
             event_name=event_name,
             smallest_event_key=key,
+            manifest_checksum=manifest_checksum,
         )
         if sample.window in seen_windows:
             continue
         seen_windows.add(sample.window)
         per_event_type_list.append(sample)
     per_failover = tuple(
-        select_per_failover_sample(pool_id=pool_id, failover_at_block=failover)
+        select_per_failover_sample(
+            pool_id=pool_id,
+            failover_at_block=failover,
+            manifest_checksum=manifest_checksum,
+        )
         for failover in failovers
     )
     return RequiredSamples(

@@ -1,0 +1,28 @@
+{
+  "task_id": "M0002",
+  "outcome": "CANDIDATE_READY",
+  "summary": "M0002 LOW_RISK maintenance repair verified. Manager had restored 4 allowed_paths changes to the worktree (no rediscovery or rewrite needed by Developer): (1) src/robinhood_lp/py.typed added (new, PEP 561 marker; sils the 5 mypy import-untyped warnings without touching pyproject.toml); (2) src/robinhood_lp/storage/reader.py - RawPartitionReader._check_bounds_against_file now also validates min/max block HASH against manifest (closes P04 entry condition for hash-drifted boundary blocks from T033 residual risk); (3) src/robinhood_lp/quality/sample_selection.py - removed dead _stable_pick_int, fixed RequiredSamples.window_count() off-by-2 vs docstring, added selection_inputs_dict(x).manifest_checksum surface for 4 selection entry points (closes T034 cross-stage contract with T032 ingestion capability_snapshot); (4) tests/test_storage_reader.py - added test_check_bounds_against_file_validates_block_hash. All 5 verification commands passed; no widening of scope, no edits outside allowed_paths, no commit.",
+  "commands": [
+    {
+      "command": "python -m mypy src/ tests/",
+      "result": "Success: no issues found in 91 source files"
+    },
+    {
+      "command": "python -m pytest tests/ -q --ignore=tests/test_workflow.py --ignore=tests/test_abi_artifacts.py --ignore=tests/test_workflow_contracts.py",
+      "result": "683 passed, 6 skipped (PYTHONPATH=src needed because robinhood_lp is not installed in the conda env; collection succeeded; no regression)"
+    },
+    {
+      "command": "python -m ruff format --check src/ tests/",
+      "result": "91 files already formatted"
+    },
+    {
+      "command": "python -m ruff check src/ tests/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "git diff --check",
+      "result": "(no output; no whitespace problems)"
+    }
+  ],
+  "residual_risks": []
+}

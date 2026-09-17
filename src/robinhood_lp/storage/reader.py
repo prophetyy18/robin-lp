@@ -221,6 +221,29 @@ class RawPartitionReader:
                 f"partition {partition_id}: max_block_number "
                 f"file={max_block} manifest={bounds.max_block_number}"
             )
+        # Hash-drift guard: the min/max block NUMBER is not enough to
+        # detect a re-org that kept the same height but swapped the
+        # block hash. The manifest row also records the block hash
+        # observed at write time; compare it to the row at the
+        # min/max block. The check is skipped when the manifest row
+        # carries no hash (forward-compat with older manifests).
+        min_idx = block_numbers.index(min_block)
+        max_idx = block_numbers.index(max_block)
+        block_hashes = table.column("block_hash").to_pylist()
+        min_hash = "0x" + bytes(block_hashes[min_idx]).hex()
+        max_hash = "0x" + bytes(block_hashes[max_idx]).hex()
+        manifest_min_hash = getattr(bounds, "min_block_hash", None)
+        manifest_max_hash = getattr(bounds, "max_block_hash", None)
+        if manifest_min_hash is not None and min_hash != manifest_min_hash:
+            raise BoundsMismatchError(
+                f"partition {partition_id}: min_block_hash "
+                f"file={min_hash} manifest={manifest_min_hash}"
+            )
+        if manifest_max_hash is not None and max_hash != manifest_max_hash:
+            raise BoundsMismatchError(
+                f"partition {partition_id}: max_block_hash "
+                f"file={max_hash} manifest={manifest_max_hash}"
+            )
 
     def _table_to_records(self, table: Any, event_name: str) -> list[Any]:
         """Decode a Parquet table into current-version dataclasses.

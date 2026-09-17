@@ -205,6 +205,59 @@ def test_reader_raises_on_bounds_mismatch(tmp_path: Path) -> None:
     manifest.close()
 
 
+def test_check_bounds_against_file_validates_block_hash(tmp_path: Path) -> None:
+    """The bounds check must guard against hash-drifted boundary
+    blocks: re-orgs that keep the same min/max block NUMBER but swap
+    the block HASH must still raise :class:`BoundsMismatchError`."""
+    manifest = ManifestStore(tmp_path / "manifest.sqlite")
+    writer = RawPartitionWriter(tmp_path, manifest)
+    records = [make_swap_record(block_number=10, log_index=0, block_hash=0xAA)]
+    writer.append_partition(
+        records,
+        chain_id=CHAIN,
+        contract_address=CONTRACT,
+    )
+    pk = PartitionKey(CHAIN, CONTRACT, "Swap", 0, 99)
+    manifest_path = tmp_path / "manifest.sqlite"
+    import sqlite3
+
+    # Sanity: with the manifest row unchanged the read succeeds.
+    reader = RawPartitionReader(tmp_path, manifest)
+    out = reader.read_partition(pk)
+    assert out.table.num_rows == 1
+
+    # Tamper the manifest row's min_block_hash. The block NUMBER is
+    # untouched, so only the hash check should catch the drift.
+    conn = sqlite3.connect(str(manifest_path))
+    conn.execute(
+        "UPDATE partition_block_bounds SET min_block_hash = ? WHERE partition_id = ?",
+        ("0x" + "FF" * 32, pk.partition_id()),
+    )
+    conn.commit()
+    conn.close()
+    # Reload manifest so the tampered row is picked up.
+    manifest.close()
+    manifest = ManifestStore(manifest_path)
+    reader = RawPartitionReader(tmp_path, manifest)
+    with pytest.raises(BoundsMismatchError, match="min_block_hash"):
+        reader.read_partition(pk)
+
+    # Restore the correct hash; the read must succeed again.
+    conn = sqlite3.connect(str(manifest_path))
+    conn.execute(
+        "UPDATE partition_block_bounds SET min_block_hash = ? WHERE partition_id = ?",
+        ("0x" + "00" * 31 + "aa", pk.partition_id()),
+    )
+    conn.commit()
+    conn.close()
+    manifest.close()
+    manifest = ManifestStore(manifest_path)
+    reader = RawPartitionReader(tmp_path, manifest)
+    out = reader.read_partition(pk)
+    assert out.qualified is True
+    manifest.close()
+
+
 def test_reader_raises_on_unqualified_partition(tmp_path: Path) -> None:
     manifest = ManifestStore(tmp_path / "manifest.sqlite")
     writer = RawPartitionWriter(tmp_path, manifest)
