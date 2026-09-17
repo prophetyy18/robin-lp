@@ -1,0 +1,116 @@
+{
+  "task_id": "T032",
+  "base_commit": "5b87abbab8b9f04e770a063bc26b9a34f18543b1",
+  "candidate_commit": "ced629644b64fce27dac9d49b49401380443ec74",
+  "verdict": "FAIL",
+  "checks": [
+    {
+      "id": "scope-diff",
+      "status": "PASS",
+      "evidence": [
+        "git diff --stat between 5b87abb and ced6296: src/ + tests/ scope changes only in src/robinhood_lp/ingestion/{__init__,capability,checkpoint,errors,planner,probe,router,runner}.py, src/robinhood_lp/storage/manifest.py, tests/_ingestion_t032_fixtures.py, tests/test_ingestion_{planner,router,runner}.py — 5910 LOC across the new T032 surface plus a deliberate MANIFEST_SCHEMA_VERSION bump 1→2 in storage/manifest.py for new tables",
+        "Todo scaffolding (config.yaml, T032.md attempt evidence, plan review, triage) and storage manifest extension are repo governance / data-plane work that the workflow expects in this task's diff"
+      ],
+      "finding": "Scope is appropriate: every src/tests change is the T032 ingestion surface or its direct dependency in the storage manifest. No unrelated files were modified."
+    },
+    {
+      "id": "tests",
+      "status": "PASS",
+      "evidence": [
+        "pytest tests/test_ingestion_planner.py tests/test_ingestion_router.py -q → 34 passed",
+        "pytest tests/test_ingestion_runner.py -v → 21 passed (all 7 contract fixtures plus kill/restart, overlapping-run convergence, every-block-covered, failed-intervals-halt, cold-start topology, warm-incremental topology, schema-mismatch rejection, cancellation, manifest metrics, provisional-suffix guard, preflight persistence)",
+        "pytest tests/ -q --ignore=tests/test_workflow.py --ignore=tests/test_abi_artifacts.py --ignore=tests/test_workflow_contracts.py → 539 passed, 6 skipped (Foundry + gpg env limits only; no FAILED)"
+      ],
+      "finding": "All T032 unit and runner integration tests pass under the project pytest config. No regressions in pre-existing test suites. Required fixtures (Alchemy 10-block cap, Robinhood wide-range + adaptive split, default-UA 403, configured-UA 403, response-size overflow, 429 rate limit, budget exhaustion, A→B failover without gap) all assert the contract's intended states."
+    },
+    {
+      "id": "ruff-format",
+      "status": "FAIL",
+      "evidence": [
+        "ruff format --check src/ tests/ reports 1 file would be reformatted: tests/test_ingestion_runner.py:311 — `def _overflow_step_factory(\\n    from_block: int, to_block: int, *, response_bytes: int\\n) -> Any:` should collapse to a single-line signature"
+      ],
+      "finding": "ruff format gate fails on a single helper function definition in the candidate's own test file. This is a tooling gate (project CI uses `ruff format --check`) and must be fixed before PASS."
+    },
+    {
+      "id": "ruff-check",
+      "status": "PASS",
+      "evidence": [
+        "ruff check src/ tests/ → All checks passed!"
+      ],
+      "finding": "ruff lint reports zero issues across the diff."
+    },
+    {
+      "id": "mypy",
+      "status": "PASS",
+      "evidence": [
+        "mypy src/ tests/ → Success: no issues found in 73 source files"
+      ],
+      "finding": "mypy is clean across the project, including the new ingestion modules and tests."
+    },
+    {
+      "id": "git-diff-check",
+      "status": "PASS",
+      "evidence": [
+        "git diff --check → no whitespace errors reported"
+      ],
+      "finding": "No trailing-whitespace, indent-with-tab, or trailing-space defects in the candidate's diff."
+    },
+    {
+      "id": "contract-clauses",
+      "status": "FAIL",
+      "evidence": [
+        "Outcome / capability-driven A+B routing: planner.py RangePlanner plan() + capability.py / probe.py persist per-endpoint capability + budget snapshot with explicit `remaining_budget_source` (operator_injection | operator_injection_unknown | provider_usage_api | provider_usage_api_unavailable) and clamps `operator_injection_unknown` to zero (capability.py:285-307) — outcome clause PASS",
+        "Range planner + durable checkpoint + retry ledger + run manifest + deterministic normalization pipeline: planner.py, checkpoint.py, runner.py, and storage/manifest.py add durable_checkpoints / run_manifests / run_intervals / retry_ledger / run_manifest_deviations tables with append-only retry ledger and capability-snapshot_id pins in the durable checkpoint — pipeline clause PASS",
+        "One pool-filtered topic0 OR query covering Initialize/ModifyLiquidity/Swap/Donate + inherited ProtocolFeeUpdated with topic1 = poolId: planner.py `_TOPIC0_NAMES` and `build_pool_topic_filter()` resolve the five topics from `robinhood_lp.protocol.abi_artifacts.EVENT_TOPICS` and pin topic1 to PoolId hex (planner.py:41-68) — clause PASS",
+        "Robinhood public RPC as initial wide-range source + Alchemy Free for archive + non-secret application User-Agent: router.py uses `ALIAS_ROBINHOOD_PUBLIC` primary and `ALIAS_ALCHEMY_FREE` failover with `_can_cover` enforcing Alchemy's 10-block cap (router.py:481-495); runner uses a `BlockHeaderCache` over `BlockHeaderSource` (one non-hydrated header per distinct event block) and never asks for hydrated/tx-list/receipts (runner.py:134-169) — clauses PASS",
+        "Cold start from pool's Initialize block, warm only on qualified checkpoint, suffix-only on warm: planner._plan_cold_start always sets coverage_from = pool_init_block regardless of requested_start (planner.py:288-314); planner._plan_warm sets coverage_from = cp.qualified_end_block + 1 after validating chain_id / contract / pool_id / pool_init_block / requested_start vs qualified prefix (planner.py:318-397) — clauses PASS",
+        "Kill/restart at each durable-commit boundary: SQLite transactions in storage/manifest.py make every per-row write atomic; one boundary test exists (`test_kill_restart_after_partial_run_resumes_from_durable_state`) but the contract enumerates four boundaries (mid-interval after RPC but before commit, mid-retry-ledger append, mid-manifest row, mid-block-header write) and only the mid-interval-after-success path is exercised — partial coverage",
+        "Every requested block covered exactly once: `test_every_requested_block_covered_exactly_once` builds a set of blocks from `result.interval_table` and asserts no double-cover and full coverage of the requested window — clause PASS",
+        "Failed intervals prevent completion with reason `budget_exhausted` and complete=False: `test_failed_intervals_prevent_completion`, `test_fixture_budget_exhaustion_records_complete_false`, `test_fixture_budget_exhaustion_marks_interval_as_failed_not_empty` all assert complete=False; umbrella `REASON_BUDGET_EXHAUSTED` constant exists and sub-tags cover calls/cu/time/response_quota — clause PASS",
+        "7 required fixtures: tests cover Alchemy 10-block cap (`test_fixture_alchemy_10_block_cap_records_capability_and_hard_cap`), Robinhood wide-range + adaptive split (`test_fixture_robinhood_wide_range_success_then_adaptive_split`, `test_fixture_response_size_overflow_triggers_adaptive_split`), default-UA 403 (`test_fixture_http_403_default_user_agent_blocks_completion`), configured-UA 403 (`test_fixture_http_403_configured_user_agent_rejected_persists`), response-size overflow (same adaptive split test), 429 (`test_fixture_rate_limit_handled_without_advancing_checkpoint`), budget exhaustion with complete=False (`test_fixture_budget_exhaustion_records_complete_false`), A→B failover without gap (`test_fixture_provider_failover_no_gap_in_coverage`) — all 7 PASS",
+        "Run manifest records logical RPC calls / HTTP requests / bytes / rows / provider units / elapsed / deviations: storage/manifest.py adds `run_manifests` columns for `logical_rpc_calls, http_requests, response_bytes, normalized_rows, provider_units, elapsed_ms, complete, halt_reason` and `run_manifest_deviations` table; runner writes per-interval metrics via `increment_run_metrics` (runner.py:654-663); deviation kinds DEVIATION_BUDGET_EXHAUSTED / DEVIATION_OBSERVED_CAP_BELOW_MEASURED / DEVIATION_ALCHEMY_10_BLOCK_CAP / DEVIATION_ROBINHOOD_UA_403 / DEVIATION_RESPONSE_SIZE_OVERFLOW / DEVIATION_RATE_LIMIT_RETRY / DEVIATION_PROVIDER_FAILOVER / DEVIATION_RETRY_BURST exist (errors.py:131-145) — clause PASS",
+        "Tests distinguish cold-start vs warm: `test_cold_start_topology_scans_from_pool_init_block` and `test_warm_incremental_topology_starts_after_checkpoint` exist — clause PASS",
+        "Reject checkpoint whose manifest / block hash / schema / decode / coverage prefix does not match requested pool and range: schema/decode versions ARE rejected in the runner (runner.py:261-280 → `checkpoint_schema_decode_drift` halt); coverage prefix IS rejected in the planner (`_validate_warm_checkpoint` checks requested_start vs qualified_start/end, planner.py:379-397). HOWEVER, manifest_checksum mismatch is NOT rejected — `test_checkpoint_rejection_on_mismatched_manifest_checksum` asserts `result.topology == TOPOLOGY_WARM_INCREMENTAL` (i.e. the run proceeds), and the test docstring explicitly states 'does not block the run — the planner-side gates are the primary validation surface'. AND there is NO code anywhere in src/ that re-fetches and compares `qualified_end_block_hash` against the requested pool — the stored block hash is read in runner.py:332 and used verbatim as `last_covered_hash`. The contract's 'block hash ... does not match the requested pool and range' clause is therefore not enforced"
+      ],
+      "finding": "Two contract clauses are not enforced: (1) the runner does not reject a warm run whose existing checkpoint's `manifest_checksum` differs from the requested pool (test asserts the run proceeds, contradicting the acceptance clause), and (2) there is no validation that the checkpoint's `qualified_end_block_hash` matches the requested pool's currently-canonical block hash (no re-fetch / compare code exists in src/). Schema/decode-version rejection and coverage-prefix rejection are present and correct."
+    },
+    {
+      "id": "must-not-clauses",
+      "status": "PASS",
+      "evidence": [
+        "No advance before durable commit: `upsert_durable_checkpoint` is only called after a successful or scanned_empty interval is recorded via `_record_interval` (runner.py:391-426) and the per-row writes use `with self.transaction()` in storage/manifest.py — must-not PASS",
+        "No infer empty from empty table: router surfaces scanned_empty only when `result.success` and `not result.rows` AND `result.pinned_block_hash` is non-None (router.py:436-451); `_record_interval` routes that state into the `run_intervals` table with `state='scanned_empty'` and the pinned block hash — must-not PASS",
+        "No continue past irreducible failed block: `for sub in plan.sub_ranges:` loop breaks on `decision.state in (STATE_FAILED, STATE_CANCELLED)` (runner.py:378-380) and `complete` is computed only when `halt_reason is None` and `last_covered_end >= plan.coverage_to_block` (runner.py:432-439) — must-not PASS",
+        "No one scan per event type: planner emits a single `[[topic0_initialize, topic0_modify, topic0_swap, topic0_donate, topic0_pfu], topic1_poolid]` filter via `build_pool_topic_filter()` and the runner uses that same filter across all intervals (planner.py:62-68, runner.py:334) — must-not PASS",
+        "No describe HTTP batches as fewer RPC calls: `CoverageDecision.logical_rpc_calls` and `http_requests` are tracked independently and the router sets `logical_rpc_calls=1` per `eth_getLogs` (router.py:419-421, 449-451, 459-461); the contract's batched-call accounting is honoured — must-not PASS",
+        "No hydrated blocks / all transactions / all receipts as part of ordinary pool-history ingestion: `BlockHeaderSource.get_header()` (runner.py:143) is the only header surface; no receipt / transaction-fetch code is added — must-not PASS",
+        "No partial-skip-then-complete: `covered_blocks_ok` and `empty_coverage_ok` both require `halt_reason is None` (runner.py:432-439) — must-not PASS",
+        "No cancelled/skipped recorded as empty: cancelled intervals record state='cancelled' and reason_code=REASON_CANCELLED_BY_OPERATOR (runner.py:338-358); `test_cancellation_marks_remaining_intervals_as_cancelled` asserts no scanned_empty — must-not PASS"
+      ],
+      "finding": "All eight contract must-not rules are honoured by the implementation."
+    },
+    {
+      "id": "scope-discipline-todo",
+      "status": "PASS",
+      "evidence": [
+        "Only the T032 ingestion package, its dedicated tests, and the directly-required durable-checkpoint / run-manifest tables in storage/manifest.py are touched by src/ + tests/. No signing, RPC adapter, schema, protocol identity, or unrelated module was modified.",
+        "MANIFEST_SCHEMA_VERSION bumped 1→2 to accommodate the new tables (storage/manifest.py:72); this is the natural location for a schema-version bump tied to the new ingestion manifest tables and the planner reads CURRENT_SCHEMA_VERSION / CURRENT_DECODE_VERSION from storage/schema.py, which were already at 2.",
+        "AGENTS.md / todo/ scaffolding changes are repo governance (config.yaml T032 entry, attempt evidence, plan review, triage) not implementation drift."
+      ],
+      "finding": "Implementation stays inside the T032 boundary. The storage manifest extension is the only out-of-package change and is the natural home for the new tables."
+    }
+  ],
+  "must_not_violations": [],
+  "unknowns": [],
+  "required_changes": [
+    "Reformat tests/test_ingestion_runner.py so `ruff format --check src/ tests/` passes (collapse the `def _overflow_step_factory(\\n    from_block: int, to_block: int, *, response_bytes: int\\n) -> Any:` signature to a single line per the formatter).",
+    "Add rejection on `manifest_checksum` mismatch in the warm-run path: today `test_checkpoint_rejection_on_mismatched_manifest_checksum` asserts the run proceeds (`result.topology == TOPOLOGY_WARM_INCREMENTAL`); the merged T032 contract requires the system to refuse to advance and refuse to set complete=true when the stored checkpoint's manifest / block hash / schema / decode / coverage prefix does not match the requested pool and range. Either make the planner or runner reject manifest_checksum mismatch and update the test, or escalate the contract gap via triage.",
+    "Add validation that the stored `qualified_end_block_hash` matches the requested pool's canonical block hash at the qualified_end_block height: today the runner copies the stored hash verbatim into `last_covered_hash` (runner.py:332, 397, 414-419) with no re-fetch / compare. The contract's 'block hash ... does not match the requested pool and range' clause requires a rejection path. Implement the re-fetch + comparison and a dedicated test that mutates the stored hash and asserts rejection, or escalate via triage."
+  ],
+  "residual_risks": [
+    "Ruff-format failure is a one-line formatting issue in the candidate's own test file; trivially fixable and not a substantive implementation defect.",
+    "The two contract gaps (manifest_checksum rejection, block_hash validation) are bounded to the warm-run path and do not block the cold-start path. They are observable as missing acceptance criteria against the merged T032.md contract but the implementation's behaviour is internally consistent and the supporting tests pass.",
+    "The kill/restart acceptance enumerates four durable-commit boundaries (mid-interval after RPC but before commit, mid-retry-ledger append, mid-manifest row, mid-block-header write); only the first boundary is exercised by `test_kill_restart_after_partial_run_resumes_from_durable_state`. The implementation's reliance on per-row SQLite transactions makes the others atomic by construction, but explicit boundary tests are absent.",
+    "test_abi_artifacts.py and test_workflow_contracts.py are excluded per the environment-limitation note; they do not affect this verdict."
+  ]
+}
