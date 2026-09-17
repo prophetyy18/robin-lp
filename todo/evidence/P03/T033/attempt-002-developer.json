@@ -1,0 +1,41 @@
+{
+  "task_id": "T033",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented T033 (handle confirmations and reorgs) as a new `robinhood_lp.storage.reorg` subpackage with four collaborating modules: `policy.py` (configurable finality policy pinned to the JSON-RPC `finalized` tag, reason-code vocabulary, `EXPERIMENTAL_NOT_LIVE_APPROVED` / `EXPERIMENTAL_CONFIRMATIONS_PLACEHOLDER` constants, `evaluate_finality_boundary`), `ancestor.py` (deterministic common-ancestor search, in-memory canonical chain view with append-only semantics, depth-bounded walk), `journal.py` (an append-only `ReorgJournal` wrapping the existing `ManifestStore` plus a strict append-only `CriticalIncidentRecorder` for `FINALIZED_ANCESTRY_VIOLATION` candidates, with a new `critical_incidents` SQLite table created lazily), and `handler.py` (the `ReorgHandler` that ties policy + journal + canonical view together to resolve shallow reorgs through orphan marking/replacement, halt on deep reorgs, escalate on `FINALIZED_ANCESTRY_VIOLATION` critical incidents, and expose the unfinalized hash window `[finalized + 1, latest]`). Reason codes emitted: `finalized_unavailable`, `finalized_ancestry_disagreement`, `finality_tag_unavailable`, `FINALIZED_ANCESTRY_VIOLATION`, plus the demotion reasons `shallow_reorg`, `deep_reorg`, `provider_disagreement`, `removed_log`, `orphan_reappearance`. Finalized raw evidence is never rewritten: the canonical chain view refuses in-place overwrites, the journal only appends, the `critical_incidents` table has no UPDATE/DELETE API, and the handler refuses to overwrite prior partition rows during a deep reorg or critical incident. Tests explicitly inject the finality policy via `_reorg_t033_fixtures.make_finality_policy` (no implicit production default). `confirmations = 12` is exposed only as `EXPERIMENTAL_CONFIRMATIONS_PLACEHOLDER` with the `EXPERIMENTAL_NOT_LIVE_APPROVED` flag constant; the `FinalityPolicy` constructor has no `confirmations` field. Coverage: 80 new tests in 4 test modules (`test_reorg_policy.py`, `test_reorg_ancestor.py`, `test_reorg_journal.py`, `test_reorg_handler.py`) covering explicit policy injection, fail-closed behaviour, provider disagreement, removed logs, orphan reappearance, shallow reorg demotion, deep-reorg halt with backtest/paper/live gate blocking, `FINALIZED_ANCESTRY_VIOLATION` critical incident detection + append-only recording + escalation, unfinalized hash window clamping, and finalized-data preservation across reorgs and critical incidents. All 80 new tests pass plus the 541 pre-existing tests in the run scope (621 total passed, 6 skipped for unrelated reasons — Foundry / gpg / vector reorder invariants — none introduced by T033). Verification commands (`pytest`, `ruff format`, `ruff check`, `mypy`, `git diff --check`) all green.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_reorg_policy.py tests/test_reorg_ancestor.py tests/test_reorg_journal.py tests/test_reorg_handler.py -q",
+      "result": "80 passed in 0.69s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ -q --ignore=tests/test_workflow.py --ignore=tests/test_abi_artifacts.py --ignore=tests/test_workflow_contracts.py",
+      "result": "621 passed, 6 skipped (Foundry / gpg / vector reorder invariants — pre-existing skips, not introduced by T033) in 2.94s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/ruff format src/ tests/",
+      "result": "83 files left unchanged"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/ruff check src/ tests/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/mypy src/ tests/",
+      "result": "Success: no issues found in 83 source files"
+    },
+    {
+      "command": "git diff --check",
+      "result": "(no output — no whitespace or CRLF issues)"
+    },
+    {
+      "command": "git status --porcelain",
+      "result": "M todo/config.yaml (workflow-controller-managed IN_DEVELOPMENT + attempt 2 transition); ?? src/robinhood_lp/storage/reorg/ + tests/_reorg_t033_fixtures.py + tests/test_reorg_{policy,ancestor,journal,handler}.py"
+    }
+  ],
+  "residual_risks": [
+    "The handler implements the canonical-chain-view in memory (rebuilt from partition bounds at startup); large partition counts on a single chain would grow memory. This is consistent with the contract's 'canonical views converge while audit history remains intact' outcome but a future P03 task may want to persist the view or chunk it.",
+    "The deep-reorg halt currently records one journal row for the canonical tip; the contract calls for halting with reason `deep_reorg` and preserving every prior raw partition, which the tests verify but which may need a richer 'halt set' representation when Phase 8 takes over.",
+    "The `critical_incidents` table is created lazily via `ReorgJournal.__init__`. A pre-existing T031 manifest opens cleanly (verified) but T033 does not bump `MANIFEST_SCHEMA_VERSION` to expose the new table to reader code outside the reorg module — that is intentional, since the new table is read-only via `CriticalIncidentRecorder.list()`.",
+    "Phase 8 incident handling is deliberately out of scope. The handler detects, halts, journals, and escalates; the human incident declaration, re-checking, and superseding-canonical-generation approval are owned by Phase 8 (per Must-not #7)."
+  ]
+}
