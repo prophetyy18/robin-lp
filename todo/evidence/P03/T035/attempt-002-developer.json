@@ -1,0 +1,39 @@
+{
+  "task_id": "T035",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Wired RpcBlockHeaderSource, BlockHeaderSink, and RawPartitionWriter into IngestionRunner so a real ingestion run actually calls eth_getBlockByNumber(hex(n), false) per distinct event block, persists the dedup'd block_headers manifest table, and flows successful eth_getLogs rows through the V4 decoder to Parquet partitions. Added an end-to-end fixture (tests/test_e2e_t035.py) that exercises the full RpcEndpointClient.call_get_logs -> RpcBlockHeaderSource.get_headers_batch -> RawPartitionWriter.append_partition -> ManifestStore.upsert_block_header path and asserts the FAIL-review acceptance clauses. The CLI entry point (__main__.py) now constructs RpcBlockHeaderSource + BlockHeaderSink from the same RpcAdapter and registers them with the runner via runner.register_header_source().",
+  "commands": [
+    {
+      "command": "python -m pytest tests/test_storage_block_headers.py tests/test_storage_partition_columns.py tests/test_ingestion_block_header_source.py tests/test_ingestion_endpoint_client.py tests/test_main_ingest.py tests/test_ingestion_runner.py tests/test_storage_writer.py tests/test_storage_manifest.py tests/test_e2e_t035.py tests/test_storage_reader.py tests/test_storage_schema.py tests/test_storage_partition.py tests/test_ingestion_router.py tests/test_ingestion_planner.py tests/test_storage_measurement.py --no-header -q",
+      "result": "271 passed in 2.11s"
+    },
+    {
+      "command": "python -m pytest tests/ --ignore=tests/test_abi_artifacts.py --no-header -q",
+      "result": "803 passed, 6 skipped in 5.07s (skips are environmental: forge-foundry / gpg / pre-existing python-invariant vector, identical to main)"
+    },
+    {
+      "command": "python -m pytest tests/test_e2e_t035.py -v --no-header -q",
+      "result": "3 passed in 0.30s (test_e2e_t035_full_real_mainnet_path_persists_events_with_header_evidence, test_e2e_t035_injected_header_fetch_failure_halts_run_non_complete, test_e2e_t035_deduped_headers_across_multiple_event_blocks)"
+    },
+    {
+      "command": "python -m ruff format --check src/ tests/test_e2e_t035.py",
+      "result": "55 files already formatted"
+    },
+    {
+      "command": "python -m ruff check src/ tests/test_e2e_t035.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python -m mypy --strict src/robinhood_lp",
+      "result": "Success: no issues found in 54 source files"
+    }
+  ],
+  "residual_risks": [
+    "The RpcBlockHeaderSource's batch retry path uses the adapter's per-call path for failed batches; the logical-call counter increments by len(batch) on success and by len(batch) again on the retry path, so a flaky batch can transiently surface more logical calls than the deduplicated distinct block count until the run reaches a steady state. The deduplication invariant is implemented and verified end-to-end on the success path via test_e2e_t035_deduped_headers_across_multiple_event_blocks; the retry path is not exercised end-to-end here but is unchanged from the prior implementation (see Developer evidence file for prior attempt).",
+    "The v3 schema bump (CURRENT_SCHEMA_VERSION=3, MANIFEST_SCHEMA_VERSION=3) is additive so existing v2 manifests open cleanly; legacy v1/v2 partitions persist as-is and migrate_to_current defaults block_timestamp=0 and parent_hash=0, which the consumer must treat as 'header not retained at decode time'. A future reader that does not distinguish 0-as-legacy from 0-as-current could silently treat a fresh ingestion with no header fetches as fully-qualified.",
+    "The default RpcAdapter transport does not override the application User-Agent (documented as a known gap the operator must configure at the deployment layer); an operator running ingest with the default transport against the Robinhood public RPC will receive HTTP 403 from urllib's default User-Agent. This is consistent with ADR-010/ADR-011 and pre-dates T035, but it is worth re-flagging for the production deployment.",
+    "The end-to-end fixture uses a single fake RpcAdapter shared by RpcEndpointClient and RpcBlockHeaderSource, so the transport distinguishes eth_getLogs (single-request) and eth_getBlockByNumber (batch) by payload shape. A real production run uses the same shared adapter for both methods; this is exercised by the end-to-end test but not by the original T035 review fixtures (test_ingestion_block_header_source.py covers the source in isolation, test_ingestion_endpoint_client.py covers the client in isolation).",
+    "tests/test_abi_artifacts.py is excluded from the pytest run because its oracle submodules live under tools/oracle/lib/ which is populated in /home/lpdev/lp/ but not in the worktree's tools/oracle/lib/. The test_abi_artifacts.py failure is environmental and present on /home/lpdev/lp/ as well; the v3 schema bump cannot be byte-confirmed against the pre-existing oracle here. The independent Reviewer should confirm the v3 bump is byte-stable by running the full suite on the approved candidate commit.",
+    "The dedup invariant 'logical-call count equals deduplicated distinct event block count' is asserted end-to-end via logical_get_block_by_number_calls==1 for the one-block case (test_e2e_t035_full_real_mainnet_path_persists_events_with_header_evidence) and logical_get_block_by_number_calls==2 for the two-distinct-block case (test_e2e_t035_deduped_headers_across_multiple_event_blocks). The batch retry path that can transiently surface more logical calls is exercised in isolation by tests/test_ingestion_block_header_source.py but not by the end-to-end fixture."
+  ]
+}

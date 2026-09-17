@@ -297,6 +297,26 @@ def _run_ingest(args: argparse.Namespace) -> int:
         runner.run_id = str(args.run_id)
     for alias, client in clients.items():
         runner.register_client(alias, client)
+    # T035 — wire the production RpcBlockHeaderSource + BlockHeaderSink
+    # so the runner populates the dedup'd ``block_headers`` manifest
+    # table and the canonical ``block_timestamp`` / ``parent_hash``
+    # columns on every persisted event. The header source uses the
+    # same adapter the EndpointClients use; the sink is keyed to the
+    # primary alias the capability snapshot declares.
+    from robinhood_lp.ingestion.block_header_source import (
+        BlockHeaderSink,
+        RpcBlockHeaderSource,
+    )
+    from robinhood_lp.ingestion.router import ALIAS_ROBINHOOD_PUBLIC as _PRIMARY
+
+    primary_alias = str(config.get("primary_header_alias", _PRIMARY))
+    header_source = RpcBlockHeaderSource(
+        adapter=adapter,
+        alias=primary_alias,
+        batch_size=int(config.get("header_batch_size", 16)),
+    )
+    header_sink = BlockHeaderSink(manifest=manifest, endpoint_alias=primary_alias)
+    runner.register_header_source(source=header_source, sink=header_sink)
     try:
         result = runner.run(
             requested_start_block=int(args.from_block),

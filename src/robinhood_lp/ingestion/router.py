@@ -91,6 +91,15 @@ class CoverageDecision:
     (``None`` when A succeeded outright). ``rows`` is the number of
     canonical events persisted. ``pinned_block_hash`` is the block
     hash pinned to the interval for ``scanned_empty`` evidence.
+
+    ``raw_rows`` is the raw ``eth_getLogs`` rows the winning endpoint
+    returned (T035). It is empty for every non-success state. The
+    runner feeds it through the block-header source, the decoder, and
+    the Parquet writer so the persisted events carry the
+    ``block_timestamp`` / ``parent_hash`` evidence the contract
+    requires. The field is intentionally immutable (``tuple`` of
+    ``dict``) so the router never shares mutable list state with the
+    runner.
     """
 
     state: str
@@ -103,6 +112,7 @@ class CoverageDecision:
     http_requests: int
     pinned_block_hash: str | None
     error_detail: str | None = None
+    raw_rows: tuple[dict[str, Any], ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +458,7 @@ class Router:
                     logical_rpc_calls=1,
                     http_requests=1,
                     pinned_block_hash=pinned,
+                    raw_rows=(),
                 )
             return CoverageDecision(
                 state=STATE_SUCCESSFUL,
@@ -459,6 +470,7 @@ class Router:
                 logical_rpc_calls=1,
                 http_requests=1,
                 pinned_block_hash=None,
+                raw_rows=tuple(dict(r) for r in result.rows),
             )
         # No endpoint could cover the interval.
         if last_error is None:

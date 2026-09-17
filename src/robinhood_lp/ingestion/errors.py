@@ -56,6 +56,13 @@ REASON_BUDGET_EXHAUSTED_RESPONSE_QUOTA: Final[str] = "budget_exhausted_response_
 REASON_NO_CAPABLE_ENDPOINT: Final[str] = "no_capable_endpoint"
 REASON_FORK_MISMATCH: Final[str] = "fork_mismatch"
 REASON_INTERNAL: Final[str] = "internal_error"
+# T035 — header fetch failure surfaced by the runner when
+# ``RpcBlockHeaderSource.get_headers_batch`` returns ``None`` for
+# a distinct event block the ingestion cannot proceed without.
+# Per ADR-012 the missing-header path halts the interval with
+# ``complete=False`` rather than zero-defaulting the
+# ``block_timestamp`` / ``parent_hash`` fields.
+REASON_HEADER_FETCH_FAILED: Final[str] = "header_fetch_failed"
 
 # The umbrella budget_exhausted reason code that the manifest records
 # at the run level when the qualification halt is triggered by budget
@@ -88,6 +95,7 @@ ALL_REASON_CODES: Final[frozenset[str]] = frozenset(
         REASON_NO_CAPABLE_ENDPOINT,
         REASON_FORK_MISMATCH,
         REASON_INTERNAL,
+        REASON_HEADER_FETCH_FAILED,
         REASON_BUDGET_EXHAUSTED,
         REASON_CANCELLED_BY_OPERATOR,
         REASON_SKIPPED_NOT_REQUIRED,
@@ -216,6 +224,7 @@ __all__ = [
     "REASON_CANCELLED_BY_OPERATOR",
     "REASON_EMPTY_RESPONSE",
     "REASON_FORK_MISMATCH",
+    "REASON_HEADER_FETCH_FAILED",
     "REASON_HTTP_403_DEFAULT_USER_AGENT",
     "REASON_HTTP_403_USER_AGENT_REJECTED",
     "REASON_HTTP_429_RATE_LIMIT",

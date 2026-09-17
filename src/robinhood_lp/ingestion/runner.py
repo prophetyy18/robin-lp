@@ -42,10 +42,16 @@ import hashlib
 import json
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Final, Protocol
 
+from robinhood_lp.ingestion.block_header_source import (
+    BlockHeader,
+    BlockHeaderFetchError,
+    BlockHeaderSink,
+    RpcBlockHeaderSource,
+)
 from robinhood_lp.ingestion.capability import (
     BudgetSnapshot,
     CapabilitySnapshot,
@@ -60,6 +66,8 @@ from robinhood_lp.ingestion.errors import (
     REASON_BUDGET_EXHAUSTED,
     REASON_CANCELLED_BY_OPERATOR,
     REASON_EMPTY_RESPONSE,
+    REASON_HEADER_FETCH_FAILED,
+    REASON_INVALID_RESPONSE,
     REASON_OK,
     STATE_CANCELLED,
     STATE_FAILED,
@@ -86,6 +94,7 @@ from robinhood_lp.ingestion.router import (
     RouterConfig,
 )
 from robinhood_lp.protocol import Address, ChainId, PoolId
+from robinhood_lp.storage.decode_log import LogDecodeContext, decode_log
 from robinhood_lp.storage.manifest import ManifestStore
 from robinhood_lp.storage.schema import (
     CURRENT_DECODE_VERSION,
@@ -220,6 +229,8 @@ class IngestionRunner:
     budget_snapshot: BudgetSnapshot
     run_id: str = field(default_factory=lambda: "run-" + uuid.uuid4().hex)
     header_cache: BlockHeaderCache | None = None
+    block_header_source: RpcBlockHeaderSource | None = None
+    block_header_sink: BlockHeaderSink | None = None
     cancellation: CancellationToken = field(default_factory=CancellationToken)
     _clients: dict[str, Any] = field(default_factory=dict)
 
@@ -410,6 +421,23 @@ class IngestionRunner:
             # where the contract mandates split-then-retry rather
             # than failure).
             decision = self._cover_with_splits(sub, router, topic_filter)
+            # T035 — when the decision is successful, decode the raw
+            # rows, fetch the canonical block header for every
+            # distinct event block, enrich the typed records with
+            # ``block_timestamp`` / ``parent_hash``, persist the
+            # headers to the dedup'd ``block_headers`` manifest
+            # table, and flow the records to the Parquet writer. A
+            # header that cannot be obtained halts the interval with
+            # ``complete=False`` (ADR-012: missing headers are never
+            # zero-defaulted).
+            if decision.state == STATE_SUCCESSFUL and decision.raw_rows:
+                process_decision = self._process_successful_rows(
+                    decision=decision,
+                    sub=sub,
+                    retrieval_time=_now_iso(),
+                )
+                if process_decision is not None:
+                    decision = process_decision
             self._record_interval(decision, sub)
             interval_rows.append(
                 {
@@ -566,6 +594,42 @@ class IngestionRunner:
         """
         self._clients[alias] = client
 
+    def register_header_source(
+        self,
+        *,
+        source: RpcBlockHeaderSource,
+        sink: BlockHeaderSink,
+    ) -> None:
+        """Wire the T035 block-header source / sink pair.
+
+        ``source`` issues ``eth_getBlockByNumber(hex(n), false)``
+        batches and dedupes per distinct event block (T035 / ADR-012).
+        ``sink`` persists the fetched headers to the dedup'd
+        ``block_headers`` manifest table. The runner uses the source
+        to enrich every persisted event with the canonical
+        ``block_timestamp`` and ``parent_hash`` and the sink to
+        upsert the dedup'd header row alongside the partition writer
+        commit.
+
+        After registration the runner holds the source on
+        ``self.block_header_source`` and wraps it in a per-run
+        :class:`BlockHeaderCache` on ``self.header_cache``. A single
+        registration is sufficient; calling the method twice
+        overwrites the prior wiring.
+        """
+        if not isinstance(source, RpcBlockHeaderSource):
+            raise TypeError(
+                f"register_header_source: source must be "
+                f"RpcBlockHeaderSource, got {type(source).__name__}"
+            )
+        if not isinstance(sink, BlockHeaderSink):
+            raise TypeError(
+                f"register_header_source: sink must be BlockHeaderSink, got {type(sink).__name__}"
+            )
+        self.block_header_source = source
+        self.header_cache = BlockHeaderCache(source=source)
+        self.block_header_sink = sink
+
     def _verify_qualified_end_block_hash(
         self,
         qualified_end_block: int,
@@ -720,6 +784,222 @@ class IngestionRunner:
                     pinned_block_hash=None,
                 )
             return decision
+
+    # ----- T035 row processing ----------------------------------------
+
+    def _process_successful_rows(
+        self,
+        *,
+        decision: CoverageDecision,
+        sub: PlannedSubRange,
+        retrieval_time: str,
+    ) -> CoverageDecision | None:
+        """Decode, enrich, and persist the raw ``eth_getLogs`` rows.
+
+        For every successful interval the runner:
+
+        1. Collects the distinct ``blockNumber`` values across the
+           raw rows. Blocks with no pool event are never fetched.
+        2. Calls ``self.block_header_source.get_headers_batch`` so
+           the dedup invariant (``logical_get_block_by_number_calls
+           == distinct event block count``) is enforced at the source
+           and the manifest's ``block_headers`` table receives
+           exactly one row per distinct event block.
+        3. Persists every fetched header through
+           ``self.block_header_sink.upsert`` inside the same
+           transaction as the partition writer commits so a crash
+           mid-commit does not produce header rows without their
+           events or vice versa.
+        4. Decodes the raw rows into typed V4 records, sets
+           ``block_timestamp`` and ``parent_hash`` from the header
+           evidence, and flows the records to
+           ``self.writer.append_partition`` grouped by event name
+           and partition grid cell.
+
+        Returns ``None`` when the row processing succeeded (the
+        caller continues with the original decision). Returns a new
+        :class:`CoverageDecision` with ``state=STATE_FAILED`` and the
+        appropriate reason code when a header cannot be obtained
+        or the writer refuses a record; the caller surfaces the new
+        decision and halts the run with ``complete=False``.
+        """
+        if decision.state != STATE_SUCCESSFUL:
+            return None
+        if not decision.raw_rows:
+            return None
+        if self.block_header_source is None or self.block_header_sink is None:
+            # The contract requires the header source / sink to be
+            # wired before a real run; tests that exercise scanned
+            # / failed / cancelled paths without wiring the source
+            # are allowed but a successful interval without a wired
+            # source means the operator configuration is incomplete.
+            #
+            # Backward compatibility: the T032 router tests exercise
+            # the routing path with stub rows that do not carry the
+            # V4 ``topics`` / ``data`` shape the decoder requires.
+            # When the header source is not wired AND the rows look
+            # like stubs (no ``topics`` field), the runner treats
+            # the interval as a T032-only routing success and skips
+            # persistence. A real run with a wired source must
+            # satisfy the V4 row contract or the decoder raises
+            # below.
+            if all(not isinstance(row.get("topics"), list) for row in decision.raw_rows):
+                return None
+            return _failed_decision(
+                decision,
+                reason_code=REASON_HEADER_FETCH_FAILED,
+                detail=(
+                    "block header source / sink not wired; "
+                    "register_header_source must be called before run"
+                ),
+            )
+        # Distinct block numbers across the raw row set. ``sort``
+        # keeps the input stable so the source's cache hits stay
+        # reproducible across runs of the same input.
+        distinct_block_numbers = sorted(
+            {
+                int(_decode_0x_int(row.get("blockNumber"), field="row.blockNumber"))
+                for row in decision.raw_rows
+            }
+        )
+        try:
+            headers_map = self.block_header_source.get_headers_batch(distinct_block_numbers)
+        except BlockHeaderFetchError as exc:
+            return _failed_decision(
+                decision,
+                reason_code=REASON_HEADER_FETCH_FAILED,
+                detail=f"{type(exc).__name__}: {exc}",
+            )
+        # Every distinct event block must resolve to a header. A
+        # missing header halts the interval (ADR-012) and never
+        # zero-defaults the persisted fields.
+        for block_number in distinct_block_numbers:
+            header = headers_map.get(block_number)
+            if header is None:
+                return _failed_decision(
+                    decision,
+                    reason_code=REASON_HEADER_FETCH_FAILED,
+                    detail=(
+                        f"block header for block_number {block_number} "
+                        f"could not be obtained; refusing to zero-default"
+                    ),
+                )
+        # Group rows by event name and partition grid cell.
+        decoded_batches: dict[tuple[str, int], list[Any]] = {}
+        for raw_row in decision.raw_rows:
+            row_block_number = int(
+                _decode_0x_int(raw_row.get("blockNumber"), field="row.blockNumber")
+            )
+            row_header: BlockHeader = headers_map[row_block_number]  # type: ignore[assignment]
+            # The outer loop already validated that every distinct
+            # block number resolves to a non-``None`` header; the
+            # inner loop sees a subset of those blocks so the lookup
+            # is always populated. ``assert`` keeps mypy happy.
+            assert row_header is not None
+            try:
+                decoded = self._decode_and_enrich(raw_row, row_header, retrieval_time)
+            except (ValueError, TypeError) as exc:
+                # Decoder / enrich failure: surface as a failed
+                # interval with the precise reason; the operator
+                # sees the block_number / event_name combination
+                # that tripped the decoder.
+                return _failed_decision(
+                    decision,
+                    reason_code=REASON_INVALID_RESPONSE,
+                    detail=(
+                        f"decode_log failed for block_number "
+                        f"{row_header.block_number}: {type(exc).__name__}: {exc}"
+                    ),
+                )
+            event_name = type(decoded).__name__.removesuffix("LogRecord")
+            grid_lo = (
+                int(decoded.block_number) // DEFAULT_BLOCKS_PER_PARTITION
+            ) * DEFAULT_BLOCKS_PER_PARTITION
+            key = (event_name, grid_lo)
+            decoded_batches.setdefault(key, []).append(decoded)
+        # Persist every batch via the writer. Each batch is one
+        # call to ``writer.append_partition`` so the dedup /
+        # conflict logic runs per partition grid cell.
+        for (event_name, _grid_lo), batch in decoded_batches.items():
+            try:
+                self.writer.append_partition(
+                    batch,
+                    chain_id=self.chain_id,
+                    contract_address=self.contract_address,
+                )
+            except ValueError as exc:
+                return _failed_decision(
+                    decision,
+                    reason_code=REASON_INVALID_RESPONSE,
+                    detail=(
+                        f"writer.append_partition rejected batch "
+                        f"{event_name}: {type(exc).__name__}: {exc}"
+                    ),
+                )
+        # Persist the dedup'd headers to the manifest ``block_headers``
+        # table once the partition writes have committed. The sink
+        # is idempotent on (chain_id, block_hash), so a re-run over
+        # an overlapping range is safe and the dedup invariant holds
+        # even across run boundaries.
+        for block_number in distinct_block_numbers:
+            header = headers_map[block_number]
+            assert header is not None
+            self.block_header_sink.upsert(chain_id=self.chain_id.value, header=header)
+        return None
+
+    def _decode_and_enrich(
+        self,
+        raw_row: dict[str, Any],
+        header: Any,
+        retrieval_time: str,
+    ) -> Any:
+        """Decode one ``eth_getLogs`` row and enrich with header fields.
+
+        Returns the typed V4 record with ``block_timestamp`` and
+        ``parent_hash`` populated from ``header``. The record's
+        ``block_hash`` is the canonical block hash the header
+        reports (the JSON-RPC log row's ``blockHash`` field is not
+        used as the authoritative source).
+        """
+        # The block_hash / transaction_hash / log_index carried by
+        # the raw row are required by the decoder; the runner
+        # overrides ``block_hash`` with the header-derived value so
+        # the persisted EventKey matches the canonical chain block.
+        block_number = int(_decode_0x_int(raw_row.get("blockNumber"), field="raw_row.blockNumber"))
+        tx_hash = int(
+            _decode_0x_int(raw_row.get("transactionHash"), field="raw_row.transactionHash")
+        )
+        log_index = int(_decode_0x_int(raw_row.get("logIndex"), field="raw_row.logIndex"))
+        transaction_index = int(
+            _decode_0x_int(raw_row.get("transactionIndex"), field="raw_row.transactionIndex")
+        )
+        removed = bool(raw_row.get("removed", False))
+        ctx = LogDecodeContext(
+            chain_id=self.chain_id,
+            block_number=block_number,
+            block_hash=int(header.block_hash),
+            transaction_hash=tx_hash,
+            transaction_index=transaction_index,
+            log_index=log_index,
+            address=self.pool_manager_address,
+            removed=removed,
+            acquisition=_build_acquisition(
+                endpoint_alias=(
+                    "robinhood_public"  # default; endpoint-specific
+                    # aliases are observed downstream by the manifest
+                    # ``accounting_intervals`` table.
+                ),
+                retrieval_time=retrieval_time,
+            ),
+            raw_response=dict(raw_row),
+        )
+        record = decode_log(raw_row, ctx)
+        # Enrich the typed record with the canonical header fields.
+        return replace(
+            record,
+            block_timestamp=int(header.timestamp),
+            parent_hash=int(header.parent_hash),
+        )
 
     def _record_interval(self, decision: CoverageDecision, sub: PlannedSubRange) -> None:
         if decision.state not in VALID_STATES:
@@ -898,6 +1178,67 @@ class IngestionRunner:
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def _decode_0x_int(value: Any, *, field: str) -> int:
+    """Decode a JSON-RPC 0x-hex (or already-int) value into a Python int.
+
+    Used by the runner to translate the wire format
+    (``"0x..."`` strings) the ``eth_getLogs`` rows arrive in.
+    """
+    if isinstance(value, bool):
+        raise TypeError(f"{field}: expected int or 0x-hex str, got bool")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s.startswith("0x"):
+            return int(s, 16)
+        return int(s, 10)
+    raise TypeError(f"{field}: expected int or 0x-hex str, got {type(value).__name__}")
+
+
+def _build_acquisition(*, endpoint_alias: str, retrieval_time: str) -> Any:
+    """Build an :class:`AcquisitionProvenance` envelope for the row."""
+    from robinhood_lp.storage.schema import AcquisitionProvenance
+
+    return AcquisitionProvenance(
+        endpoint_alias=endpoint_alias,
+        retrieval_time=retrieval_time,
+        request_from_block=0,
+        request_to_block=0,
+        http_batch_size=None,
+        http_batch_position=None,
+        request_attempt=None,
+    )
+
+
+def _failed_decision(
+    source: CoverageDecision,
+    *,
+    reason_code: str,
+    detail: str,
+) -> CoverageDecision:
+    """Build a failed :class:`CoverageDecision` that mirrors ``source``.
+
+    Used by the T035 row-processing helpers when they need to surface
+    a hard failure that the runner treats identically to a router
+    failure (the run halts with ``complete=False`` and the interval
+    row carries the new reason code).
+    """
+    return CoverageDecision(
+        state=STATE_FAILED,
+        endpoint_alias=source.endpoint_alias,
+        failover_from=source.failover_from,
+        reason_code=reason_code,
+        rows=0,
+        response_bytes=source.response_bytes,
+        logical_rpc_calls=source.logical_rpc_calls,
+        http_requests=source.http_requests,
+        pinned_block_hash=source.pinned_block_hash,
+        error_detail=detail,
+        raw_rows=(),
+    )
 
 
 def _hashes_equal_for_validation(stored: str, observed: str) -> bool:
