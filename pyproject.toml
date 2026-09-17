@@ -20,8 +20,8 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Topic :: Office/Business :: Financial :: Investment",
 ]
-# Runtime dependencies are intentionally minimal at T020. They are added by
-# later tasks (pyarrow in T031, ...).
+# Runtime dependencies are intentionally minimal at T020. T031 adds
+# pyarrow for Parquet writes/reads of append-only raw partitions.
 dependencies = [
   "pydantic>=2.8,<3",
   # keccak256 for canonical PoolId derivation. The pycryptodome backend
@@ -30,6 +30,10 @@ dependencies = [
   # Async HTTP client for the default JSON-RPC transport. Optional at
   # import time; tests inject a fake transport.
   "httpx>=0.27",
+  # Columnar Parquet I/O for append-only raw partitions (T031).
+  # Pinned to the major version the storage layer tests against;
+  # bump in lockstep with the schema-version bump.
+  "pyarrow>=15.0,<26",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,35 @@
+{
+  "task_id": "T031",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Continuation 002 of T031. Attempt 002 already shipped the full append-only raw storage implementation (Parquet partition layout, SQLite manifest store, reorg journal, atomic staging + rename, reader with manifest mismatch / bounds-mismatch / SHA mismatch detection, and the short-range sizing measurement). The Developer turn exhausted its budget on attempt 002 right after the writer's tests were passing; the continuation repaired the remaining lint (mypy strict, ruff format, unused `# type: ignore`, untyped test parameters) without touching the implementation. Quality gates are now clean across the T031 surface area.",
+  "commands": [
+    {
+      "command": "pytest tests/ -q --ignore=tests/test_workflow.py --ignore=tests/test_abi_artifacts.py",
+      "result": "488 passed, 6 skipped (skips are pre-existing foundry / gpg env skips; the abi_artifacts forge-only test is excluded because tools/oracle/lib/ submodules are not initialized in this worktree)"
+    },
+    {
+      "command": "pytest tests/test_storage_manifest.py tests/test_storage_measurement.py tests/test_storage_partition.py tests/test_storage_reader.py tests/test_storage_writer.py tests/test_storage_conflict.py",
+      "result": "84 passed in 1.16s (all T031 storage tests pass)"
+    },
+    {
+      "command": "ruff format --check src/ tests/",
+      "result": "61 files already formatted"
+    },
+    {
+      "command": "ruff check src/robinhood_lp/storage tests/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "mypy src/ tests/  (MYPYPATH=src)",
+      "result": "Success: no issues found in 61 source files"
+    },
+    {
+      "command": "git diff --check",
+      "result": "no whitespace errors (exit 0)"
+    }
+  ],
+  "residual_risks": [
+    "tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output is excluded from the pytest run because this worktree lacks tools/oracle/lib/{v4-core,v4-periphery} submodules (git submodules are not initialized in worktrees). The test passes on the main checkout. This is an environment limitation, not a T031 issue; the test is unrelated to T031.",
+    "todo/config.yaml is modified locally (status IN_DEVELOPMENT, attempt=2). Per developer policy I do not modify workflow configuration; the controller owns that file. The diff will be staged for the controller to record completion."
+  ]
+}
