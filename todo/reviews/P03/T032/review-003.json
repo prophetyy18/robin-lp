@@ -1,0 +1,129 @@
+{
+  "task_id": "T032",
+  "base_commit": "5b87abbab8b9f04e770a063bc26b9a34f18543b1",
+  "candidate_commit": "509cc33ef0066d2d0438e2678da61e2af4e74d53",
+  "verdict": "PASS",
+  "checks": [
+    {
+      "id": "scope-diff",
+      "status": "PASS",
+      "evidence": [
+        "git diff 5b87abb 509cc33 --stat: src/ + tests/ changes only in src/robinhood_lp/ingestion/{__init__,capability,checkpoint,errors,planner,probe,router,runner}.py, src/robinhood_lp/storage/manifest.py, tests/_ingestion_t032_fixtures.py, tests/test_ingestion_{planner,router,runner}.py — 6931 LOC for the new T032 surface and a deliberate MANIFEST_SCHEMA_VERSION bump 1->2 in storage/manifest.py for the new tables",
+        "Todo scaffolding (config.yaml attempt=3 bump, attempt-003-developer.json evidence, review-002.md/.json) is workflow governance, not implementation drift; T032.md is unchanged in this attempt",
+        "No signing, RPC adapter, schema, protocol identity, or unrelated module was modified"
+      ],
+      "finding": "Scope is appropriate: every src/tests change is the T032 ingestion surface or its direct dependency in the storage manifest. No unrelated files were modified."
+    },
+    {
+      "id": "ruff-format",
+      "status": "PASS",
+      "evidence": [
+        "ruff format --check src/ tests/ reports: 73 files already formatted",
+        "The previously flagged tests/test_ingestion_runner.py:311 `_overflow_step_factory` signature was collapsed to a single line (attempt-3 diff:tests/test_ingestion_runner.py:311) and no other file requires reformatting"
+      ],
+      "finding": "ruff format gate is clean. The attempt-2 format failure has been fixed."
+    },
+    {
+      "id": "manifest-checksum-rejection",
+      "status": "PASS",
+      "evidence": [
+        "RangePlannerInputs gains an `expected_manifest_checksum: str | None` field (src/robinhood_lp/ingestion/planner.py:235) with a __post_init__ guard that raises ValueError when an existing_checkpoint is supplied without expected_manifest_checksum (planner.py:249-253)",
+        "RangePlanner._validate_warm_checkpoint now compares the stored cp.manifest_checksum against inputs.expected_manifest_checksum via _manifest_checksums_equal and raises CheckpointMismatchError on mismatch (planner.py:390-412); the comparator normalises 0x prefix and case (planner.py:452-468)",
+        "IngestionRunner.run computes the expected checksum from the current capability/budget snapshots via _stable_checksum(self.capability_snapshot.snapshot_id, self.budget_snapshot.to_json()) (runner.py:302-311) and passes it into RangePlannerInputs; a CheckpointMismatchError from planner.plan is caught and the runner halts with halt_reason='checkpoint_manifest_drift', complete=False, and no advance (runner.py:312-338)",
+        "tests/test_ingestion_runner.py::test_checkpoint_rejection_on_mismatched_manifest_checksum now seeds a stale stored manifest_checksum ('0x'+'00'*32) under matching schema/decode/block-hash and asserts complete is False, halt_reason == 'checkpoint_manifest_drift', interval_count == 0, qualified_end_block is None — test PASSES"
+      ],
+      "finding": "The planner accepts expected_manifest_checksum and raises CheckpointMismatchError on mismatch; the runner catches that error and halts with checkpoint_manifest_drift. The dedicated rejection test asserts the rejection path (not the previous 'run proceeds' assertion)."
+    },
+    {
+      "id": "block-hash-validation",
+      "status": "PASS",
+      "evidence": [
+        "IngestionRunner._verify_qualified_end_block_hash(qualified_end_block, stored_hash) queries every registered client via client.get_block_hash_for_pin(block_number), accepts the first non-None response, and returns None on equality or 'checkpoint_block_hash_drift' on disagreement; no registered clients surfaces 'checkpoint_block_hash_unverified' rather than silently trusting the stored hash (src/robinhood_lp/ingestion/runner.py:569-609)",
+        "_hashes_equal_for_validation normalises 0x prefix and case so casing differences do not produce false drift (runner.py:903-913)",
+        "IngestionRunner.run calls _verify_qualified_end_block_hash after the schema/decode check (runner.py:281-301); on a halt reason it returns the halt path before any planner invocation",
+        "tests/test_ingestion_runner.py::test_checkpoint_rejection_on_mismatched_qualified_end_block_hash wires a stored hash of '0x'+'ab'*32 and a scripted canonical hash of '0x'+'cd'*32 and asserts complete is False, halt_reason == 'checkpoint_block_hash_drift', interval_count == 0 — test PASSES",
+        "tests/test_ingestion_runner.py::test_checkpoint_accepts_when_qualified_end_block_hash_matches wires the same stored/canonical hash and asserts complete is True, topology == TOPOLOGY_WARM_INCREMENTAL, halt_reason is None — test PASSES",
+        "ScriptedEndpointClient.block_hash_overrides is the deterministic hook the new validation surface reads (tests/_ingestion_t032_fixtures.py:196-204, 237-238); tests that exercise the warm-run path are wired with the matching deterministic value so the validation surface accepts the cold-start-written checkpoint"
+      ],
+      "finding": "The runner re-fetches the canonical block hash at qualified_end_block from the registered endpoints and rejects the run when the stored hash disagrees. Both mismatch-rejection and match-acceptance tests pass."
+    },
+    {
+      "id": "tests",
+      "status": "PASS",
+      "evidence": [
+        "pytest tests/test_ingestion_runner.py -v -> 23 passed (includes the three required-change tests: test_checkpoint_rejection_on_mismatched_manifest_checksum, test_checkpoint_rejection_on_mismatched_qualified_end_block_hash, test_checkpoint_accepts_when_qualified_end_block_hash_matches)",
+        "pytest tests/test_ingestion_planner.py -v -> 19 passed",
+        "pytest tests/test_ingestion_router.py -v -> 15 passed",
+        "pytest tests/ -q --ignore=tests/test_workflow.py --ignore=tests/test_abi_artifacts.py --ignore=tests/test_workflow_contracts.py -> 541 passed, 6 skipped (Foundry + gpg env limits only; no FAILED)",
+        "All attempt-2 tests remain in the suite and continue to pass; no regressions introduced"
+      ],
+      "finding": "Full test suite is green. The two new tests for the qualified_end_block_hash validation are added and pass; the existing manifest_checksum test was rewritten to assert the rejection path and passes."
+    },
+    {
+      "id": "ruff-check",
+      "status": "PASS",
+      "evidence": [
+        "ruff check src/ tests/ -> All checks passed!"
+      ],
+      "finding": "ruff lint reports zero issues across the project."
+    },
+    {
+      "id": "mypy",
+      "status": "PASS",
+      "evidence": [
+        "mypy src/ tests/ -> Success: no issues found in 73 source files"
+      ],
+      "finding": "mypy is clean across the project, including the new _verify_qualified_end_block_hash helper, the _stable_checksum/_hashes_equal_for_validation helpers, and the updated RangePlannerInputs dataclass."
+    },
+    {
+      "id": "git-diff-check",
+      "status": "PASS",
+      "evidence": [
+        "git diff --check 5b87abb 509cc33 -> no whitespace errors reported"
+      ],
+      "finding": "No trailing-whitespace, indent-with-tab, or trailing-space defects in the candidate's diff."
+    },
+    {
+      "id": "contract-clauses",
+      "status": "PASS",
+      "evidence": [
+        "Checkpoint rejection on manifest mismatch (attempt-2 required_change 2): planner._validate_warm_checkpoint raises CheckpointMismatchError when stored manifest_checksum != expected_manifest_checksum (planner.py:406-412); runner halts with 'checkpoint_manifest_drift' (runner.py:329-338); the dedicated test asserts the rejection path — clause PASS",
+        "Checkpoint rejection on block hash mismatch (attempt-2 required_change 3): runner._verify_qualified_end_block_hash re-fetches the canonical hash via the registered clients and returns 'checkpoint_block_hash_drift' on disagreement (runner.py:569-609); two dedicated tests assert rejection and acceptance respectively — clause PASS",
+        "Schema/decode rejection: runner halts with 'checkpoint_schema_decode_drift' when either version differs (runner.py:261-280); test_checkpoint_rejection_on_mismatched_schema_version still passes — clause PASS",
+        "Coverage prefix rejection: planner._validate_warm_checkpoint still raises on requested_start < qualified_start_block and on requested_start > qualified_end_block + 1 (planner.py:413-431); tests test_warm_planner_rejects_requested_start_inside_qualified_prefix and test_warm_planner_rejects_requested_start_skipping_into_prefix pass — clause PASS",
+        "Cold-start topology from pool_init_block and warm topology suffix-only after qualified checkpoint: planner._plan_cold_start/_plan_warm unchanged and tests pass — clause PASS",
+        "Outcome / A+B routing / preflight probe / durable checkpoint / retry ledger / run manifest / deterministic normalisation / block header policy / 7 fixtures / killed-restart boundary / every-block-covered / failed-intervals-prevent-completion / cold-vs-warm distinction / must-not clauses / scope discipline: unchanged from attempt-2 review (which was PASS on these clauses); no attempt-3 change introduced regression in these surfaces"
+      ],
+      "finding": "All three attempt-2 required_changes are now satisfied: ruff format passes, manifest_checksum is rejected on mismatch, qualified_end_block_hash is re-fetched and compared. All previously-PASS clauses remain PASS; no attempt-3 change regressed any previously-PASS clause."
+    },
+    {
+      "id": "must-not-clauses",
+      "status": "PASS",
+      "evidence": [
+        "No advance before durable commit, no infer empty from empty table, no continue past irreducible failed block, no one scan per event type, no describe HTTP batches as fewer RPC calls, no hydrated blocks / tx-list / receipts in ordinary ingestion, no partial-skip-then-complete, no cancelled/skipped recorded as empty: unchanged from attempt-2 review (which was PASS on these clauses); the runner now additionally rejects on manifest drift and block hash drift before any planner invocation, which strengthens (does not weaken) the 'no advance past an uncovered checkpoint' must-not clause",
+        "Runner.run() still upserts the durable checkpoint only after a successful or scanned_empty interval commit; the new validation surfaces (manifest_checksum, block hash) are evaluated before the planner emits sub-ranges, so no interval can be recorded under a rejected checkpoint"
+      ],
+      "finding": "All contract must-not rules are honoured. The new validation surfaces strengthen the 'no advance past a mismatched checkpoint' rule rather than weakening any must-not."
+    },
+    {
+      "id": "scope-discipline-todo",
+      "status": "PASS",
+      "evidence": [
+        "attempt-3 implementation changes are confined to src/robinhood_lp/ingestion/{planner,runner}.py, the dedicated tests, and the shared scripted-client fixture; storage/manifest.py is unchanged in this attempt",
+        "todo/config.yaml attempt bumped 2 -> 3 and review-002.md/.json are workflow governance, not implementation drift",
+        "AGENTS.md / README / docs are not modified by this attempt"
+      ],
+      "finding": "Implementation stays inside the T032 boundary. The attempt-3 changes are additive: one new helper in planner.py (manifest_checksum comparison + dataclass field), one new helper and one new gate in runner.py (_verify_qualified_end_block_hash + halt-with-reason branches), and the supporting tests."
+    }
+  ],
+  "must_not_violations": [],
+  "unknowns": [],
+  "required_changes": [],
+  "residual_risks": [
+    "The new qualified_end_block_hash validation requires every registered endpoint to be reachable enough to answer get_block_hash_for_pin; when no endpoint returns a hash the runner halts with 'checkpoint_block_hash_unverified' rather than silently trusting the stored hash. Tests must wire ScriptedEndpointClient.block_hash_overrides for the qualified_end_block so the validation surface returns a known value (test_warm_incremental_topology_starts_after_checkpoint was updated accordingly).",
+    "The new manifest_checksum rejection runs inside the planner's _validate_warm_checkpoint after schema/decode and before sub-range emission; existing planner tests that supply an existing_checkpoint must also supply expected_manifest_checksum. This was applied as a per-call update in tests/test_ingestion_planner.py (5 callsites).",
+    "The runner's _verify_qualified_end_block_hash runs BEFORE the manifest_checksum validation in the planner path; the test_checkpoint_rejection_on_mismatched_manifest_checksum test wires a matching stored hash so the manifest_checksum rejection is the first to fire (the documented isolation between the two contract gates).",
+    "The kill/restart acceptance enumerates four durable-commit boundaries (mid-interval after RPC but before commit, mid-retry-ledger append, mid-manifest row, mid-block-header write); only the first boundary is exercised by test_kill_restart_after_partial_run_resumes_from_durable_state. The implementation's reliance on per-row SQLite transactions makes the others atomic by construction, but explicit boundary tests are absent (carried over from attempt-2 review).",
+    "test_abi_artifacts.py and test_workflow_contracts.py are excluded per the environment-limitation note; they do not affect this verdict."
+  ]
+}
