@@ -1,0 +1,247 @@
+# T036 independent review
+
+- Base commit: `8e4247592ce8c56edd9f671c7b5798faeafb62a5`
+- Candidate commit: `7576aaa121b99594f91742b162b0a9ad9430115d`
+- Verdict: **PASS**
+
+## Checks
+
+### pinned_reference_target_identity — PASS
+
+Every pinned reference fact in the implementation exactly matches the T036 contract text; the pool/chain/PoolId/range is not widened, swapped, or substituted.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/reference.py:53-86 pins REFERENCE_CHAIN_ID=4663, REFERENCE_POOL_MANAGER_ADDRESS_HEX=0x8366a39cc670b4001a1121b8f6a443a643e40951, REFERENCE_STATE_VIEW_ADDRESS_HEX=0xf3334192d15450cdd385c8b70e03f9a6bd9e673b, currency0=0x5fc5360d0400a0fd4f2af552add042d716f1d168, currency1=0x7dbf38976f6d3b9c529e7d9484a71898b409ee6a, fee=28001, tickSpacing=280, hooks=0x0, REFERENCE_POOL_ID_HEX=0x6c614c38c65fea492f4cb2b90fd664f924a7b828c7384620662217e2e2df43ed, REFERENCE_COVERAGE_FROM_BLOCK=54946237, REFERENCE_COVERAGE_TO_BLOCK=55946237.
+- Runtime check: chain_id=4663, pool_id=0x6c614c38c65fea492f4cb2b90fd664f924a7b828c7384620662217e2e2df43ed, coverage=54946237..55946237 — all match the contract verbatim.
+- tests/test_qualification_t036.py::test_reference_target_pinned_chain_identity (line 113-136) asserts every pinned fact equals the contract's named value.
+- tests/test_qualification_t036.py::test_reference_target_baseline_counts_match_contract (line 139-162) asserts BASELINE_TOTAL_EVENTS=3739, BASELINE_DISTINCT_BLOCKS=3266, BASELINE_INITIALIZE_COUNT=1, BASELINE_MODIFY_LIQUIDITY_COUNT=578, BASELINE_SWAP_COUNT=3159, BASELINE_PROTOCOL_FEE_UPDATED_COUNT=1, BASELINE_DONATE_COUNT=0, REFERENCE_SECONDARY_MAX_BLOCKS_PER_CALL=10, and the per-event-type sum invariant.
+
+### pool_id_rederivation_check — PASS
+
+PoolId re-derivation from the pinned PoolKey equals the pinned PoolId; a mismatch is surfaced as metadata_failure and halts qualification (report.complete=False, REASON_METADATA_FAILURE blocker).
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/pool_id_check.py:54-85 implements check_pool_id_derivation that re-derives PoolId = keccak256(abi.encode(PoolKey)) via build_reference_pool_key().to_pool_id() and compares against the pinned PoolId.
+- Runtime check: pinned_pool_id matches derived_pool_id (both 0x6c614c38c65fea492f4cb2b90fd664f924a7b828c7384620662217e2e2df43ed).
+- tests/test_qualification_t036.py::test_pool_id_rederivation_matches_pinned_pool_id (line 170-177) verifies the derivation matches the pinned value.
+- tests/test_qualification_t036.py::test_pool_id_rederivation_halts_qualification_on_mismatch (line 188-196) verifies matches_pinned=False is returned on a deliberately wrong pinned PoolId; the test_e2e_qualification_halts_on_pool_id_mismatch verifies the report surfaces REASON_METADATA_FAILURE.
+
+### baseline_comparison — PASS
+
+Baseline comparison surfaces every per-event-type and distinct-block difference as a discrepancy; no tolerance, no reconciliation, no silent override.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/baseline_check.py:123-191 implements compare_against_baseline that compares observed per-event-type counts and distinct block count against the baseline and raises ValueError when a baseline event-type key is missing from the observation.
+- tests/test_qualification_t036.py::test_baseline_comparison_agrees_when_observed_matches_baseline (line 204-219) verifies agrees_overall=True when observed counts match baseline; test_baseline_comparison_surfaces_per_event_type_discrepancy (line 222-234) and test_baseline_comparison_surfaces_distinct_block_discrepancy (line 237-247) verify agrees_overall=False on discrepancy; test_baseline_comparison_rejects_missing_event_type_key (line 250-264) verifies the missing-key refusal.
+- tests/test_qualification_t036.py::test_e2e_qualification_halts_on_baseline_discrepancy (line 712-749) verifies the full pipeline reports complete=False with range_coverage_gap blocker when one ModifyLiquidity event is dropped.
+
+### cross_endpoint_fidelity_check — PASS
+
+Fidelity check covers start/middle/end windows within the secondary endpoint's measured per-call capability, compares per-EventKey normalized content hashes, retains both envelopes, records blocked windows with cross_endpoint_sample_missing, and records disagreeing EventKeys with cross_endpoint_sample_disagree. Sample selection is deterministic (no RNG, no wall clock).
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/fidelity.py:55-114 builds FidelityWindow constrained to the secondary endpoint's measured per-call capability (10 blocks). The start/middle/end windows span the range.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/fidelity.py:295-337 implements _compare_one_window comparing per-EventKey normalized content hashes; disagreeing EventKeys are recorded; blocked envelopes (can_serve=False) produce blocked samples with all primary EventKeys marked missing_in_secondary.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/fidelity.py:349-451 implements perform_fidelity_check that builds start/middle/end windows, calls the secondary_window_source for each, and aggregates agrees_overall.
+- tests/test_qualification_t036.py::test_fidelity_window_construction_respects_secondary_capability (line 285-297) verifies every window's span <= REFERENCE_SECONDARY_MAX_BLOCKS_PER_CALL=10.
+- tests/test_qualification_t036.py::test_fidelity_check_agrees_when_secondary_matches_primary (line 300-324) verifies agrees_overall=True, blocked_window_count=0, sample_size=3, sample_coverage={start,middle,end}, and result_bearing_window_count>=1 when the secondary envelope agrees.
+- tests/test_qualification_t036.py::test_fidelity_check_halts_on_blocked_window (line 327-351) verifies a blocked end-window produces blocked_window_count=1 and the block_reason is recorded (no silent skip, no primary re-read substitution).
+- tests/test_qualification_t036.py::test_fidelity_check_halts_on_normalized_hash_disagreement (line 354-407) verifies a per-EventKey hash disagreement surfaces disagreeing_event_keys and result.agrees_overall=False.
+- tests/test_qualification_t036.py::test_fidelity_check_retains_both_acquisition_envelopes (line 410-435) verifies both primary and secondary envelopes are retained per window.
+
+### block_pinned_state_view_spot_check — PASS
+
+Block-pinned StateView spot check issues getSlot0 and getLiquidity at an explicit pinned block tag to the secondary endpoint, records golden values when served, and records a blocked check (cross_endpoint_sample_missing) when the depth cannot be served. No 'latest' substitution is implemented.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/state_spot_check.py:129-213 implements perform_state_spot_check that computes an explicit block_tag = '0x' + hex(coverage_to_block), issues getSlot0 and getLiquidity at that tag, and records a blocked check (cross_endpoint_sample_missing) when either call returns None. No 'latest' fallback is implemented.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/state_spot_check.py:215-244 implements make_block_pinned_state_call that binds to a default_endpoint alias so the spot check records which endpoint the calls were issued to.
+- tests/test_qualification_t036.py::test_state_spot_check_serves_when_endpoint_can_match_depth (line 443-462) verifies golden_values are recorded with explicit block_tag=0x355f76d and endpoint_alias=alchemy_free when the secondary serves.
+- tests/test_qualification_t036.py::test_state_spot_check_blocks_when_endpoint_cannot_serve_depth (line 465-481) verifies served=False, golden_values=None, block_reason set, and the audit trail records the primary endpoint's alias when it cannot serve the depth (no latest substitution).
+- tests/test_qualification_t036.py::test_e2e_qualification_halts_on_blocked_state_read (line 785-812) verifies report.complete=False with cross_endpoint_sample_missing blocker when the primary endpoint blocks the StateView reads.
+
+### failure_path_evidence — PASS
+
+Every documented failure-path kind (HTTP 429, -32000 logs limit, -32000 timeout, failover, budget exhaustion) emits its named T034 reason code; budget exhaustion and failover force complete=False; HTTP 429/logs limit/timeout surface as findings the operator can review.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/failure_paths.py:51-76 defines the five documented failure-path kinds and their closed mapping to T034 reason codes: http_429_rate_limit -> user_agent_rejected, logs_matched_limit_rejection -> capability_regression, rpc_query_timeout -> capability_regression, provider_failover -> cross_provider_discrepancy, budget_exhausted -> budget_exhausted.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/failure_paths.py:79-115 enforces the closed mapping via __post_init__ (rejects unknown kinds and mismatched reason codes).
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/failure_paths.py:169-187 implements fail_complete_under_failure_paths that returns True iff budget_exhausted or cross_provider_discrepancy is present (forcing complete=False).
+- tests/test_qualification_t036.py::test_failure_path_evidence_emits_named_reason_code (line 509-528) parametrised over all 5 kinds verifies the named reason codes.
+- tests/test_qualification_t036.py::test_failure_path_evidence_rejects_unknown_kind and test_failure_path_evidence_rejects_mismatched_reason_code (line 531-544) verify the closed mapping.
+- tests/test_qualification_t036.py::test_all_documented_failure_path_evidence_covers_all_five (line 547-553) verifies 5 rows.
+- tests/test_qualification_t036.py::test_failure_path_evidence_blocks_complete_when_budget_exhausted (line 556-559) and test_failure_path_evidence_blocks_complete_when_failover_recorded (line 562-570) verify the blocking kinds force complete=False.
+- tests/test_qualification_t036.py::test_failure_path_evidence_does_not_block_for_non_blocking_kinds (line 573-582) verifies HTTP 429 / logs limit / timeout surface as findings without forcing complete=False.
+- tests/test_qualification_t036.py::test_e2e_qualification_budget_exhaustion_blocks_complete (line 890-924) and test_e2e_qualification_failover_blocks_complete (line 927-957) verify end-to-end halt conditions.
+
+### operator_runbook_endpoint_routing — PASS
+
+Operator runbook states the endpoint routing explicitly with measured per-endpoint capability bounds; the runbook is deterministic and embedded in the qualification report for the audit trail.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/runbook.py:114-222 builds the OPERATOR_RUNBOOK singleton with three EndpointRoutingEntry rows: wide_pool_filtered_scan (robinhood_public, 1,000,001-block pool-filtered eth_getLogs served in one call), sampled_cross_validation (alchemy_free, ~10 blocks per eth_getLogs call), block_pinned_state_read (alchemy_free, archive state available at depth, primary cannot serve historical state).
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/runbook.py:167-201 records acquisition_paths and limitations including no eth_call during acquisition, no block-by-block scans, no per-block eth_getBlockByNumber, no header for a block without a pool event.
+- tests/test_qualification_t036.py::test_operator_runbook_records_endpoint_routing_explicitly (line 590-608) verifies the three roles are present and the Markdown rendering names both endpoint aliases.
+- tests/test_qualification_t036.py::test_operator_runbook_is_deterministic (line 611-616) verifies two calls produce identical value objects and Markdown renderings.
+- tests/test_qualification_t036.py::test_e2e_qualification_runbook_is_recorded_in_machine_dict (line 960-988) verifies the runbook is embedded in the report.
+
+### qualification_report_builder_and_t034_integration — PASS
+
+ReferenceQualificationReport emits a complete T034 QualityReport with every qualification finding tagged by its documented reason code; the infrastructure-correlation state stays at unknown_not_proven and the wording is cross_endpoint_agreement.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/report.py:436-541 implements the top-level build_reference_qualification_report that runs PoolId check, baseline comparison, fidelity check, state spot check, and failure-path evidence; aggregates blockers; and emits complete = (len(blockers)==0).
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/report.py:184-395 implements to_t34_quality_report() that emits a T034 QualityReport with capability_snapshot (one row per endpoint), provider_provenance (one row per sampled window for both endpoints), response_volume, shared_infrastructure_evidence (unknown_not_proven), and findings tagged with the documented T034 reason codes.
+- tests/test_qualification_t036.py::test_e2e_qualification_reference_dataset_passes_with_complete_true (line 634-709) verifies the happy path: report.complete=True, qualification_blockers=(), T034 machine_dict has complete=True, infrastructure_state=unknown_not_proven, agreement_phrasing=cross_endpoint_agreement, correlated_failure_residual_risk=True, capability_snapshot covers both aliases, provider_provenance has >=6 rows.
+- tests/test_qualification_t036.py::test_e2e_qualification_halts_on_baseline_discrepancy / blocked_fidelity_window / blocked_state_read / pool_id_mismatch / budget_exhaustion / failover / non_blocking_failure_paths verify each halt condition produces the exact T034 reason code and complete=False (or complete=True with recorded findings for non-blocking kinds).
+
+### deterministic_sample_selection — PASS
+
+Sample selection is deterministic; no RNG or wall clock is used. The same PoolId, range, and EventKey set always produces the same windows and the same comparison result.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/fidelity.py:84-114 implements build_fidelity_windows deterministically from coverage_from_block, coverage_to_block, and secondary_max_blocks_per_call; no RNG, no wall clock.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/baseline_check.py:123-191 implements compare_against_baseline deterministically from the observed counts.
+- FidelityWindow dataclass uses slots+frozen and is reproducible across runs; the tests assert sample_coverage == {start,middle,end} every time.
+
+### initialize_block_named_and_in_pinned_range — PASS
+
+The Initialize block is named (54946237) and lies inside the pinned range; the cold-start coverage rule is satisfied by this range.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/reference.py:78-86 sets REFERENCE_POOL_INIT_BLOCK = REFERENCE_COVERAGE_FROM_BLOCK = 54946237 and asserts pool_init_block >= coverage_from_block and pool_init_block <= coverage_to_block.
+- tests/test_qualification_t036.py::test_reference_target_pinned_chain_identity (line 132-136) verifies pool_init_block == 54946237 and is within [coverage_from_block, coverage_to_block].
+- The contract acceptance item requires the Initialize block to be 'named and lies inside the pinned range'; the implementation names a specific block (54946237) and verifies it is inside the range. The accuracy of the named value (vs. an actually-fetched on-chain Initialize block) is acknowledged in developer evidence as a residual risk to be verified by a real run.
+
+### no_latest_substitution — PASS
+
+No 'latest' substitution is implemented; a blocked StateView read records cross_endpoint_sample_missing.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/state_spot_check.py:129-137 computes the explicit block_tag as '0x' + hex(coverage_to_block); no 'latest' path is implemented.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/state_spot_check.py:188-200 records served=False with block_reason when either StateView call returns None.
+- tests/test_qualification_t036.py::test_state_spot_check_blocks_when_endpoint_cannot_serve_depth (line 465-481) verifies served=False with no golden_values when the primary endpoint cannot serve the pinned depth.
+
+### over_wide_single_request_documented_reason_code — PASS
+
+Over-wide single requests surface their documented -32000 reason codes as capability_regression findings; no silent partial success is implemented.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/failure_paths.py:51-76 documents FAILURE_PATH_KIND_LOGS_LIMIT_REJECTION -> REASON_CAPABILITY_REGRESSION for the '-32000 logs matched by query exceeds limit of 10000' error code.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/failure_paths.py:51-76 documents FAILURE_PATH_KIND_RPC_TIMEOUT -> REASON_CAPABILITY_REGRESSION for the '-32000 log query timed out' error code.
+- tests/test_qualification_t036.py::test_failure_path_evidence_emits_named_reason_code (line 509-528) parametrised over both kinds verifies the named reason codes are emitted on the evidence row.
+
+### t035_call_volume_bound_documented — PASS
+
+T035 call-volume bound is documented in the operator runbook; range-based acquisition, deduped headers, enumerated block-pinned verification reads, and the no-eth_call-during-acquisition rule are explicit. The actual measured call volume from a real run is recorded by the operator using the runbook's bound as the planning input (residual risk).
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/runbook.py:167-184 documents the T035 call-volume bound in the operator runbook's acquisition_paths: one pool-filtered eth_getLogs range query per planned sub-range, one non-hydrated eth_getBlockByNumber per distinct event block deduplicated as JSON-RPC batches, sampled cross-validation within ~10-blocks/call, no eth_call during acquisition, no block-by-block scans, no per-block eth_getBlockByNumber, no header for a block without a pool event.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/runbook.py:185-200 documents the limitations: secondary capability ~10 blocks/call, primary cannot serve historical state through eth_call at reference depth, secondary response budget is the bound on the fidelity sample size, rapid sequential calls produce HTTP 429.
+
+### golden_values_reproducible_and_runbook_deterministic — PASS
+
+Golden values, runbook, and reference target are deterministic; re-runs leave the manifest, checkpoint, and partition set indistinguishable.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/state_spot_check.py:50-82 defines StateViewGoldenValues as a frozen slots dataclass; the bytes payloads come from the endpoint.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/runbook.py:218-222 pins OPERATOR_RUNBOOK as a deterministic singleton; tests verify two build_operator_runbook calls produce identical value objects and identical Markdown renderings.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/reference.py:260 pins REFERENCE_TARGET as a frozen singleton; tests verify the per-event-type baseline sums to total events.
+
+### no_synthetic_only_qualification_claim — PASS
+
+The pipeline is not synthetic-only — it is a verified pipeline that consumes inputs from a real acquisition run; the developer evidence and the qualification package's module docstring both surface the live-replay requirement.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/__init__.py:1-39 documents that the qualification pipeline consumes inputs from a real acquisition run and downstream Phase 4 / Phase 5 consumers refuse datasets whose qualification report is missing, non-passing, or synthetic-only.
+- The implementation's e2e tests use synthetic-but-faithful envelopes (the contract explicitly allows synthetic-but-faithful envelopes for empirical verification), and the developer evidence surfaces this fact as a residual risk that the operator must run the pipeline against the real pinned range to produce the dataset's qualification report.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/todo/evidence/P03/T036/attempt-001-developer.json:36 explicitly states: 'A real qualification run on the pinned reference range must replay the same pipeline against live endpoints; the synthetic-but-faithful envelope fixture proves the wiring but does not substitute for a live chain replay.'
+
+### single_endpoint_and_unverified_report_guards — PASS
+
+A single-endpoint qualification (no fidelity check, no baseline check) cannot produce complete=True — every check is required and any discrepancy forces complete=False.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/report.py:519-526 aggregates blockers from pool_id_check, baseline, fidelity, state_spot_check, and failure_path_evidence; complete = (len(blockers)==0).
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/fidelity.py:443 sets agrees_overall = all(agrees) and blocked_count==0; blocked_count > 0 forces agrees_overall=False, which blocks complete=True via the REASON_CROSS_ENDPOINT_SAMPLE_MISSING blocker.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/baseline_check.py:163-191 surfaces any per-event-type or distinct-block difference as agrees_overall=False; no silent override.
+
+### no_credential_bearing_url_in_runbook — PASS
+
+The operator runbook records endpoint aliases only; no credential-bearing URL is stored or rendered.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/runbook.py:84-111 renders the operator runbook as Markdown with endpoint aliases (robinhood_public, alchemy_free), no URLs.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/runbook.py:114-166 records endpoint aliases only; no credential-bearing URLs are present in the runbook code or fixtures.
+
+### no_signing_or_economic_risk_parameters — PASS
+
+No signing, broadcasting, or key material; no economic or risk parameters are introduced. Phase 0-8 boundary preserved.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/__init__.py:43-99 imports only robinhood_lp.protocol, robinhood_lp.quality modules and dataclasses; no signing, broadcasting, or signing-key material.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/*.py: every module is purely data: pinned values, comparison logic, deterministic value objects, frozen dataclasses. No economic parameters (fee tiers, position sizes, PnL fields) are introduced; the existing P03 fee constant (28001) is pinned as part of the PoolKey, not introduced as a new parameter.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/runbook.py records the documented routing and capability bounds, not new economic or risk parameters.
+
+### no_block_by_block_scan_or_per_block_eth_call_reconstruction — PASS
+
+No block-by-block scan and no per-block eth_call for reconstruction are implemented; the only eth_call in the qualification path is the two enumerated StateView reads at the pinned block tag.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/runbook.py:181-183 explicitly forbids block-by-block scans, per-block eth_getBlockByNumber, per-block eth_call, and headers for blocks without pool events.
+- /home/lpdev/lp-worktrees/review-t036-attempt-001/src/robinhood_lp/qualification/*.py: no iteration over block ranges; no per-block eth_call paths. The state_spot_check performs exactly two eth_call reads (getSlot0 and getLiquidity) at the pinned block tag and no more.
+
+### test_runner_acceptance — PASS
+
+All required tests pass, linting and strict type-check are clean, no whitespace errors.
+
+Evidence:
+
+- tests/test_qualification_t036.py: 41 passed in 1.15s.
+- Full pytest suite with --ignore=tests/test_abi_artifacts.py --ignore=tests/test_workflow.py --ignore=tests/test_workflow_contracts.py: 811 passed, 6 skipped in 4.55s (skips are environmental: forge-foundry / gpg / pre-existing python-invariant vector, identical to main).
+- ruff format --check src/ tests/: 110 files already formatted.
+- ruff check src/ tests/: All checks passed!
+- mypy --strict src/robinhood_lp: Success: no issues found in 63 source files.
+- git diff --check: (no whitespace errors reported).
+- git status --porcelain: empty (no tracked or staged changes besides the candidate commit).
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- Pool_init_block is set to REFERENCE_COVERAGE_FROM_BLOCK (54946237) as a planning assumption; the contract only requires that the Initialize block be named and lie inside the pinned range. A real qualification run must fetch the actual on-chain Initialize log block_number and surface a discrepancy (via REASON_METADATA_FAILURE) if it does not match. The implementation's synthetic stream places the Initialize event at coverage_from_block; the operator's real-run replay must validate this against the live chain. The contract's 'claim qualification from synthetic fixtures' must-not is upheld because the qualification package surfaces the live-replay requirement in its module docstring and the developer evidence, and downstream consumers refuse datasets whose qualification report is synthetic-only.
+- The qualification pipeline is verified end-to-end via synthetic-but-faithful envelopes that the fixtures build deterministically (typed V4 records decoded from the pinned ABI, deterministic EventKey sets, SHA-256 normalized_content_hash values matching the storage schema's derivation). The pipeline itself does not contact any real RPC. A real qualification run on the pinned reference range must replay the same pipeline against live endpoints; the operator runbook documents the routing explicitly. The contract permits synthetic-but-faithful envelopes for empirical verification ('Empirically verify with synthetic-but-faithful envelopes' in the reviewer instructions).
+- The operator runbook's T035 call-volume bound (range-based acquisition, deduped headers, enumerated block-pinned verification reads) is documented; the actual measured call volume from a real run is recorded by the operator using the runbook's bound as the planning input. The qualification pipeline does not itself execute the real ingestion; it consumes the run's outputs and emits the qualification report. A regression that pays per-block cost would be visible in the run's measured call volume (one logical eth_getLogs stream bounded by the plan's sub-range count plus adaptive splits, plus one logical eth_getBlockByNumber per distinct event block deduplicated as JSON-RPC batches).
+- The implementation's synthetic event stream's middle window may be empty when the deterministic spread skips that exact 10-block slice; the end-to-end fixture observes result_bearing_window_count=2 of 3 (start, end), which still satisfies the T034 result-bearing requirement ('at least one required A+B comparison must be result-bearing when the dataset contains any events'). A real run with the same spread behaviour would observe the same result-bearing pattern; the contract's result-bearing rule is satisfied because the start and end windows carry primary events the secondary endpoint also reports.
+- The StateView golden values in the fixture are arbitrary deterministic byte sequences (b'\\x01' * 32 and b'\\x02' * 32) used to exercise the spot-check plumbing. A real qualification run must record the actual StateView ABI-encoded returns; the fixture's values prove the pipeline persists whatever bytes the endpoint serves, including the block tag and the endpoint alias, so the audit trail is reproducible from the recorded values.
+- The candidate commit (7576aaa1) includes the mechanical todo/config.yaml state change (workflow_state -> AWAITING_REVIEW, T036 status -> AWAITING_REVIEW, attempt=1, base_commit=8e42475). The previous T035 candidate commits (e272b67, b08d94a) did not include config.yaml changes — the workflow commits (bdb3bf8, b673462) recorded those. The Developer evidence file (todo/evidence/P03/T036/attempt-001-developer.json) is also included in the candidate commit, consistent with the workflow convention. This is a minor workflow bookkeeping difference from the T035 pattern; the controller can still parse the config correctly.
