@@ -174,6 +174,7 @@ superseding decisions are new ADRs that explicitly reference the prior one.
 | ADR-009 | Display / Decimal boundary | Owner (Direction 1) | 2026-09-15 |
 | ADR-010 | Free dual-provider historical ingestion | accepted |
 | ADR-011 | Project-owned bounded JSON-RPC transport | accepted |
+| ADR-012 | Block-header time persistence and acquisition call volume | accepted (addendum to ADR-002 / ADR-010) |
 
 ## 5. Open decisions (not blocking research)
 
