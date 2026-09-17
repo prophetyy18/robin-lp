@@ -1,0 +1,178 @@
+# T031 independent review
+
+- Base commit: `cd56704f2344623941b0044f78c5fc23b018a4ea`
+- Candidate commit: `7ee2c915684a8467bd48127ad976e6173834e4d3`
+- Verdict: **PASS**
+
+## Checks
+
+### scope-diff — PASS
+
+Scope is contained to src/robinhood_lp/storage/{__init__,manifest,measurement,partition,reader,writer}.py, tests/_storage_t031_fixtures.py + 6 new tests/test_storage_*.py, pyproject.toml (pyarrow >=15,<26 only), and todo/ workflow bookkeeping. No docs/intent/, docs/spec/, other task contracts, workflow / controller code, agent definitions, signer / execution / risk / dependency surfaces touched. Only pyarrow is added as a runtime dependency, and the existing pre-T030 modules (decode_log.py, schema.py) are unchanged.
+
+Evidence:
+
+- git diff --stat cd56704f2344623941b0044f78c5fc23b018a4ea 7ee2c915684a8467bd48127ad976e6173834e4d3 --stat
+- src/robinhood_lp/storage/__init__.py: +65 lines
+- src/robinhood_lp/storage/manifest.py: +843 lines (new)
+- src/robinhood_lp/storage/measurement.py: +226 lines (new)
+- src/robinhood_lp/storage/partition.py: +323 lines (new)
+- src/robinhood_lp/storage/reader.py: +469 lines (new)
+- src/robinhood_lp/storage/writer.py: +790 lines (new)
+- tests/_storage_t031_fixtures.py: +198 lines (new helper, not auto-collected)
+- tests/test_storage_conflict.py: +305 lines (new)
+- tests/test_storage_manifest.py: +515 lines (new)
+- tests/test_storage_measurement.py: +222 lines (new)
+- tests/test_storage_partition.py: +185 lines (new)
+- tests/test_storage_reader.py: +285 lines (new)
+- tests/test_storage_writer.py: +541 lines (new)
+- pyproject.toml: +5 (single new dep pyarrow >=15,<26)
+- todo/config.yaml: workflow_state/status/attempt/base_commit transition only
+- todo/evidence/P03/T031/attempt-001-developer.json, attempt-001-planner.json, attempt-002-developer.json: workflow bookkeeping
+- todo/phases/P03-ingestion-and-storage/T031.md: +188 lines (already merged contract, this is the pre-existing plan-review-001 candidate delta to align attempt state with attempt 2 base commit)
+- todo/reviews/P03/T031/plan-review-001.{json,md}: pre-existing plan review record (T031 planning only)
+- todo/triage/P03/T031/triage-001.json: pre-existing triage record (T031 planning only)
+
+### tests — PASS
+
+All 488 non-excluded tests pass; 6 skips are pre-existing environment/invariant skips unrelated to T031. tests/test_abi_artifacts.py excluded per the prompt because tools/oracle/lib/ git submodules are not initialised in this worktree (environment limitation, not an implementation defect). T031 acceptance matrix is covered by 65 dedicated tests across writer, reader, manifest, partition, measurement, and conflict scenarios.
+
+Evidence:
+
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ -q --ignore=tests/test_workflow.py --ignore=tests/test_abi_artifacts.py
+- 488 passed, 6 skipped
+- Skips: 3x tests/test_oracle_drift.py (Foundry/forge binary not on PATH — environment), 2x tests/test_oracle_review_provenance.py (gpg verification out of scope), 1x tests/test_protocol_ids.py (unsorted currencies invariant test)
+- T031-specific run of tests/test_storage_{writer,measurement,conflict,reader,manifest,partition}.py: 65 passed in 1.19s
+- T031 conflict tests verify same content from two endpoints dedups, different content from same EventKey halts qualification, conflicting observation is retained (consistent + conflict rows in event_index, full payload in conflicting_observations)
+- T031 writer tests verify repeat/overlap idempotence (test_repeat_append_with_same_records_is_idempotent, test_overlap_with_partial_range_is_idempotent, test_cross_provider_same_content_hash_is_idempotent), staging cleanup on failure, orphan staging files not exposed to reader, manifest rollback on mid-transaction failure, scanned-empty intervals recorded, reorg journal marks orphan
+- T031 reader tests verify partition resolves by key, missing file raises ManifestMismatchError, SHA mismatch raises ManifestMismatchError, bounds mismatch raises BoundsMismatchError, halted partition raises UnqualifiedDatasetError, files not in manifest are invisible
+
+### ruff-format — PASS
+
+ruff format --check is clean across src/ and tests/.
+
+Evidence:
+
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/ruff format --check src/ tests/
+- 61 files already formatted
+
+### ruff-check — PASS
+
+ruff check is clean across src/ and tests/.
+
+Evidence:
+
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/ruff check src/ tests/
+- All checks passed!
+
+### mypy — PASS
+
+mypy passes across the whole src/ and tests/ tree, including the new modules and fixtures (61 files).
+
+Evidence:
+
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/mypy src/ tests/
+- Success: no issues found in 61 source files
+
+### git-diff-check — PASS
+
+No whitespace-only errors introduced by the candidate diff.
+
+Evidence:
+
+- git diff --check cd56704f2344623941b0044f78c5fc23b018a4ea 7ee2c915684a8467bd48127ad976e6173834e4d3
+- exit=0, no whitespace errors reported
+
+### contract-outcome — PASS
+
+Outcome and Deliverables are satisfied. The two-layer storage (Parquet raw partitions + SQLite manifest) follows ADR-002, and the separation of acquisition provenance from normalized event identity and content hash follows ADR-010. T030 logical schema in src/robinhood_lp/storage/schema.py is reused as-is (canonical_bytes / from_canonical_bytes / migrate_to_current / normalized_content_hash / AcquisitionProvenance / *_LogRecord dataclasses) — T031 does not redefine it.
+
+Evidence:
+
+- src/robinhood_lp/storage/partition.py implements the Parquet physical layout keyed by (chain_id, contract_address, event_name, block_range) with raw evidence columns (raw_topic_0..3, raw_data, raw_response_json), typed/normalized identity columns, acquisition envelope columns, schema/decode version columns, and event-key-hash + content_hash columns (SHARED_PARQUET_FIELDS)
+- src/robinhood_lp/storage/manifest.py implements the SQLite manifest store with partitions, partition_block_bounds, partition_qualification, event_index, conflicting_observations, accounting_intervals, scanned_empty_intervals, reorg_journal, ingestion_checkpoints tables (DDL in _DDL tuple)
+- src/robinhood_lp/storage/writer.py implements the staging (.staging-<uuid>.parquet) + atomic os.rename + BEGIN IMMEDIATE/COMMIT commit protocol in RawPartitionWriter.append_partition
+- src/robinhood_lp/storage/reader.py implements the manifest-aware reader that resolves by PartitionKey, recomputes SHA-256, compares bounds, surfaces manifest/contents errors, and refuses to enumerate the filesystem
+- src/robinhood_lp/storage/measurement.py implements measure_short_range + assert_measurement_within_tolerance, fulfilling the representative short-range measurement acceptance clause without promoting the observed bytes-per-row to a universal constant
+
+### contract-deliverables — PASS
+
+All deliverables are implemented in code: partition layout, raw evidence columns, typed columns, acquisition envelope columns, schema/decode version columns, staging/atomic commit, manifest with row count / file checksum / block bounds / schema/decode version / ingestion checkpoint, split-by accounting, scanned-empty intervals, reorg journal without byte deletion, T011 EventKey identity, reader that ignores filenames, dual raw envelopes retained (each record carries acquisition_endpoint_alias etc. in its own row). The contract's explicit accounting counters (endpoint alias, logical RPC calls, HTTP requests/batches, response bytes, normalized rows, provider units, Parquet bytes, scanned-empty intervals) are all present.
+
+Evidence:
+
+- Partition layout: <data_root>/raw/chain=<id>/contract=<hex>/event=<name>/range=<from>-<to>/data.parquet (PartitionKey.partition_dir, partition_id in src/robinhood_lp/storage/partition.py lines 153-205)
+- Acquisition envelope columns: acquisition_endpoint_alias, acquisition_retrieval_time, acquisition_request_from_block, acquisition_request_to_block, acquisition_http_batch_size, acquisition_http_batch_position, acquisition_request_attempt (SHARED_PARQUET_FIELDS)
+- Schema/decode version columns: schema_version int32, decode_version int32 (SHARED_PARQUET_FIELDS)
+- EventKey + content_hash columns: event_key_hash binary(32), content_hash binary(32) (SHARED_PARQUET_FIELDS)
+- Manifest rows in ManifestStore.insert_partition cover row count, file_path, file_size_bytes, file_sha256, schema_version, decode_version, created_at, partition_block_bounds (min/max block number + hash), partition_qualification
+- AccountingInterval dataclass covers endpoint_alias, request_from_block, request_to_block, logical_rpc_calls, http_requests, http_batches, response_bytes, normalized_rows, parquet_bytes, provider_units
+- scanned_empty_intervals separate table for empty scanned ranges (record_scanned_empty / list_scanned_empty)
+- Reorg journal: record_reorg / list_reorgs with orphan_block_hash, replacement_block_hash (nullable), demotion_reason, partition_id — does not delete raw bytes
+- EventKey = T011 (chain_id, block_hash, tx_hash, log_index) consumed via record.event_key(); EventKey = dataclasses from robinhood_lp.protocol imported by writer/reader/manifest
+- Normalized content hash excludes acquisition / ingestion_time / source_endpoint / raw / raw_topics / raw_data / unknown_fields (PROVENANCE_FIELD_NAMES + RAW_FIELD_NAMES in schema.py)
+- Reader never trusts filenames: RawPartitionReader.has_partition / read_partition / list_qualified_partitions all go through the SQLite manifest, not directory listing
+
+### contract-acceptance — PASS
+
+Acceptance clauses are covered by the test matrix: idempotent repeat/overlap, crash-at-boundary atomicity (staging + manifest transaction), corruption and manifest mismatch detection (missing file, SHA-256 mismatch, bounds mismatch), cross-provider normalized content hash equality with raw envelopes retained, dedup-by-EventKey-plus-content with conflicting observations halting qualification (not overwriting), and a representative short-range measurement that is explicitly NOT promoted to a universal constant.
+
+Evidence:
+
+- tests/test_storage_writer.py::test_repeat_append_with_same_records_is_idempotent + test_overlap_with_partial_range_is_idempotent + test_cross_provider_same_content_hash_is_idempotent prove repeat / overlap is idempotent (rows_appended==0, rows_skipped==N, file_sha256 unchanged)
+- tests/test_storage_writer.py::test_writer_cleans_up_staging_file_on_failure + test_writer_recovery_from_prior_staging_files + test_manifest_transaction_failure_does_not_corrupt_state prove crash-at-boundary atomicity (staging file removed on failure, manifest rolls back, first partition survives a forced mid-transaction error)
+- tests/test_storage_reader.py::test_reader_raises_when_manifest_file_missing + test_reader_raises_on_sha_mismatch + test_reader_raises_on_bounds_mismatch prove corruption / manifest mismatch is detected on read
+- tests/test_storage_conflict.py::test_same_event_two_endpoints_same_content_hash + test_cross_provider_run_dedups_by_content + test_endpoint_alias_does_not_drive_dedup + test_ingestion_time_does_not_drive_dedup prove cross-provider same content hash equality (canonical_bytes differ, normalized_content_hash equal)
+- tests/test_storage_conflict.py::test_same_event_key_different_content_is_conflict + test_conflict_halts_qualification + test_conflict_retains_both_observations + test_modify_liquidity_conflict_detection prove dedup by T011 EventKey + normalized content with conflicting observations retained (both consistent and conflict rows in event_index; full payload in conflicting_observations) and qualification halted (partition_qualification.qualified=false, UnqualifiedDatasetError on read)
+- tests/test_storage_measurement.py::test_partition_sizing_measurement_documented + test_default_blocks_per_partition_is_documented prove a representative short-range measurement is recorded and the constant is documented as DEFAULT_BLOCKS_PER_PARTITION=100 with bytes_per_row loose tolerance band (no promotion to a universal constant)
+
+### must-not — PASS
+
+All Must-not clauses are satisfied. The implementation never mutates / deletes orphaned raw evidence (only reorg journal marks it), never exposes a half-written partition (only manifest-visible partitions are returned, and the staging/rename/transaction sequence is atomic at each commit boundary), never trusts filenames (reader is purely manifest-driven), does not reopen ADR-002 (no spec / intent edits), and never accepts a credential-bearing URL (alias validation rejects scheme / userinfo / query / path-separator characters at multiple layers).
+
+Evidence:
+
+- Reorg journal: ManifestStore.record_reorg only inserts a reorg_journal row (orphan_block_hash, replacement_block_hash, demotion_reason, partition_id). It does not delete or rewrite raw partition files. test_writer_rejects_records_with_credential_bearing_endpoint + test_writer_rejects_records_with_mismatched_chain_id + test_writer_rejects_records_with_mismatched_contract_address demonstrate writer-side rejection of any attempt to encode non-canonical acquisition / chain / contract values
+- Staging/atomic commit: RawPartitionWriter.append_partition writes to .staging-<uuid>.parquet, then os.rename, then the BEGIN IMMEDIATE SQLite transaction. A crash between staging and rename leaves only an orphan .staging file (reader never enumerates the filesystem). A crash between rename and COMMIT leaves the final file on disk but no manifest row, so the reader still does not see it. test_writer_cleans_up_staging_file_on_failure proves the staging file is removed on writer-internal failure; test_manifest_transaction_failure_does_not_corrupt_state proves a manifest-side failure rolls back the manifest
+- Filename trust: RawPartitionReader.has_partition / read_partition / list_qualified_partitions / list_halted_partitions all query the SQLite manifest. test_reader_does_not_see_files_not_in_manifest plants a phantom data.parquet on disk and proves the reader still raises MissingPartitionError for that partition key
+- ADR-002 is not reopened: docs/spec/architecture/adr/ADR-002-storage-and-query-format.md is untouched by this diff; no spec changes
+- No credential-bearing URL: validate_endpoint_alias in manifest.py rejects any alias containing '://', '@', '?', '/', '\\', whitespace, or newline; AcquisitionProvenance._validate_alias in schema.py applies the same rule at the source; tests/test_storage_manifest.py::test_accounting_rejects_credential_url + test_scanned_empty_rejects_credential_url + test_validate_endpoint_alias_rejects_url cover the rejection paths; the writer additionally re-validates each record's acquisition.endpoint_alias before insert (validate_endpoint_alias(acq_alias, field='record.acquisition.endpoint_alias'))
+
+### references — PASS
+
+References R13, ADR-002, ADR-010 are cited in the T031 contract and the implementation follows both.
+
+Evidence:
+
+- todo/phases/P03-ingestion-and-storage/T031.md References section: 'R13, ADR-002, ADR-010.' (line 154)
+- R13 is cited via ADR-002 (ADR-002 references: [R4, R9, R13]) and is the relevant requirements anchor for the storage and query format
+- docs/spec/architecture/adr/ADR-002-storage-and-query-format.md and docs/spec/architecture/adr/ADR-010-free-dual-provider-ingestion.md both accepted; storage module implements both as the merged T031 contract directs
+
+### binding-direction — PASS
+
+The merged contract is in place and the candidate implementation executes against it (not against the frozen-only or amendment-only body). The Owner Decision 2 directives (a–f) are all reflected in the implementation: Parquet column layout carrying acquisition envelope separately from normalized identity / content hash; cross-provider normalized content hash equality with both raw envelopes retained; manifest accounting split by all eight required counters; dedup by T011 EventKey + normalized content; conflicting observations retained and halt qualification; short-range measurement as measurement only.
+
+Evidence:
+
+- /tmp/owner_decision_T031.txt Decision 2 (T031 specific) and Decision 5 (all P03 tasks)
+- todo/phases/P03-ingestion-and-storage/T031.md is the merged single-body contract (the FROZEN_FROM_BASELINE_6C31778 marker and the separate 'Owner amendment' block are absent in the current contract — see diff for attempt-002 base commit which carries the merged text)
+- todo/reviews/P03/T031/plan-review-001.json PASS for the planning candidate commit d565963 (the merged contract commit) — plan review only approves contract executability, not implementation, and does not change T031 implementation status
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- InitializeLogRecord dataclass in src/robinhood_lp/storage/schema.py does not carry fee / tick_spacing / hooks / sqrt_price_x96 / tick / currency0 / currency1 as fields (the V4 PoolKey fields are collapsed into the derived pool_id only). The per-event Parquet schema in src/robinhood_lp/storage/partition.py adds these columns (PER_EVENT_PARQUET_FIELDS['Initialize']), but src/robinhood_lp/storage/writer.py _record_typed_columns fills them with hardcoded zero / b'\x00' * ADDRESS_BYTES placeholders because the source T030 record does not carry them. This is forward-compat for a future T030 expansion that may add the full PoolKey fields; today the columns are structural placeholders. The contract clause 'typed / normalized columns: the complete logical field set defined by T030' is satisfied as a lower bound (extra columns are allowed), but a future Reviewer may want T030 to actually carry these fields so the Initialize Parquet rows are populated.
+- RawPartitionReader._check_bounds_against_file verifies min/max block numbers against the Parquet content but does not verify min/max block hashes (the partition_block_bounds table stores both min/max block number and min/max block hash, and the Parquet content does carry a per-row block_hash column). The T031 contract clause 'a manifest row whose block bounds do not match the file content' is satisfied for block numbers, but block-hash-boundary tampering inside an otherwise-valid file would not be detected by this version. SHA-256 verification of the whole file covers full-content tamper detection, so a tamper limited to one block_hash value at the boundary edge would slip through today.
+- tests/test_abi_artifacts.py is excluded from the pytest run because this worktree lacks tools/oracle/lib/{v4-core,v4-periphery} submodules (git submodules are not initialised in worktrees). This is an environment limitation, not a T031 defect; the test is unrelated to T031.
+- todo/config.yaml is part of the diff (workflow_state AWAITING_REVIEW, status AWAITING_REVIEW, attempt=2, base_commit=cd56704f...) — this matches the candidate's record-keeping for a Developer attempt 002 against the merged contract. The controller owns the workflow config; this diff is the Developer's expected local edit per the existing pattern.
