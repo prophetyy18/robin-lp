@@ -1,0 +1,25 @@
+{
+  "task_id": "T031",
+  "outcome": "TRIAGE_REQUIRED",
+  "summary": "T031 合同正文标记 FROZEN_FROM_BASELINE_6C31778 + 顶部追加 2026-09-16 Owner amendment。按 Owner 决定 #5（binding direction）必须先经 planning route 把 frozen + amendment 合并为单一合同正文，再开始 implementation。本次 attempt 不做 implementation，转入 TRIAGE_REQUIRED 让 triager 分类为 CONTRACT_MISMATCH 后进入 planning。",
+  "commands": [
+    {
+      "command": "git status --porcelain (executed during this attempt)",
+      "result": "no changes; todo/phases/P03-ingestion-and-storage/T031.md and todo/config.yaml untouched"
+    }
+  ],
+  "residual_risks": [
+    "T031 合同 Owner decision 合并需求: ADR-002 vs ADR-010 分层（Decision 2）、append-only raw storage 的分区/manifest 承接字段、Framing rule（EventKey + normalized content 去重，not ingestion time / endpoint / block / filename）、conflicting observations 保留并 halt qualification、attempt 1 不留 implementation evidence"
+  ],
+  "triage_request": {
+    "observed_problem": "T031 合同正文标记 FROZEN_FROM_BASELINE_6C31778 + 顶部追加 2026-09-16 Owner amendment。按 Owner 决定 #5（binding direction，/tmp/owner_decision_T031.txt 记录），workflow 必须经 planning route（Planner → Plan Reviewer）把 frozen 与 amendment 合并为单一合同正文，再开始 implementation。amendment 内容覆盖：ADR-002/ADR-010 分层（append-only raw Parquet 分区 + acquisition envelope/manifest 字段 vs normalized identity 分离）、T030 逻辑 schema 衔接、T031 物理 Parquet 列/partition/manifest 布局、Framing rule 与冲突保留策略。Developer 不得自行选择只执行旧合同或只执行 amendment；当前 contract 的双层表达不直接可执行。",
+    "evidence": [
+      "todo/phases/P03-ingestion-and-storage/T031.md",
+      "/tmp/owner_decision_T031.txt",
+      "docs/spec/architecture/adr/ADR-010-free-dual-provider-ingestion.md",
+      "docs/spec/architecture/adr/ADR-002-storage-and-query-format.md"
+    ],
+    "proposed_classification": "CONTRACT_MISMATCH",
+    "requested_change": "由 Planner 把 2026-09-16 Owner amendment 合并进 T031 的 Outcome / Deliverables / Acceptance / Must-not / References 段落，去除顶部 amendment block 与 FROZEN_FROM_BASELINE marker 的双层表达；明确 T030 = 逻辑 schema、T031 = Parquet 列/partition/manifest 物理布局（Decision 2）；append-only raw partitions (ADR-002) + Parquet 列布局 + acquisition envelope/manifest 字段（endpoint alias、retrieval time、request interval、HTTP batch metadata）+ normalized event identity/content hash 排除 observational fields；manifest accounting 分别记录 endpoint alias、logical RPC calls、HTTP requests/batches、response bytes、normalized rows、provider units、Parquet bytes、scanned-empty intervals；dedup by T011 EventKey + normalized content（不是 ingestion time、endpoint、block number、filename）；conflicting observations 保留并 halt qualification。必须 not mutate/delete orphaned raw evidence、不 expose half-written partitions、不 trust filenames as manifests。然后由独立 Plan Reviewer 校验修改是否完整、一致、未削弱验收。"
+  }
+}
