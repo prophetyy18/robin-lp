@@ -1,0 +1,32 @@
+{
+  "task_id": "T032",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Attempt 003 fixes the three required_changes from attempt 002 review: (1) ruff format on tests/test_ingestion_runner.py is now clean (73 files formatted, no regressions); (2) manifest_checksum rejection is implemented in planner._validate_warm_checkpoint — RangePlannerInputs gains an expected_manifest_checksum field and the runner computes the expected checksum from the current capability/budget snapshots and passes it to the planner, which raises CheckpointMismatchError on mismatch; the runner catches the error and halts with halt_reason='checkpoint_manifest_drift', complete=False, no advance; test_checkpoint_rejection_on_mismatched_manifest_checksum now asserts the rejection path; (3) qualified_end_block_hash validation is implemented in IngestionRunner.run via a new _verify_qualified_end_block_hash helper that re-fetches the canonical block hash at qualified_end_block from every registered endpoint's get_block_hash_for_pin and halts with 'checkpoint_block_hash_drift' (or 'checkpoint_block_hash_unverified' when no client returns a hash) when the stored hash disagrees; two new tests cover the mismatch rejection path and the matching-hash acceptance path. The existing test_warm_incremental_topology_starts_after_checkpoint was updated to wire the deterministic block hash override so the new validation surface accepts the cold-start-run-written checkpoint.",
+  "commands": [
+    {
+      "command": "ruff format --check src/ tests/",
+      "result": "73 files already formatted"
+    },
+    {
+      "command": "pytest tests/ -q --ignore=tests/test_workflow.py --ignore=tests/test_abi_artifacts.py --ignore=tests/test_workflow_contracts.py",
+      "result": "541 passed, 6 skipped (Foundry + gpg env limits only; no FAILED)"
+    },
+    {
+      "command": "ruff check src/ tests/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "mypy src/ tests/",
+      "result": "Success: no issues found in 73 source files"
+    },
+    {
+      "command": "git diff --check",
+      "result": "no whitespace errors"
+    }
+  ],
+  "residual_risks": [
+    "The new qualified_end_block_hash validation requires every registered endpoint to be reachable enough to answer get_block_hash_for_pin; when no endpoint returns a hash the runner halts with 'checkpoint_block_hash_unverified' rather than silently trusting the stored hash. Tests must wire ScriptedEndpointClient.block_hash_overrides for the qualified_end_block so the validation surface returns a known value (the existing test_warm_incremental_topology_starts_after_checkpoint was updated accordingly).",
+    "The new manifest_checksum rejection runs inside the planner after schema/decode and before sub-range emission. Existing planner tests that supply an existing_checkpoint must also supply expected_manifest_checksum (set to cp.manifest_checksum) — this was applied as a single replace_all in tests/test_ingestion_planner.py.",
+    "The runner's _verify_qualified_end_block_hash runs before the manifest_checksum validation in the planner path; the test_checkpoint_rejection_on_mismatched_manifest_checksum test wires a matching stored hash so the manifest_checksum rejection is the first to fire (the documented isolation between the two contract gates)."
+  ]
+}

@@ -308,9 +308,7 @@ def test_fixture_response_size_overflow_triggers_adaptive_split(tmp_path: Path) 
     assert STATE_SUCCESSFUL in states
 
 
-def _overflow_step_factory(
-    from_block: int, to_block: int, *, response_bytes: int
-) -> Any:
+def _overflow_step_factory(from_block: int, to_block: int, *, response_bytes: int) -> Any:
     from _ingestion_t032_fixtures import _ScriptedStep
 
     return _ScriptedStep(
@@ -675,6 +673,12 @@ def test_warm_incremental_topology_starts_after_checkpoint(tmp_path: Path) -> No
             success_step(POOL_INIT_BLOCK, POOL_INIT_BLOCK + 9),
         ],
     )
+    # The cold-start run writes the canonical block hash for the
+    # qualified end block into the durable checkpoint. Wire the
+    # deterministic hash the scripted client returns so the second
+    # (warm) run's qualified-end-block-hash validation agrees with
+    # the stored checkpoint.
+    rh1.block_hash_overrides[POOL_INIT_BLOCK + 9] = "0x" + "ab" * 32
     runner = _runner(
         tmp_path,
         clients={ALIAS_ROBINHOOD_PUBLIC: rh1},
@@ -694,6 +698,9 @@ def test_warm_incremental_topology_starts_after_checkpoint(tmp_path: Path) -> No
         ALIAS_ROBINHOOD_PUBLIC,
         [success_step(POOL_INIT_BLOCK + 10, POOL_INIT_BLOCK + 19)],
     )
+    # The warm run re-fetches the canonical hash for
+    # qualified_end_block; wire the matching deterministic value.
+    rh2.block_hash_overrides[POOL_INIT_BLOCK + 9] = "0x" + "ab" * 32
     runner2 = _runner(
         tmp_path,
         clients={ALIAS_ROBINHOOD_PUBLIC: rh2},
@@ -758,8 +765,11 @@ def test_checkpoint_rejection_on_mismatched_schema_version(tmp_path: Path) -> No
 
 
 def test_checkpoint_rejection_on_mismatched_manifest_checksum(tmp_path: Path) -> None:
-    """A warm run whose existing checkpoint's manifest checksum is
-    invalid is rejected."""
+    """A warm run whose existing checkpoint's manifest checksum
+    disagrees with the checksum the current capability / budget
+    snapshots would write is rejected (T032 contract: reject a
+    checkpoint whose manifest does not match the requested pool
+    and range)."""
     from robinhood_lp.ingestion.checkpoint import (
         DurableCheckpointState,
         upsert_durable_checkpoint,
@@ -771,6 +781,147 @@ def test_checkpoint_rejection_on_mismatched_manifest_checksum(tmp_path: Path) ->
     )
 
     manifest = ManifestStore(tmp_path / "manifest.sqlite")
+    # Wire the scripted client so its canonical block hash at
+    # qualified_end_block agrees with the stored hash. This
+    # isolates the manifest_checksum rejection from the
+    # qualified_end_block_hash rejection.
+    stored_hash = "0x" + "ab" * 32
+    upsert_durable_checkpoint(
+        manifest,
+        DurableCheckpointState(
+            chain_id=4663,
+            contract_address=CONTRACT,
+            pool_id=POOL_ID,
+            qualified_start_block=POOL_INIT_BLOCK,
+            qualified_end_block=POOL_INIT_BLOCK + 99,
+            qualified_end_block_hash=stored_hash,
+            schema_version=CURRENT_SCHEMA_VERSION,
+            decode_version=CURRENT_DECODE_VERSION,
+            capability_snapshot_id="snap-old",
+            manifest_checksum="0x" + "00" * 32,  # garbage / stale
+            topology="cold_start",
+            pool_init_block=POOL_INIT_BLOCK,
+        ),
+    )
+    rh = ScriptedEndpointClient(
+        ALIAS_ROBINHOOD_PUBLIC,
+        [success_step(POOL_INIT_BLOCK + 100, POOL_INIT_BLOCK + 109)],
+    )
+    rh.block_hash_overrides[POOL_INIT_BLOCK + 99] = stored_hash
+    runner = _runner(
+        tmp_path,
+        clients={ALIAS_ROBINHOOD_PUBLIC: rh},
+        planner_max_blocks=10,
+    )
+    runner.manifest = manifest
+    # The planner refuses to plan a warm run whose stored
+    # checkpoint's manifest checksum does not match the one this
+    # run would write. The runner catches the
+    # CheckpointMismatchError and halts with the
+    # ``checkpoint_manifest_drift`` reason; ``complete`` stays
+    # ``False`` and the run never advances past the validation
+    # gate.
+    result = runner.run(
+        requested_start_block=POOL_INIT_BLOCK,
+        requested_end_block=POOL_INIT_BLOCK + 109,
+    )
+    assert result.complete is False
+    assert result.halt_reason == "checkpoint_manifest_drift"
+    assert result.interval_count == 0
+    assert result.qualified_end_block is None
+    assert result.qualified_end_block_hash is None
+
+
+def test_checkpoint_rejection_on_mismatched_qualified_end_block_hash(tmp_path: Path) -> None:
+    """A warm run whose stored qualified_end_block_hash does not
+    match the canonical block hash at qualified_end_block as
+    observed by the registered endpoints is rejected (T032
+    contract: reject a checkpoint whose block hash does not match
+    the requested pool and range)."""
+    from robinhood_lp.ingestion.checkpoint import (
+        DurableCheckpointState,
+        upsert_durable_checkpoint,
+    )
+    from robinhood_lp.storage.manifest import ManifestStore
+    from robinhood_lp.storage.schema import (
+        CURRENT_DECODE_VERSION,
+        CURRENT_SCHEMA_VERSION,
+    )
+
+    manifest = ManifestStore(tmp_path / "manifest.sqlite")
+    # The stored checkpoint's manifest_checksum must agree with
+    # the one the runner's capability / budget snapshots would
+    # write so the planner's manifest validation does not fire
+    # first. Use the same value the runner computes.
+    from robinhood_lp.ingestion.runner import _stable_checksum
+
+    cap = make_capability_snapshot()
+    bud = make_budget_snapshot()
+    expected_manifest_checksum = _stable_checksum(cap.snapshot_id, bud.to_json())
+    upsert_durable_checkpoint(
+        manifest,
+        DurableCheckpointState(
+            chain_id=4663,
+            contract_address=CONTRACT,
+            pool_id=POOL_ID,
+            qualified_start_block=POOL_INIT_BLOCK,
+            qualified_end_block=POOL_INIT_BLOCK + 99,
+            qualified_end_block_hash="0x" + "ab" * 32,  # stale hash
+            schema_version=CURRENT_SCHEMA_VERSION,
+            decode_version=CURRENT_DECODE_VERSION,
+            capability_snapshot_id="snap-1",
+            manifest_checksum=expected_manifest_checksum,
+            topology="cold_start",
+            pool_init_block=POOL_INIT_BLOCK,
+        ),
+    )
+    rh = ScriptedEndpointClient(
+        ALIAS_ROBINHOOD_PUBLIC,
+        [success_step(POOL_INIT_BLOCK + 100, POOL_INIT_BLOCK + 109)],
+    )
+    # Configure the scripted client so its canonical hash at
+    # POOL_INIT_BLOCK + 99 disagrees with the stored hash.
+    rh.block_hash_overrides[POOL_INIT_BLOCK + 99] = "0x" + "cd" * 32
+    runner = _runner(
+        tmp_path,
+        clients={ALIAS_ROBINHOOD_PUBLIC: rh},
+        planner_max_blocks=10,
+        capability=cap,
+        budget=bud,
+    )
+    runner.manifest = manifest
+    result = runner.run(
+        requested_start_block=POOL_INIT_BLOCK,
+        requested_end_block=POOL_INIT_BLOCK + 109,
+    )
+    assert result.complete is False
+    assert result.halt_reason == "checkpoint_block_hash_drift"
+    assert result.interval_count == 0
+    assert result.qualified_end_block is None
+    assert result.qualified_end_block_hash is None
+
+
+def test_checkpoint_accepts_when_qualified_end_block_hash_matches(tmp_path: Path) -> None:
+    """When the stored qualified_end_block_hash agrees with the
+    canonical hash observed by the registered endpoints, the warm
+    run proceeds normally (T032 contract: rejection is for
+    mismatches, not for the validation surface itself)."""
+    from robinhood_lp.ingestion.checkpoint import (
+        DurableCheckpointState,
+        upsert_durable_checkpoint,
+    )
+    from robinhood_lp.storage.manifest import ManifestStore
+    from robinhood_lp.storage.schema import (
+        CURRENT_DECODE_VERSION,
+        CURRENT_SCHEMA_VERSION,
+    )
+
+    manifest = ManifestStore(tmp_path / "manifest.sqlite")
+    from robinhood_lp.ingestion.runner import _stable_checksum
+
+    cap = make_capability_snapshot()
+    bud = make_budget_snapshot()
+    expected_manifest_checksum = _stable_checksum(cap.snapshot_id, bud.to_json())
     upsert_durable_checkpoint(
         manifest,
         DurableCheckpointState(
@@ -782,42 +933,33 @@ def test_checkpoint_rejection_on_mismatched_manifest_checksum(tmp_path: Path) ->
             qualified_end_block_hash="0x" + "ab" * 32,
             schema_version=CURRENT_SCHEMA_VERSION,
             decode_version=CURRENT_DECODE_VERSION,
-            capability_snapshot_id="snap-old",
-            manifest_checksum="0x" + "00" * 32,  # garbage
+            capability_snapshot_id="snap-1",
+            manifest_checksum=expected_manifest_checksum,
             topology="cold_start",
             pool_init_block=POOL_INIT_BLOCK,
         ),
     )
-    # Direct call to the planner must reject this checkpoint via
-    # the existing-checkpoint manifest path (the planner's
-    # rejection surface covers chain_id / contract / pool_id /
-    # pool_init_block; the schema/decode/manifest mismatch is
-    # rejected by the warm-run's persistent state validation).
     rh = ScriptedEndpointClient(
         ALIAS_ROBINHOOD_PUBLIC,
         [success_step(POOL_INIT_BLOCK + 100, POOL_INIT_BLOCK + 109)],
     )
+    # The stored hash matches what the scripted client returns.
+    rh.block_hash_overrides[POOL_INIT_BLOCK + 99] = "0x" + "ab" * 32
     runner = _runner(
         tmp_path,
         clients={ALIAS_ROBINHOOD_PUBLIC: rh},
         planner_max_blocks=10,
+        capability=cap,
+        budget=bud,
     )
     runner.manifest = manifest
-    # The warm run begins; the planner's chain_id/contract/pool
-    # fields all match, so the planner proceeds. The checkpoint
-    # validation in ``upsert_durable_checkpoint`` (called per
-    # interval) is the second line of defence; the run completes
-    # successfully here because the planner-side fields match.
     result = runner.run(
         requested_start_block=POOL_INIT_BLOCK,
         requested_end_block=POOL_INIT_BLOCK + 109,
     )
-    # The run covers the new suffix and the checkpoint is
-    # advanced. The manifest checksum mismatch is recorded as a
-    # deviation (the runtime surfaces a deviation row) but does
-    # not block the run — the planner-side gates are the primary
-    # validation surface.
+    assert result.complete is True
     assert result.topology == TOPOLOGY_WARM_INCREMENTAL
+    assert result.halt_reason is None
 
 
 # ---------------------------------------------------------------------------

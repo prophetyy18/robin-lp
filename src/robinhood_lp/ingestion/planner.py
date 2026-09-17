@@ -218,6 +218,11 @@ class RangePlannerInputs:
     start the operator asked for. ``requested_end_block`` is the
     latest block the operator asked for. ``existing_checkpoint`` is
     the previously qualified local checkpoint when one exists.
+    ``expected_manifest_checksum`` is the manifest checksum the
+    current capability / budget snapshots would write; a warm run
+    whose stored checkpoint carries a different manifest checksum
+    is rejected (T032 contract: reject a checkpoint whose manifest
+    does not match the requested pool and range).
     """
 
     chain_id: int
@@ -227,6 +232,7 @@ class RangePlannerInputs:
     requested_start_block: int
     requested_end_block: int
     existing_checkpoint: ExistingCheckpoint | None = None
+    expected_manifest_checksum: str | None = None
 
     def __post_init__(self) -> None:
         if self.pool_init_block < 0:
@@ -239,6 +245,11 @@ class RangePlannerInputs:
             raise ValueError(
                 f"requested_end_block: must be >= requested_start_block, "
                 f"got {self.requested_end_block} < {self.requested_start_block}"
+            )
+        if self.existing_checkpoint is not None and self.expected_manifest_checksum is None:
+            raise ValueError(
+                "expected_manifest_checksum: required when an existing checkpoint "
+                "is supplied so the planner can validate the stored manifest checksum"
             )
         # The pool_init_block may be greater than the requested
         # end block when the operator requests a backtest window
@@ -376,6 +387,29 @@ class RangePlanner:
                 f"warm checkpoint pool_init_block {cp.pool_init_block} does not "
                 f"match requested pool_init_block {inputs.pool_init_block}"
             )
+        # Manifest checksum: the stored checkpoint must have been
+        # written under the same capability / budget snapshot the
+        # current run is using. A warm run whose stored manifest
+        # checksum disagrees with the one this run would write
+        # is rejected (T032 contract: reject a checkpoint whose
+        # manifest does not match the requested pool and range).
+        expected = inputs.expected_manifest_checksum
+        if expected is None:
+            # Defensive: RangePlannerInputs.__post_init__ already
+            # raises when expected_manifest_checksum is None and
+            # an existing checkpoint is supplied. Treat this as
+            # a programmer error rather than a checkpoint mismatch.
+            raise CheckpointMismatchError(
+                "warm checkpoint validation requires expected_manifest_checksum "
+                "in RangePlannerInputs but it was not provided"
+            )
+        if not _manifest_checksums_equal(cp.manifest_checksum, expected):
+            raise CheckpointMismatchError(
+                f"warm checkpoint manifest_checksum {cp.manifest_checksum} does "
+                f"not match requested manifest_checksum {expected}; "
+                f"the stored checkpoint was written under a different capability "
+                f"or budget snapshot"
+            )
         if inputs.requested_start_block < cp.qualified_start_block:
             raise CheckpointMismatchError(
                 f"warm checkpoint qualified_start_block {cp.qualified_start_block} > "
@@ -413,6 +447,25 @@ def _split_into_windows(
         out.append(PlannedSubRange(cursor, end))
         cursor = end + 1
     return out
+
+
+def _manifest_checksums_equal(stored: str, expected: str) -> bool:
+    """Compare two 0x-prefixed hex manifest checksums case-insensitively.
+
+    The planner refuses to start a warm run when the stored
+    checkpoint's manifest checksum differs from the checksum the
+    current capability / budget snapshots would write (T032 contract
+    clause: reject a checkpoint whose manifest does not match the
+    requested pool and range). The comparison normalises both sides
+    to lowercase and strips an optional ``0x`` prefix so a stored
+    checksum and an expected checksum compare equal when they
+    encode the same 32-byte digest regardless of casing.
+    """
+    if not isinstance(stored, str) or not isinstance(expected, str):
+        return False
+    norm_stored = stored.strip().lower().removeprefix("0x")
+    norm_expected = expected.strip().lower().removeprefix("0x")
+    return norm_stored == norm_expected
 
 
 __all__ = [

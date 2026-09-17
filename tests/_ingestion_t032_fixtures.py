@@ -193,6 +193,13 @@ class ScriptedEndpointClient:
         self.alias = alias
         self._steps = list(steps or [])
         self.calls: list[tuple[int, int, str, list[list[str] | str]]] = []
+        # Per-block hash overrides for the runner's qualified-end
+        # block-hash validation. When set, ``get_block_hash_for_pin``
+        # returns the configured value instead of the default
+        # ``"0x" + format(block_number, "064x")`` (which would only
+        # match a checkpoint that was written by the same
+        # block-number-based deterministic encoding).
+        self.block_hash_overrides: dict[int, str] = {}
 
     def add_step(self, step: _ScriptedStep) -> None:
         self._steps.append(step)
@@ -228,6 +235,8 @@ class ScriptedEndpointClient:
         )
 
     def get_block_hash_for_pin(self, block_number: int) -> str | None:
+        if block_number in self.block_hash_overrides:
+            return self.block_hash_overrides[block_number]
         return "0x" + format(block_number, "064x")
 
 

@@ -278,17 +278,64 @@ class IngestionRunner:
                     pool_init_block=self.pool_init_block,
                     plan=None,
                 )
-        plan = self.planner.plan(
-            RangePlannerInputs(
-                chain_id=self.chain_id.value,
-                contract_address=self.contract_address,
-                pool_id=self.pool_id,
-                pool_init_block=self.pool_init_block,
+            # Validate the stored qualified_end_block_hash against
+            # the canonical block hash at qualified_end_block as
+            # observed by the registered endpoints. The contract
+            # requires the runner to reject a checkpoint whose
+            # block hash does not match the requested pool's
+            # canonical block at that height (no silent
+            # trust-the-stored-hash path).
+            block_hash_check = self._verify_qualified_end_block_hash(
+                existing_cp.qualified_end_block,
+                existing_cp.qualified_end_block_hash,
+            )
+            if block_hash_check is not None:
+                return self._halt_with_reason(
+                    started_at=started_at,
+                    started_monotonic=started_monotonic,
+                    requested_start_block=requested_start_block,
+                    requested_end_block=requested_end_block,
+                    halt_reason=block_hash_check,
+                    pool_init_block=self.pool_init_block,
+                    plan=None,
+                )
+        # The manifest checksum this run would write under the
+        # current capability / budget snapshots. The planner
+        # compares it against the stored checksum when validating
+        # a warm checkpoint (T032 contract: reject a checkpoint
+        # whose manifest does not match the requested pool and
+        # range).
+        expected_manifest_checksum = _stable_checksum(
+            self.capability_snapshot.snapshot_id,
+            self.budget_snapshot.to_json(),
+        )
+        try:
+            plan = self.planner.plan(
+                RangePlannerInputs(
+                    chain_id=self.chain_id.value,
+                    contract_address=self.contract_address,
+                    pool_id=self.pool_id,
+                    pool_init_block=self.pool_init_block,
+                    requested_start_block=requested_start_block,
+                    requested_end_block=requested_end_block,
+                    existing_checkpoint=(
+                        existing_cp.to_existing_checkpoint() if existing_cp else None
+                    ),
+                    expected_manifest_checksum=(
+                        expected_manifest_checksum if existing_cp is not None else None
+                    ),
+                )
+            )
+        except CheckpointMismatchError:
+            return self._halt_with_reason(
+                started_at=started_at,
+                started_monotonic=started_monotonic,
                 requested_start_block=requested_start_block,
                 requested_end_block=requested_end_block,
-                existing_checkpoint=(existing_cp.to_existing_checkpoint() if existing_cp else None),
+                halt_reason="checkpoint_manifest_drift",
+                pool_init_block=self.pool_init_block,
+                plan=None,
             )
-        )
         # 2. Persist the run manifest before any RPC traffic.
         self.manifest.insert_run_manifest(
             run_id=self.run_id,
@@ -518,6 +565,48 @@ class IngestionRunner:
         keyed by the configured alias names.
         """
         self._clients[alias] = client
+
+    def _verify_qualified_end_block_hash(
+        self,
+        qualified_end_block: int,
+        stored_hash: str | None,
+    ) -> str | None:
+        """Compare the stored ``qualified_end_block_hash`` against
+        the canonical block hash observed at ``qualified_end_block``.
+
+        The T032 contract requires the runner to reject a warm
+        checkpoint whose block hash does not match the requested
+        pool's canonical block at that height. The runner queries
+        every registered endpoint for the hash and accepts the
+        first non-``None`` response; an agreeing canonical hash
+        returns ``None`` (no halt), a disagreement returns a halt
+        reason, and no observation surfaces a separate halt reason
+        so a configured but unreachable endpoint does not silently
+        approve a stale hash.
+        """
+        if not self._clients:
+            # No clients registered at all: we cannot re-fetch and
+            # compare. The contract requires a re-fetch + compare;
+            # the safe default is to refuse to advance.
+            return "checkpoint_block_hash_unverified"
+        observed: str | None = None
+        for client in self._clients.values():
+            try:
+                observed = client.get_block_hash_for_pin(qualified_end_block)
+            except Exception:  # noqa: BLE001 — defensive: an
+                # unreachable endpoint must not block the
+                # comparison path; the next client is tried.
+                observed = None
+                continue
+            if observed is not None:
+                break
+        if observed is None:
+            return "checkpoint_block_hash_unverified"
+        if stored_hash is None:
+            return "checkpoint_block_hash_drift"
+        if _hashes_equal_for_validation(stored_hash, observed):
+            return None
+        return "checkpoint_block_hash_drift"
 
     def _cover_with_splits(
         self,
@@ -809,6 +898,19 @@ class IngestionRunner:
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def _hashes_equal_for_validation(stored: str, observed: str) -> bool:
+    """Compare two 0x-hex block hashes case-insensitively.
+
+    Used by the runner's qualified-end-block-hash validation. The
+    canonical hash the registered client returns and the stored
+    checkpoint hash compare equal when they encode the same 32-byte
+    digest regardless of casing or leading ``0x`` prefix.
+    """
+    if not isinstance(stored, str) or not isinstance(observed, str):
+        return False
+    return stored.strip().lower().removeprefix("0x") == observed.strip().lower().removeprefix("0x")
 
 
 def _compute_manifest_checksum(

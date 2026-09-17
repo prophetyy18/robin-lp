@@ -196,6 +196,7 @@ def test_warm_planner_covers_only_the_missing_suffix() -> None:
             requested_start_block=POOL_INIT_BLOCK,
             requested_end_block=POOL_INIT_BLOCK + 1_500,
             existing_checkpoint=cp,
+            expected_manifest_checksum=cp.manifest_checksum,
         )
     )
     assert plan.topology == TOPOLOGY_WARM_INCREMENTAL
@@ -231,6 +232,7 @@ def test_warm_planner_with_no_missing_suffix_is_empty() -> None:
             requested_start_block=POOL_INIT_BLOCK,
             requested_end_block=POOL_INIT_BLOCK + 4_000,  # entirely inside prefix
             existing_checkpoint=cp,
+            expected_manifest_checksum=cp.manifest_checksum,
         )
     )
     assert plan.sub_ranges == ()
@@ -282,6 +284,7 @@ def test_warm_planner_rejects_mismatched_pool_or_chain(field: str, value: object
                 requested_start_block=POOL_INIT_BLOCK,
                 requested_end_block=POOL_INIT_BLOCK + 2_000,
                 existing_checkpoint=cp,
+                expected_manifest_checksum=cp.manifest_checksum,
             )
         )
 
@@ -305,6 +308,7 @@ def test_warm_planner_rejects_requested_start_inside_qualified_prefix() -> None:
                 requested_start_block=POOL_INIT_BLOCK + 100,
                 requested_end_block=POOL_INIT_BLOCK + 2_000,
                 existing_checkpoint=cp,
+                expected_manifest_checksum=cp.manifest_checksum,
             )
         )
 
@@ -327,6 +331,7 @@ def test_warm_planner_rejects_requested_start_skipping_into_prefix() -> None:
                 requested_start_block=POOL_INIT_BLOCK + 1_500,
                 requested_end_block=POOL_INIT_BLOCK + 2_000,
                 existing_checkpoint=cp,
+                expected_manifest_checksum=cp.manifest_checksum,
             )
         )
 
