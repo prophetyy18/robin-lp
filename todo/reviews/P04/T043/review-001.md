@@ -1,0 +1,199 @@
+# T043 independent review
+
+- Base commit: `87ed8c9a2cd22182ac4d3a2e2a341a40f731399c`
+- Candidate commit: `f47db7f329d777606e81530acae5d180432b61e4`
+- Verdict: **PASS**
+
+## Checks
+
+### diff-scope-implementation-files — PASS
+
+Implementation changes are scoped to the qualification layer (hook_pack.py + __init__.py export surface) plus the matching test file and the standard workflow bookkeeping. No protected path is modified. The new module is 1317 lines and the new tests are 1312 lines; 2731 insertions, 6 deletions.
+
+Evidence:
+
+- git diff 87ed8c9..f47db7f --name-only: src/robinhood_lp/qualification/__init__.py, src/robinhood_lp/qualification/hook_pack.py, tests/test_hook_pack_t043.py, todo/config.yaml, todo/evidence/P04/T043/attempt-001-developer.json
+- git diff 87ed8c9..f47db7f --stat: 2731 insertions, 6 deletions across the five files; the implementation module is 1317 lines and the test module is 1312 lines
+- Protected implementation paths under docs/, tools/, tools/workflow/, AGENTS.md, todo/WORKFLOW.md, todo/phases/, tests/fixtures/, tests/test_abi_artifacts.py are untouched
+- todo/config.yaml diff is the standard prepare-develop / finish-develop controller transition (T043 workflow_state READY->AWAITING_REVIEW, status READY->AWAITING_REVIEW, attempt 0->1, base_commit=87ed8c9, candidate_commit null, approved_commit null, latest_review null); this is workflow bookkeeping required by the finish-develop gate, not an implementation edit
+
+### module-architecture-and-floats — PASS
+
+Module sits in the qualification layer per ADR-006, depends only on the protocol and config-model surfaces it pins (matches the architectural rule that qualification depends on protocol + discovery, not on RPC/storage/signer). All output types are frozen, slotted value objects; the module is float-free, deterministic, and reproducible.
+
+Evidence:
+
+- src/robinhood_lp/qualification/hook_pack.py imports: robinhood_lp.config.models (ALL_HOOK_MASK, DELTA_TO_ACTION_FLAG, DYNAMIC_FEE_FLAG, HOOK_FLAG_BITS), robinhood_lp.discovery.eligibility (EligibilityDecision, EligibilityReasonCode), robinhood_lp.protocol (Address, PoolKey, RunMode) -- only protocol-layer + protocol-adjacent surfaces, no RPC, storage, signer, or config layer
+- All dataclasses are @dataclass(frozen=True, slots=True): HookDeltaPath, HookInvalidationRule, HookSourcePin, HookPack, EmptySetHookEvidence, HookPoolClassificationOutcome, HookReplayModel -- 7 frozen value objects
+- Module has no float operations (no Decimal/float imports; arithmetic is only integer masking & equality)
+- Module has no time, random, I/O, or wall-clock dependencies (datetime, time, random, json, asyncio are absent)
+- The module docstring explicitly states: 'must not import RPC, storage, the config layer, signer code, or any network time'
+
+### required-hook-pack-fields-complete — PASS
+
+All 16 T043 acceptance deliverables are present in the HookPack record and reachable from the audit dict (to_dict) surface. The cross-check between the constant and the audit keys is asserted by the dedicated test.
+
+Evidence:
+
+- REQUIRED_HOOK_PACK_FIELDS constant in hook_pack.py lines 92-109 enumerates 16 fields exactly matching the deliverables: chain_id, pool_id_hex, hook_address, code_hash, proxy_implementation_address, upgrade_authority, flag_bits, verified_source, verified_abi, before_after_deltas, dynamic_fee_behavior, external_state_dependencies, replay_model, adversarial_tests, invalidation_rule, version
+- HookPack dataclass (lines 285-360) carries all 16 fields; verified_abi fields (verified_abi_selectors + verified_event_topics) live on the verified_source sub-record, which the schema explicitly cross-checks via to_dict() (lines 392-398)
+- tests/test_hook_pack_t043.py::test_required_hook_pack_fields_constant_lists_every_acceptance_field asserts the constant's exact contents and passed; test_build_hook_pack_nonzero_hook_produces_all_required_fields verifies every field is reachable from to_dict() and passed
+- tests/test_build_hook_pack_nonzero_hook_produces_all_required_fields cross-checks every required field against the audit dict keys (including verified_abi_selectors via verified_source sub-record)
+
+### before-after-deltas-cover-every-enabled-callback — PASS
+
+Before/after deltas are derived per enabled callback in upstream order; every callback (initialize / add-liquidity / remove-liquidity / swap / donate) has a dedicated positive test. The return-delta path is independently tested. The adversarial-test surface covers every enabled callback and return-delta path.
+
+Evidence:
+
+- ENABLED_CALLBACK_NAMES constant lists all 10 V4 callbacks: beforeInitialize, afterInitialize, beforeAddLiquidity, afterAddLiquidity, beforeRemoveLiquidity, afterRemoveLiquidity, beforeSwap, afterSwap, beforeDonate, afterDonate (lines 150-161)
+- derive_before_after_deltas() emits one HookDeltaPath per enabled callback with the documented (sender, poolKey, sqrtPriceX96 / tick / liquidity / amount*) fields and the per-callback returns_delta flag derived from V4 isValidHookAddress rule 1
+- 5 dedicated tests cover each callback family: test_derive_before_after_deltas_swap_callbacks, test_derive_before_after_deltas_swap_with_return_delta, test_derive_before_after_deltas_modify_liquidity_callbacks, test_derive_before_after_deltas_donate_callbacks, test_derive_before_after_deltas_initialize_callbacks; all 5 pass
+- DEFAULT_ADVERSARIAL_TESTS (lines 1263-1277) covers all 8 before/after pairs plus delta-without-action, proxy-implementation, upgrade-authority, flag-bits-change, and dynamic-fee paths -- tests verify all required substrings are present
+
+### dynamic-fee-behavior-derived-from-poolkey — PASS
+
+Dynamic-fee behaviour is derived deterministically from the V4 PoolKey.fee and PoolKey.hooks fields and recorded as a contract-grade string in HookPack.dynamic_fee_behavior. The is_dynamic_fee flag is set from fee == DYNAMIC_FEE_FLAG.
+
+Evidence:
+
+- derive_dynamic_fee_behavior() returns 'dynamic_fee_pool: fee == DYNAMIC_FEE_FLAG (0x800000); ...' for fee == DYNAMIC_FEE_FLAG
+- Returns 'static_fee_pool_with_nonzero_hook_flags: hook fires ... but the fee itself is constant; ...' when (hook_int & ALL_HOOK_MASK) != 0 with static fee
+- Returns '' for zero-hook static-fee pool
+- Three dedicated tests verify each branch (dynamic_fee_pool, static_fee_with_nonzero_hook, zero_hook_static_fee); all pass
+
+### invalidation-rule-demotes-on-code-change — PASS
+
+The invalidation rule is the V4 contract: any code-hash, proxy-implementation, upgrade-authority, ABI-selector, event-topic, or flag-bit change demotes the pool to ingestion. The code_change_demotes_pack helper is the audit-trail surface for the runtime to detect an upgrade; the demoted_pool_record helper emits the structured demotion record the operator runbook pins.
+
+Evidence:
+
+- code_change_demotes_pack(pack, observed_code_hash) returns True when observed_code_hash is non-empty and differs from pack.code_hash; False on match or empty observed
+- demoted_pool_record(pack, observed_code_hash, demotion_reason=None) emits an audit-trail dict with schema 'robinhood_lp.qualification.hook_pack.demotion.v1' carrying the previous_code_hash, observed_code_hash, demoted_to (RunMode.INGESTION.value), and the demotion_reason
+- build_default_invalidation_rule() returns HookInvalidationRule with trigger_conditions (code_hash_change, proxy_implementation_address_change, upgrade_authority_change, verified_abi_selector_change, verified_event_topic_change, flag_bits_change) and demoted_to=RunMode.INGESTION
+- Five dedicated tests: code_change_demotes_pack_returns_true_on_mismatch, code_change_demotes_pack_returns_false_on_match, code_change_demotes_pack_returns_false_on_empty_observed, demoted_pool_record_emits_audit_packet_on_mismatch, demoted_pool_record_emits_empty_dict_on_match; all pass
+
+### empty-set-evidence-path-with-explicit-no-verification — PASS
+
+The empty-set evidence path satisfies the Owner amendment A0002: when no included pool has nonzero hooks, the artifact carries per-pool T023 classification outcomes (observed hooks value + reason + level + reasons), the reason no hook pack exists, and an explicit statement that no hook semantics were verified. The artifact is schema-validated and rejects any ambiguous shape (empty classifications, blank verification statement, wrong version).
+
+Evidence:
+
+- EmptySetHookEvidence dataclass (lines 435-486) requires chain_id > 0, non-empty pool_classifications, non-empty hook_verification_statement, and HOOK_PACK_SPEC_REVISION version; on each error it raises ValueError
+- build_empty_set_hook_evidence() defaults hook_verification_statement to 'no included pool has a nonzero hooks address; no hook semantics were verified by this task; the empty set is never summarised, reported, or accepted as though hook behaviour had been checked'
+- HookPoolClassificationOutcome carries pool_alias, pool_id_hex, hooks_address, hooks_is_zero, eligibility_level, eligibility_reasons, reason_no_hook_pack, prior_code_hash, current_code_hash -- the observed hooks value and the reason no pack exists are both recorded
+- build_pool_classification_outcome derives the T023 eligibility surface (level + reasons) from PoolKey.hooks alone when no decision is supplied, and uses the supplied EligibilityDecision otherwise
+- Eight tests cover empty-set evidence: requires_at_least_one_pool, requires_non_empty_verification_statement, default_statement_records_no_verification, dual_pool_records_both_classifications, to_dict_round_trip, plus five pool-classification tests; all pass
+
+### hook-pack-report-combines-empty-set-and-packs — PASS
+
+The combined report is mutually-exclusive: a kind='hook_packs' report never carries an empty-set record and vice versa. Tests assert each shape and the cross-shape rejection.
+
+Evidence:
+
+- HookPackReport dataclass (lines 576-634) carries chain_id, kind ('hook_packs' or 'empty_set'), hook_packs tuple, empty_set_record (Optional[EmptySetHookEvidence]), and pool_classifications tuple
+- __post_init__ enforces shape consistency: kind='hook_packs' requires at least one HookPack and forbids empty_set_record; kind='empty_set' requires empty_set_record and forbids any hook_packs
+- build_hook_pack_report() selects kind from inputs: when hook_packs is non-empty it emits kind='hook_packs' with no empty_set_record; otherwise it falls back to kind='empty_set' with a defaulted EmptySetHookEvidence
+- Six dedicated tests cover the report: kind_hook_packs, kind_empty_set, rejects_empty_hook_packs_with_kind_hook_packs, rejects_empty_set_without_artifact, rejects_combined_hook_packs_and_empty_set, to_dict_round_trip; all pass
+
+### must-not-promote-closed-source-beyond-ingestion — PASS
+
+Closed-source / unverified hooks cannot be promoted beyond ingestion: (a) verified_source is required by the pack builder; (b) default source pin emits empty ABI selectors to refuse silent invention; (c) the eligibility surface is hard-coded to ingestion when no decision is supplied. The empty-set statement explicitly disclaims any hook-behaviour verification.
+
+Evidence:
+
+- build_hook_pack requires verified_source (test_build_hook_pack_requires_verified_source: pytest.raises ValueError 'verified_source' when None)
+- build_default_source_pin() emits empty verified_abi_selectors and verified_event_topics -- the builder refuses to invent a verified ABI; the runner must populate these from a real eth_getCode probe and ABI verification pass
+- HookPoolClassificationOutcome 'verifies hooks_is_zero/hooks_address consistency' and 'nonzero-hook requires no reason_no_hook_pack' -- a closed-source hook cannot silently bypass the framework
+- When no EligibilityDecision is supplied to build_pool_classification_outcome, eligibility_level is hard-coded to 'ingestion' for both zero-hook and nonzero-hook paths; the framework does not auto-promote to backtest/paper/live
+- Module docstring line 60: 'a pool whose hooks are nonzero and that is promoted beyond ingestion still needs a complete pack, and a hook-flag bit is never treated as evidence of semantics'
+
+### must-not-equate-flags-with-semantics — PASS
+
+Flags and semantics are kept separate: flag bits are recorded verbatim from the upstream Hooks.sol table, and semantics are recorded only from the verified source/ABI/commit/selector/topic fields. A nonzero flag never implies a hook behaviour; the pack carries the fact that hook behaviour is unknown until verified.
+
+Evidence:
+
+- HookPack fields separate flag bits (flag_bits + flag_names -- cheap, observable from address alone) from verified implementation facts (code_hash, proxy_implementation_address, upgrade_authority, verified_source -- require an on-chain probe and ABI verification pass)
+- Module docstring lines 17-25: 'A nonzero flag bit in the hook address is not evidence of semantics; it is only a possibility. The pack must separate the flag bits (cheap, observable) from the verified implementation facts (address book, code hash, owner, ABI, source revision)'
+- derive_dynamic_fee_behavior() marks is_dynamic_fee only from fee == DYNAMIC_FEE_FLAG, not from flag bits; the dynamic-fee contract is the V4 LPFeeLibrary sentinel, not a hook-address inference
+- build_pool_classification_outcome for nonzero hooks emits HOOK_ADDRESS_PRESENT + HOOK_BEHAVIOUR_UNKNOWN reasons; level remains ingestion. No semantics are inferred from flag bits alone
+
+### must-not-generalize-evidence-across-deployments — PASS
+
+Evidence is per-deployment and per-pool: chain_id, hook_address, pool_id_hex, code_hash, and the verified source commit are all recorded on the pack and the empty-set classifications. The code-change demotion rule prevents silent re-use of a stale pack against an upgraded hook; the per-pool pool_classifications prevent cross-pool reuse.
+
+Evidence:
+
+- Every HookPack carries chain_id, pool_id_hex, hook_address, code_hash, proxy_implementation_address (optional), upgrade_authority (optional), and the verified_source repository + commit + verified_abi_selectors + verified_event_topics
+- code_change_demotes_pack compares the observed code hash against the pack's pinned code hash byte-for-byte -- an upgrade on the same hook address changes the code hash and invalidates the pack; a different hook deployment carries a different hook_address and cannot share the pack
+- EmptySetHookEvidence.pool_classifications carries per-pool (pool_alias, pool_id_hex, hooks_address, prior_code_hash, current_code_hash) so the empty-set record is also pinned per-pool
+- HookPackReport.pool_classifications surfaces the per-pool classifications on every report so the audit trail cannot substitute a different pool's classification
+
+### spec-revision-pinned — PASS
+
+The pack's spec revision is pinned at a single string constant and asserted on every value object's construction. Re-running the build on a fresh checkout reproduces the same bytes.
+
+Evidence:
+
+- HOOK_PACK_SPEC_REVISION = 'v1-2026-09-18-t043-hook-pack' (line 87); all value objects reject any version != HOOK_PACK_SPEC_REVISION in __post_init__
+- to_dict() on every record includes 'version': HOOK_PACK_SPEC_REVISION; the audit trail reader can reject a pack built against an older revision
+- test_hook_pack_spec_revision_pin_is_stable asserts the constant value and passes
+
+### pytest-all-65-hook-pack-tests-pass — PASS
+
+All 65 new tests in tests/test_hook_pack_t043.py pass. The full test suite passes 1105 with 6 pre-existing environment-related skips (forge-not-on-PATH x3, gpg-verification-out-of-scope x2, unordered-vector x1) when the environment-dependent forge-v4-core test is ignored. The forge test failure is a pre-existing environment issue (missing gitignored oracle lib) that exists in both base and candidate and is not introduced by T043.
+
+Evidence:
+
+- PYTHONPATH=src python -m pytest tests/test_hook_pack_t043.py -v --tb=short: 65 passed in 0.26s; all 65 tests PASSED (no skipped, no failed)
+- PYTHONPATH=src python -m pytest --tb=short -q --ignore=tests/test_abi_artifacts.py: 1105 passed, 6 skipped in 11.90s
+- Without the --ignore flag the full suite reports 1 failed -- tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output -- which fails because tools/oracle/lib/v4-core/src/... is absent from the worktree; this path is .gitignore'd (the lib directory does not exist in either base commit 87ed8c9 or candidate f47db7f, per git ls-tree -d HEAD tools/oracle/ which lists only tools/oracle/src and tools/oracle/test)
+
+### ruff-format-and-check-pass — PASS
+
+Ruff format --check and ruff check both exit 0 on src/ and tests/. No new formatting or lint warnings introduced.
+
+Evidence:
+
+- ruff format --check src/ tests/: exit 0, stdout '135 files already formatted'
+- ruff check src/ tests/: exit 0, stdout 'All checks passed!'
+- Two-run byte-identity not required (ruff output includes volatile elapsed-time tokens that vary per run; the format/check outputs above are stable and exit 0)
+
+### mypy-strict-passes-on-src-and-test — PASS
+
+Strict mypy passes on src/ (79 source files) and on the new test file. No new mypy errors introduced.
+
+Evidence:
+
+- mypy src/: exit 0, stdout 'Success: no issues found in 79 source files'
+- MYPYPATH=src mypy --explicit-package-bases tests/test_hook_pack_t043.py: exit 0, stdout 'Success: no issues found in 1 source file'
+
+### developer-handoff-schema-valid — PASS
+
+The developer handoff is consistent with CANDIDATE_READY; no triage_request is required. Summary, command records, and residual_risks entries are coherent with the implemented module.
+
+Evidence:
+
+- todo/evidence/P04/T043/attempt-001-developer.json exists with outcome='CANDIDATE_READY', a summary describing the module's surfaces, an array of 7 command-result records (pytest for the new file, pytest for the related T041/T042 files, full pytest excluding abi_artifacts, ruff format/check, mypy src, mypy on the new test file), and 4 residual_risks entries (operator-on-chain verification requirement, pre-existing forge test environment issue, V4 delta-without-action rule not aborting build, upstream ABI variant dependency)
+- Developer handoff summary explicitly references: EmptySetHookEvidence for no-included-pool-nonzero-hooks case; HookPack per-pool with every required field; HookPackReport combining both shapes; code_change_demotes_pack demotes to ingestion; float-free and deterministic; refuses zero-hook HookPack
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- The Owner-pinned second pool's actual on-chain code hash, verified ABI selectors, verified event topics, proxy implementation address, and upgrade authority are operator observations the runtime must verify at promotion time; the T043 deliverable is the deterministic builder + audit-trail schema (not a substitute for on-chain bytecode verification). Producing an artifact file for the actual pool is a runtime concern that consumes the build_hook_pack / build_empty_set_hook_evidence builders this task provides.
+- The pre-existing tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output forge build failure is environment-specific and unrelated to this task; the same test fails in the base commit 87ed8c9 because tools/oracle/lib/v4-core and tools/oracle/lib/v4-periphery are gitignored and not populated in this worktree.
+- The V4 isValidHookAddress rule-1 delta-without-action violation is recorded in HookPack.invalidation_note but does not abort the pack build; the framework must refuse to promote such a pool beyond ingestion per the T023 acceptance clause and the T038 acceptance clause ('if the second pool's hooks is not 0x0, it is classified per T023 and its support level does not exceed ingestion until a T043-level evidence pack exists').
+- The hook flag names and (action, delta) pairs are taken from the upstream Uniswap V4 Hooks.sol convention (HOOK_FLAG_BITS, DELTA_TO_ACTION_FLAG in src/robinhood_lp/config/models.py); a future hook ABI variant will require a HOOK_PACK_SPEC_REVISION bump and a new pack build, which the framework's pinned version field is designed to support.
+- No actual hook pack or empty-set evidence artifact file (e.g. todo/evidence/P04/T043/hook-pack-report.json) is produced by this task; the task delivers the deterministic builder and schema, not a concrete artifact. This is consistent with the T043 contract's deliverables list (which names fields, not files), but a downstream task should call build_hook_pack_report to produce the runtime artifact.
