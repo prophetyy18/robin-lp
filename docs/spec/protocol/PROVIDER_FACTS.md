@@ -120,12 +120,17 @@ decision of 2026-09-18 and are not measurements.
   because a number measured today is not evidence for a later run; every run
   re-probes at run start (ADR-010 decision 1) and records its own values.
 
-The second pool of the window is Owner-pinned by `PoolId`
-`0xEd50bDeeA8aDC232f159486192a4157281D722ff` on chain id 4663. Its `PoolKey`
-(`currency0`, `currency1`, `fee`, `tickSpacing`, `hooks`) and its `Initialize` block
-are **not** recorded here: they are unresolved and are resolved on chain by T038,
-which then verifies `keccak256(abi.encode(PoolKey)) == PoolId`. No value for those
-fields may be assumed from this document.
+The second pool of the window is Owner-pinned by hook contract address
+`0xEd50bDeeA8aDC232f159486192a4157281D722ff` on chain id 4663. The pinned value
+is a **lookup signal** (the `hooks` field of the second pool's `PoolKey`); it is
+not a V4 `PoolId` and is not a keccak256 digest. Its `PoolKey` (`currency0`,
+`currency1`, `fee`, `tickSpacing`) and its 32-byte `PoolId` (the keccak256
+digest emitted on chain) and its `Initialize` block are **not** recorded here:
+they are unresolved and are resolved on chain by T038 by scanning `Initialize`
+logs whose decoded `hooks` field equals the pinned hook contract address. T038
+then verifies `keccak256(abi.encode(PoolKey)) == PoolId`, where `PoolId` is the
+32-byte keccak256 digest the chain emits (not the pinned 20-byte hook address).
+No value for those fields may be assumed from this document.
 
 ## Dataset qualification records
 
