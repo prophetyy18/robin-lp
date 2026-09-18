@@ -891,6 +891,7 @@
       "phase": "P10",
       "status": "PLANNED",
       "depends_on": [
+        "T026",
         "T034",
         "T039",
         "T053"
