@@ -131,6 +131,56 @@ successor before it can be `ready`; `ready` refuses a dependency that carries
 `todo/amendments/<id>/`, and the successor's contract must state what it
 replaces.
 
+#### The PROPHET layer: goals, plan structure and collateral
+
+Three axes had no route at all: the plan structure itself, the collateral
+documents that describe the project, and the goal statements. The `PROPHET` layer
+supplies them, and it is a *role* as well as a scope — the `prophet` agent
+authors, the `prophet-reviewer` agent reviews. The layer is named for the role,
+not for the Owner, so that the human Owner and the agent that restates their
+goals are never confused.
+
+```bash
+python -m tools.workflow prepare-amendment \
+  --layer PROPHET \
+  --summary "record the goal and add the task that delivers it" \
+  --owner-direction "<exact Owner direction>"
+```
+
+A PROPHET change takes no `--task`: it restructures the plan and may create tasks
+that do not exist yet, so it targets none of them. It is the only layer that
+allows an empty target set.
+
+It may write `docs/intent/`, `docs/spec/`, `docs/implement/`, `README.md`,
+`CLAUDE.md`, `AGENTS.md`, `todo/README.md`, `todo/WORKFLOW.md`, a phase
+`README.md`, and the `todo/config.yaml` `tasks` entries for tasks it adds.
+
+Two rules bound it, and both are enforced by the controller rather than left to
+the reviewer:
+
+- **It may create a new task contract and may never modify an existing one.** The
+  status letter of the changed path is part of the test: a contract path that is
+  not an addition is refused. This is what stops a goal restatement from quietly
+  adding an obligation to an `APPROVED` contract, which would leave its
+  `approved_commit` describing something other than what was reviewed. A new
+  obligation belongs to a new task that supersedes the old one.
+- **Every task that already exists is frozen.** Only newly added tasks and the two
+  revisions may differ in `todo/config.yaml`. Status, attempt, commit SHAs,
+  evidence pointers, review records, dependencies, phases and contract paths are
+  all compared and must be byte-identical.
+
+Everything else is refused by omission: `tools/workflow/`, `.claude/`,
+`todo/schemas/`, `.github/`, `src/`, `tests/` and the dependency manifests are in
+no layer's scope at all. They are changed only by an explicit bootstrap act, and
+that is deliberate — a role that can rewrite the gate it is checked by is not
+checked by anything.
+
+Intent belongs to PROPHET rather than to the Planner. The Planner translates a
+goal into task text, and on the triaged route it may reach `docs/intent/` only to
+transcribe the Owner decision that `--owner-decision` was required to supply
+before it would start. Authoring a goal and translating one are never the same
+act performed by the same role.
+
 ### Claude Code as the Manager
 
 The interactive Claude Code session in the main checkout may orchestrate these

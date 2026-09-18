@@ -124,6 +124,14 @@ through an independent planning review. Passing that review merges only the
 planning amendment; target tasks remain `PLANNED` with their implementation
 attempt counters unchanged.
 
+A `PROPHET`-layer change states goals, restructures the plan and corrects
+collateral documents. It is a role as well as a layer — the `prophet` agent
+authors it and the `prophet-reviewer` agent reviews it — and it is the only layer
+that targets no task, because it may create tasks that do not exist yet. It may
+create a new task contract and may never modify an existing one, and every task
+that already exists stays byte-identical, so a goal restatement can never add an
+obligation to a contract whose approval would then describe something else.
+
 A `SUPERSEDE`-layer amendment retires work that is already `APPROVED` instead of
 planning work that is not. It records the successor in the target's
 `superseded_by` field and may change nothing else — status, attempts, commits,

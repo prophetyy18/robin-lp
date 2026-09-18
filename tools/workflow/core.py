@@ -21,12 +21,19 @@ TASK_PATTERN = re.compile(r"^T[0-9]{3}$")
 MAINTENANCE_PATTERN = re.compile(r"^M[0-9]{4}$")
 AMENDMENT_PATTERN = re.compile(r"^A[0-9]{4}$")
 PHASE_PATTERN = re.compile(r"^P[0-9]{2}$")
-#: Owner amendment layers, narrowest first. CONTRACT edits the target task
-#: contracts and their dependency fields; SPEC additionally edits ``docs/spec/``;
-#: INTENT additionally edits ``docs/intent/``. SUPERSEDE is a separate axis: it
-#: retires already-APPROVED tasks by recording their successor, and may touch no
-#: document and no approval evidence.
-AMENDMENT_LAYERS = frozenset({"CONTRACT", "SPEC", "INTENT", "SUPERSEDE"})
+#: Owner-directed change layers. CONTRACT edits the target task contracts and
+#: their dependency fields; SPEC additionally edits ``docs/spec/``. SUPERSEDE is a
+#: separate axis: it retires already-APPROVED tasks by recording their successor,
+#: and may touch no document and no approval evidence.
+#:
+#: PROPHET is a separate role as well as a separate scope, and it is named for the
+#: role rather than for the Owner so that the human Owner and the agent that
+#: restates their goals are never confused. It may state Intent, restructure the
+#: plan and correct collateral documents, and it may create new task contracts but
+#: never modify an existing one. Authoring a goal belongs here; the Planner
+#: translates a goal into task text, and on the triaged route it only transcribes
+#: an Owner decision the controller required before it would start.
+AMENDMENT_LAYERS = frozenset({"CONTRACT", "SPEC", "PROPHET", "SUPERSEDE"})
 REQUIRED_AGENT_MODEL = "MiniMax-M3[1m]"
 MAX_DEVELOPMENT_CONTINUATIONS = 1
 
@@ -229,8 +236,12 @@ class AmendmentRecord:
         if layer not in AMENDMENT_LAYERS:
             raise WorkflowError(f"invalid amendment layer {layer!r}")
         raw_task_ids = value.get("task_ids")
-        if not isinstance(raw_task_ids, list) or not raw_task_ids:
-            raise WorkflowError("amendment task_ids must be a non-empty list")
+        if not isinstance(raw_task_ids, list) or (not raw_task_ids and layer != "PROPHET"):
+            raise WorkflowError(
+                f"{layer} task_ids must be a non-empty list"
+                if layer != "PROPHET"
+                else "PROPHET task_ids must be a list (empty is allowed)"
+            )
         if not all(isinstance(item, str) and TASK_PATTERN.fullmatch(item) for item in raw_task_ids):
             raise WorkflowError("amendment task_ids contain an invalid task ID")
         return cls(
@@ -433,6 +444,9 @@ def _without_planner_owned_config_fields(
     if classification in {"SPEC_DEFECT", "OWNER_DECISION_REQUIRED"}:
         comparable.pop("spec_revision", None)
     if classification == "OWNER_DECISION_REQUIRED":
+        # The Planner transcribes the Owner's answer here; it never authors one.
+        # ``--owner-decision`` is mandatory for this classification, and that
+        # requirement is what keeps transcription distinct from invention.
         comparable.pop("intent_revision", None)
     return comparable
 
@@ -445,11 +459,77 @@ def _without_amendment_owned_config_fields(
         comparable["tasks"][task_id].pop("depends_on", None)
         if layer == "SUPERSEDE":
             comparable["tasks"][task_id].pop("superseded_by", None)
-    if layer in {"SPEC", "INTENT"}:
+    if layer in {"SPEC", "PROPHET"}:
         comparable.pop("spec_revision", None)
-    if layer == "INTENT":
+    if layer == "PROPHET":
         comparable.pop("intent_revision", None)
     return comparable
+
+
+def _without_prophet_owned_config_fields(
+    config: Mapping[str, Any], base_config: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Reduce a config to the fields a PROPHET change may not touch.
+
+    An Owner change may add tasks and raise the two revisions. It may not alter
+    anything about a task that already exists -- not its state, not its
+    dependencies, not its evidence, not its contract path. Dropping every task
+    key absent from the base and both revisions leaves exactly the frozen set,
+    so a candidate that edits an existing task compares unequal here.
+    """
+    comparable = cast(dict[str, Any], json.loads(json.dumps(config)))
+    comparable.pop("spec_revision", None)
+    comparable.pop("intent_revision", None)
+    existing = set(base_config["tasks"])
+    comparable["tasks"] = {
+        task_id: task for task_id, task in comparable["tasks"].items() if task_id in existing
+    }
+    return comparable
+
+
+#: A new task contract a PROPHET change may create. Modifying an existing file
+#: that matches this pattern is the one thing the Owner role must never do, so
+#: the status letter is part of the test rather than an afterthought.
+_TASK_CONTRACT_PATH = re.compile(r"^todo/phases/[^/]+/T[0-9]{3}\.md$")
+
+#: Files a PROPHET change may edit freely. Everything absent from this set is
+#: refused, so the enforcement core, the agent definitions, the schemas, CI and
+#: the source tree stay out of reach without needing to be listed.
+_PROPHET_EDITABLE_FILES = frozenset(
+    {
+        "README.md",
+        "CLAUDE.md",
+        "AGENTS.md",
+        "todo/README.md",
+        "todo/WORKFLOW.md",
+    }
+)
+_PROPHET_EDITABLE_PREFIXES = ("docs/spec/", "docs/intent/", "docs/implement/")
+
+
+def _prophet_path_allowed(path: str, status: str) -> bool:
+    if status == "D":
+        return False
+    if path in _PROPHET_EDITABLE_FILES or path.startswith(_PROPHET_EDITABLE_PREFIXES):
+        return True
+    if path.startswith("todo/phases/"):
+        if path.endswith("README.md"):
+            return True
+        if _TASK_CONTRACT_PATH.fullmatch(path):
+            return status == "A"
+    return False
+
+
+def _change_statuses(root: Path, base: str) -> dict[str, str]:
+    """Map every changed path to its single-letter Git status."""
+    statuses: dict[str, str] = {}
+    for line in _git(root, "diff", "--name-status", base, "--").stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2 and parts[-1]:
+            statuses[parts[-1]] = parts[0][0]
+    for path in _git(root, "ls-files", "--others", "--exclude-standard").stdout.splitlines():
+        statuses.setdefault(path, "A")
+    return statuses
 
 
 def _render_review(result: Mapping[str, Any]) -> str:
@@ -693,6 +773,8 @@ class WorkflowManager:
             "issue-triager",
             "planner",
             "plan-reviewer",
+            "prophet",
+            "prophet-reviewer",
         ):
             if not (self.repo / ".claude" / "agents" / f"{agent}.md").is_file():
                 raise WorkflowError(f"{agent} agent is missing")
@@ -1330,14 +1412,15 @@ class WorkflowManager:
         summary: str,
         owner_direction: str,
     ) -> dict[str, object]:
-        """Prepare an Owner-directed planning amendment without a Developer failure."""
+        """Prepare an Owner-directed change without a Developer failure."""
         self._ensure_clean_main()
+        layer = layer.upper()
+        if layer not in AMENDMENT_LAYERS:
+            raise WorkflowError("amendment layer must be " + ", ".join(sorted(AMENDMENT_LAYERS)))
         config = self.load_config()
         active = config.get("active_task")
-        if isinstance(active, str) and config["tasks"][active]["status"] not in {
-            "APPROVED",
-            "PLANNED",
-        }:
+        active_status = config["tasks"][active]["status"] if isinstance(active, str) else None
+        if active_status not in {None, "APPROVED", "PLANNED"}:
             raise WorkflowError(f"cannot start an amendment while {active} is unfinished")
         if self._amendment_records():
             raise WorkflowError("another owner amendment is already active")
@@ -1349,23 +1432,24 @@ class WorkflowManager:
         if active_repairs:
             raise WorkflowError("cannot start an amendment while maintenance is unfinished")
         normalized = tuple(dict.fromkeys(task_ids))
-        if not normalized:
-            raise WorkflowError("an amendment requires at least one target task")
+        # An PROPHET change restructures the plan and may create tasks that do not
+        # exist yet, so it targets no task in particular; every other layer
+        # corrects work that is already in the plan.
+        if not normalized and layer != "PROPHET":
+            raise WorkflowError(f"a {layer} amendment requires at least one target task")
         if len(normalized) > 8:
             raise WorkflowError("an amendment may target at most eight tasks")
-        layer = layer.upper()
-        if layer not in AMENDMENT_LAYERS:
-            raise WorkflowError("amendment layer must be " + ", ".join(sorted(AMENDMENT_LAYERS)))
         # A SUPERSEDE amendment retires already-approved work by pointing it at
         # its successor; every other layer corrects work that has not run yet.
         required_status = "APPROVED" if layer == "SUPERSEDE" else "PLANNED"
-        for task_id in normalized:
-            task = self._task(config, task_id)
-            if task["status"] != required_status:
-                raise WorkflowError(
-                    f"{layer} amendment targets must be {required_status}, "
-                    f"found {task_id}={task['status']}"
-                )
+        if layer != "PROPHET":
+            for task_id in normalized:
+                task = self._task(config, task_id)
+                if task["status"] != required_status:
+                    raise WorkflowError(
+                        f"{layer} amendment targets must be {required_status}, "
+                        f"found {task_id}={task['status']}"
+                    )
         if not summary.strip() or not owner_direction.strip():
             raise WorkflowError("amendment summary and owner direction must be non-empty")
         amendment_id = self._next_amendment_id()
@@ -1391,7 +1475,7 @@ class WorkflowManager:
             "amendment_id": amendment_id,
             "task_ids": list(normalized),
             "layer": layer,
-            "target_status": required_status,
+            "target_status": required_status if layer != "PROPHET" else None,
             "summary": summary.strip(),
             "owner_direction": owner_direction.strip(),
         }
@@ -1400,15 +1484,27 @@ class WorkflowManager:
         request_path = worktree / ".workflow" / "amendment-request.json"
         _write_json(request_path, request)
         task_files = [config["tasks"][task_id]["task_file"] for task_id in normalized]
+        if layer == "PROPHET":
+            agent, scope = (
+                "prophet",
+                "Apply this Owner-directed change with the PROPHET layer. It restructures "
+                "the plan, states Intent, or corrects collateral documents; it targets no "
+                "task in particular",
+            )
+        else:
+            agent, scope = (
+                "planner",
+                f"Apply Owner-directed amendment {amendment_id} to exactly these "
+                f"{required_status} tasks: {', '.join(normalized)}",
+            )
         prompt = (
-            f"Apply Owner-directed amendment {amendment_id} to exactly these "
-            f"{required_status} tasks: {', '.join(normalized)}. Read {request_path}. Target "
-            f"contracts: {', '.join(task_files)}. Layer: {layer}. Work only in {worktree}. "
-            "Do not implement business code or change workflow state. Make only the smallest "
-            "planning changes required by the recorded Owner direction. Write the structured "
-            f"result only to {worktree / '.workflow' / 'amendment-result.json'}."
+            f"{scope}. Read {request_path}. Target "
+            f"contracts: {', '.join(task_files) or 'none'}. Layer: {layer}. Work only in "
+            f"{worktree}. Do not implement business code or change workflow state. Make only "
+            "the smallest planning changes required by the recorded Owner direction. Write "
+            f"the structured result only to {worktree / '.workflow' / 'amendment-result.json'}."
         )
-        return {**record.to_dict(), "agent": "planner", "prompt": prompt}
+        return {**record.to_dict(), "agent": agent, "prompt": prompt}
 
     def finish_amendment(self, amendment_id: str) -> AmendmentRecord:
         record = self.load_amendment(amendment_id)
@@ -1429,30 +1525,49 @@ class WorkflowManager:
         allowed_contracts = {
             base_config["tasks"][task_id]["task_file"] for task_id in record.task_ids
         }
+        statuses = _change_statuses(worktree, record.base_commit)
         forbidden: list[str] = []
         for path in changed:
-            allowed = path in allowed_contracts or path == "todo/config.yaml"
-            if record.layer in {"SPEC", "INTENT"}:
-                allowed = allowed or path.startswith("docs/spec/")
-            if record.layer == "INTENT":
-                allowed = allowed or path.startswith("docs/intent/")
+            if record.layer == "PROPHET":
+                allowed = path == "todo/config.yaml" or _prophet_path_allowed(
+                    path, statuses.get(path, "M")
+                )
+            else:
+                allowed = path in allowed_contracts or path == "todo/config.yaml"
+                if record.layer == "SPEC":
+                    allowed = allowed or path.startswith("docs/spec/")
             if not allowed:
                 forbidden.append(path)
         if forbidden:
-            raise WorkflowError(
-                "planner changed paths outside the owner amendment: " + ", ".join(forbidden)
-            )
-        if "todo/config.yaml" in changed and _without_amendment_owned_config_fields(
-            base_config, record.task_ids, record.layer
-        ) != _without_amendment_owned_config_fields(config, record.task_ids, record.layer):
-            raise WorkflowError(
-                "planner changed workflow state, evidence, model, SHA, or a non-target config field"
-            )
+            joined = ", ".join(forbidden)
+            if record.layer == "PROPHET":
+                raise WorkflowError(f"prophet change altered paths outside its scope: {joined}")
+            raise WorkflowError(f"planner changed paths outside the owner amendment: {joined}")
+        if "todo/config.yaml" in changed:
+            if record.layer == "PROPHET":
+                drifted = _without_prophet_owned_config_fields(
+                    config, base_config
+                ) != _without_prophet_owned_config_fields(base_config, base_config)
+            else:
+                drifted = _without_amendment_owned_config_fields(
+                    base_config, record.task_ids, record.layer
+                ) != _without_amendment_owned_config_fields(config, record.task_ids, record.layer)
+            if drifted:
+                if record.layer == "PROPHET":
+                    raise WorkflowError(
+                        "prophet change altered workflow state, evidence, model, SHA, or a task "
+                        "that already exists"
+                    )
+                raise WorkflowError(
+                    "planner changed workflow state, evidence, model, SHA, or a non-target "
+                    "config field"
+                )
         if outcome == "NO_CHANGE_REQUIRED" and changed:
             raise WorkflowError("NO_CHANGE_REQUIRED contradicts planner file changes")
         relative_root = Path("todo") / "amendments" / amendment_id
         _write_json(worktree / relative_root / "request.json", request)
-        _write_json(worktree / relative_root / f"planner-{record.attempt:03d}.json", result)
+        author = "prophet" if record.layer == "PROPHET" else "planner"
+        _write_json(worktree / relative_root / f"{author}-{record.attempt:03d}.json", result)
         result_path.unlink()
         (worktree / ".workflow" / "amendment-request.json").unlink(missing_ok=True)
         if outcome == "BLOCKED":
@@ -1514,16 +1629,27 @@ class WorkflowManager:
         _git(
             self.repo, "worktree", "add", "--detach", str(review_worktree), record.candidate_commit
         )
+        if record.layer == "PROPHET":
+            subject = (
+                f"Independently review PROPHET change {amendment_id}, which restates a goal, "
+                "restructures the plan or corrects high-level documents. It targets no task."
+            )
+            reviewer = "prophet-reviewer"
+        else:
+            subject = (
+                f"Independently review Owner amendment {amendment_id}. Target tasks: "
+                f"{', '.join(record.task_ids)}."
+            )
+            reviewer = "plan-reviewer"
         prompt = (
-            f"Independently review Owner amendment {amendment_id}. Base commit: "
-            f"{record.base_commit}. Candidate commit: {record.candidate_commit}. Target tasks: "
-            f"{', '.join(record.task_ids)}. Work only in {review_worktree}; do not edit planning "
+            f"{subject} Base commit: {record.base_commit}. Candidate commit: "
+            f"{record.candidate_commit}. Work only in {review_worktree}; do not edit planning "
             "files. Write the structured result only to "
             f"{review_worktree / '.workflow' / 'amendment-review-result.json'}."
         )
         return {
             **record.to_dict(),
-            "agent": "plan-reviewer",
+            "agent": reviewer,
             "review_worktree": str(review_worktree),
             "prompt": prompt,
         }
@@ -2412,6 +2538,9 @@ class WorkflowManager:
             if classification == "SPEC_DEFECT":
                 allowed = allowed or path.startswith("docs/spec/")
             if classification == "OWNER_DECISION_REQUIRED":
+                # Intent is reachable on this route only to transcribe the Owner's
+                # mandatory decision. Authoring a goal belongs to the PROPHET layer,
+                # which is a different role with a different review.
                 allowed = (
                     allowed or path.startswith("docs/spec/") or path.startswith("docs/intent/")
                 )

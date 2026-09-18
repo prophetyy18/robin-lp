@@ -54,7 +54,13 @@ amendment-review route. This does not require a synthetic Developer failure and
 must not activate the target tasks or consume implementation attempts. Work that
 is already `APPROVED` is retired through the same route with `--layer SUPERSEDE`,
 which records the successor task and leaves every approval field untouched; a
-retired decision is never edited or deleted.
+retired decision is never edited or deleted. Goals, plan structure and collateral
+documents — `docs/intent/`, `docs/implement/`, the root `README.md`, this file,
+`AGENTS.md` and `todo/README.md` — go through `--layer PROPHET`, which takes no
+`--task` because it may create tasks that do not exist yet, and which may create a
+new task contract but never modify an existing one. `tools/workflow/`, `.claude/`,
+`todo/schemas/` and the dependency manifests are in no route's scope and change
+only by an explicit bootstrap act.
 If a Developer returns `CONTINUATION_REQUIRED`, use the controller's continuation
 gate and invoke the returned fresh Developer in the retained worktree. If the
 visible Agent is stopped specifically by `maxTurns` before writing that handoff,

@@ -92,6 +92,8 @@ def _make_repo(tmp_path: Path) -> tuple[Path, str]:
         "issue-triager",
         "planner",
         "plan-reviewer",
+        "prophet",
+        "prophet-reviewer",
     ):
         path = repo / ".claude" / "agents" / f"{agent}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -993,3 +995,207 @@ def test_visible_owner_planning_route(tmp_path: Path) -> None:
     )
     state, _ = manager.finish_plan_review("T001")
     assert state == "CHANGES_REQUESTED"
+
+
+def _drive_to_owner_decision(tmp_path: Path) -> tuple[WorkflowManager, Path]:
+    """Reach OWNER_DECISION_REQUIRED and hand the task to the Planner."""
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    prepared = manager.prepare_develop("T001")
+    development = Path(str(prepared["development_worktree"]))
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "TRIAGE_REQUIRED",
+            "summary": "owner behavior is missing",
+            "commands": [],
+            "residual_risks": [],
+            "triage_request": {
+                "observed_problem": "intent choice is absent",
+                "evidence": ["task contract"],
+                "proposed_classification": "OWNER_DECISION_REQUIRED",
+                "requested_change": "record the choice",
+            },
+        },
+    )
+    manager.finish_develop("T001")
+    triage = manager.prepare_triage("T001")
+    _write_json(
+        Path(str(triage["triage_worktree"])) / ".workflow" / "triage-result.json",
+        {
+            "task_id": "T001",
+            "issue_commit": triage["issue_commit"],
+            "classification": "OWNER_DECISION_REQUIRED",
+            "summary": "owner must choose",
+            "evidence": ["intent does not decide"],
+            "recommended_action": "ask owner",
+            "owner_question": "Which behavior is intended?",
+        },
+    )
+    manager.finish_triage("T001")
+    return manager, development
+
+
+def test_planning_route_transcribes_the_owner_decision_into_intent(tmp_path: Path) -> None:
+    """The triaged Planner may reach Intent, but only to transcribe the answer the
+    Owner supplied through --owner-decision; that requirement, not a path ban, is
+    what keeps transcription distinct from authoring a goal."""
+    manager, development = _drive_to_owner_decision(tmp_path)
+    manager.prepare_plan("T001", owner_decision="Keep one active pool")
+    (development / "docs" / "intent").mkdir(parents=True, exist_ok=True)
+    (development / "docs" / "intent" / "decision.md").write_text(
+        "one active pool\n", encoding="utf-8"
+    )
+    _write_json(
+        development / ".workflow" / "planner-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "PLAN_READY",
+            "summary": "owner decision recorded",
+            "rationale": "matches explicit decision",
+            "unresolved_questions": [],
+        },
+    )
+    plan = manager.finish_plan("T001")
+    assert plan is not None
+
+
+def test_a_prophet_change_targets_no_task_and_names_the_prophet_agent(tmp_path: Path) -> None:
+    """A PROPHET change restructures the plan and may create tasks that do not
+    exist yet, so it is the one layer that takes no --task."""
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    with pytest.raises(WorkflowError, match="requires at least one target task"):
+        manager.prepare_amendment(
+            task_ids=[],
+            layer="CONTRACT",
+            summary="no target",
+            owner_direction="Not a valid CONTRACT amendment.",
+        )
+    prepared = manager.prepare_amendment(
+        task_ids=[],
+        layer="PROPHET",
+        summary="state a goal and add the task that delivers it",
+        owner_direction="Record the goal and the new task.",
+    )
+    assert prepared["layer"] == "PROPHET"
+    assert prepared["agent"] == "prophet"
+    assert prepared["task_ids"] == []
+
+
+_NEW_CONTRACT = (
+    "# T002 — New task\n\n## Dependencies\n\nT000\n\n## Outcome\n\nTest outcome.\n\n"
+    "## Deliverables\n\nTest file.\n\n## Acceptance\n\nValue is good.\n\n"
+    "## Must not\n\nDo not edit contracts.\n\n## References\n\nNone.\n"
+)
+
+
+def _prepare_prophet_change(tmp_path: Path) -> tuple[WorkflowManager, Path]:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    prepared = manager.prepare_amendment(
+        task_ids=[],
+        layer="PROPHET",
+        summary="add a task and state its goal",
+        owner_direction="Record the goal and add the task that delivers it.",
+    )
+    return manager, Path(str(prepared["worktree"]))
+
+
+def _seal_prophet_result(worktree: Path) -> None:
+    _write_json(
+        worktree / ".workflow" / "amendment-result.json",
+        {
+            "amendment_id": "A0001",
+            "outcome": "AMENDMENT_READY",
+            "summary": "applied the recorded direction",
+            "rationale": "matches the recorded direction",
+            "unresolved_questions": [],
+        },
+    )
+
+
+def _add_task_to_config(worktree: Path, task_id: str = "T002") -> None:
+    config_path = worktree / "todo" / "config.yaml"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["tasks"][task_id] = {
+        "phase": "P00",
+        "status": "PLANNED",
+        "depends_on": ["T000"],
+        "task_file": f"todo/phases/P00/{task_id}.md",
+        "attempt": 0,
+        "base_commit": None,
+        "candidate_commit": None,
+        "approved_commit": None,
+        "latest_review": None,
+    }
+    _write_json(config_path, config)
+
+
+def test_prophet_change_creates_a_task_and_passes_review(tmp_path: Path) -> None:
+    manager, worktree = _prepare_prophet_change(tmp_path)
+    (worktree / "todo" / "phases" / "P00" / "T002.md").write_text(_NEW_CONTRACT, encoding="utf-8")
+    _add_task_to_config(worktree)
+    _seal_prophet_result(worktree)
+    candidate = manager.finish_amendment("A0001")
+    assert candidate.status == "AWAITING_REVIEW"
+    review = manager.prepare_amendment_review("A0001")
+    assert review["agent"] == "prophet-reviewer"
+    review_worktree = Path(str(review["review_worktree"]))
+    _write_json(
+        review_worktree / ".workflow" / "amendment-review-result.json",
+        {
+            "amendment_id": "A0001",
+            "base_commit": candidate.base_commit,
+            "candidate_commit": candidate.candidate_commit,
+            "verdict": "PASS",
+            "summary": "new task added, nothing existing touched",
+            "required_changes": [],
+            "unknowns": [],
+        },
+    )
+    state, _ = manager.finish_amendment_review("A0001")
+    assert state == "APPROVED"
+    added = manager.load_config()["tasks"]["T002"]
+    assert added["status"] == "PLANNED"
+    assert added["attempt"] == 0
+
+
+def test_prophet_change_may_not_modify_an_existing_contract(tmp_path: Path) -> None:
+    """The check this whole layer exists for: an APPROVED contract records what was
+    reviewed, so a new obligation belongs to a new task, not to an edit of it."""
+    manager, worktree = _prepare_prophet_change(tmp_path)
+    target = worktree / "todo" / "phases" / "P00" / "T000.md"
+    target.write_text(
+        target.read_text(encoding="utf-8") + "\nAnd also do this.\n", encoding="utf-8"
+    )
+    _seal_prophet_result(worktree)
+    with pytest.raises(WorkflowError, match="outside its scope"):
+        manager.finish_amendment("A0001")
+
+
+def test_prophet_change_may_not_touch_implementation_or_the_workflow(tmp_path: Path) -> None:
+    for relative in ("src/robinhood_lp/new_module.py", "tools/workflow/core.py", ".claude/x.md"):
+        case = tmp_path / relative.replace("/", "_")
+        case.mkdir()
+        manager, worktree = _prepare_prophet_change(case)
+        path = worktree / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("changed\n", encoding="utf-8")
+        _seal_prophet_result(worktree)
+        with pytest.raises(WorkflowError, match="outside its scope"):
+            manager.finish_amendment("A0001")
+
+
+def test_prophet_change_may_not_alter_an_existing_task(tmp_path: Path) -> None:
+    manager, worktree = _prepare_prophet_change(tmp_path)
+    config_path = worktree / "todo" / "config.yaml"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["tasks"]["T001"]["attempt"] = 5
+    _write_json(config_path, config)
+    _seal_prophet_result(worktree)
+    with pytest.raises(WorkflowError, match="a task that already exists"):
+        manager.finish_amendment("A0001")

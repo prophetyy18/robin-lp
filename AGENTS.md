@@ -40,6 +40,15 @@
 - Owner 可以通过独立 amendment 通道要求 Planner 一次修订一个或多个仍为
   `PLANNED` 的任务。该通道不需要制造 Developer 失败，不激活任务、不增加实现
   attempt，且必须由独立 Plan Reviewer 审查后才能合并。
+- 已 `APPROVED` 的任务由同一通道的 `SUPERSEDE` 层退役：只在 `superseded_by` 记录
+  继任者，状态、attempt、commit、证据和审查记录逐字节不变。继任者可以依赖它取代的
+  任务；任何其他任务依赖已退役任务都会被 `ready` 拒绝。
+- 目标、计划结构和附属文档由 `PROPHET` 层负责：`prophet` 起草，`prophet-reviewer`
+  独立审查。该层可以新建任务合同，但**永不修改已存在的合同**；`todo/config.yaml`
+  中已存在的任务必须逐字节不变。它不接受 `--task`，因为新建的任务此刻还不存在。
+- `tools/workflow/`、`.claude/`、`todo/schemas/`、`.github/`、`src/`、`tests/` 和依赖
+  清单不在任何角色或层的范围内，只能由显式 bootstrap 动作变更。一个能改写自己门禁
+  的角色等于没有门禁。
 - Issue Triager 只读核对异常证据并区分实现缺陷、任务合同偏差、Spec 缺陷、Owner
   决策和外部阻塞；发现者提出的分类不是最终分类。
 - Developer 每次以全新上下文在独立 worktree 中只实现一个 `READY` 任务。不得修改

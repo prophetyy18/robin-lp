@@ -62,10 +62,14 @@ def _parser() -> argparse.ArgumentParser:
     changed.add_argument("base_commit")
     amendment = subparsers.add_parser(
         "prepare-amendment",
-        help="prepare an Owner-directed planning amendment for PLANNED tasks",
+        help="prepare an Owner-directed change: a planning amendment, or a PROPHET change",
     )
-    amendment.add_argument("--task", dest="task_ids", action="append", required=True)
-    amendment.add_argument("--layer", choices=("CONTRACT", "SPEC", "INTENT"), required=True)
+    # PROPHET restructures the plan and may create tasks that do not exist yet, so
+    # it is the one layer that targets no task and needs no --task.
+    amendment.add_argument("--task", dest="task_ids", action="append", default=[])
+    amendment.add_argument(
+        "--layer", choices=("CONTRACT", "SPEC", "PROPHET", "SUPERSEDE"), required=True
+    )
     amendment.add_argument("--summary", required=True)
     amendment.add_argument("--owner-direction", required=True)
     for name, help_text in (
