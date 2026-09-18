@@ -1,0 +1,150 @@
+# T037 independent review
+
+- Base commit: `7dddad524db28822e1fa76882b39828be80812c5`
+- Candidate commit: `59cc364f60974418d9ecfcf0f332a118bb41992b`
+- Verdict: **PASS**
+
+## Checks
+
+### writer_fail_closed_guard — PASS
+
+SilentRowLossError is raised inside the existing-partition merge path before any event_index write commits; the transaction context manager rolls back the batch so no row is silently appended. The runner catches the exception and returns _failed_decision with the new REASON_PARTITION_ROW_LOSS_GUARD. Tests test_writer_fail_closed_on_new_event_key_in_existing_partition, test_writer_fail_closed_lists_missing_event_keys_in_exception, and test_runner_partition_cell_row_loss_regression all pass.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/src/robinhood_lp/storage/writer.py
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/src/robinhood_lp/ingestion/runner.py
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/tests/test_storage_t037.py
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/src/robinhood_lp/ingestion/errors.py
+
+### grid_aligned_collection_intervals — PASS
+
+RangePlanner now accepts blocks_per_partition (default 100) and emits a partial pre-window covering [coverage_from, first_grid_boundary - 1] followed by grid-aligned full windows. When max_blocks_per_sub_range is a multiple of blocks_per_partition (production 10_000/100) grid_aligned is True. When not (tests with max_blocks=10) grid_aligned is False and the legacy split is preserved; the writer guard is the safety net. Tests test_planner_grid_aligned_sub_ranges_have_no_overlap, test_planner_grid_aligned_when_start_is_on_boundary, and test_planner_legacy_split_when_max_blocks_not_multiple_of_partition pass.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/src/robinhood_lp/ingestion/planner.py
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/tests/test_storage_t037.py
+
+### per_partition_reconciliation — PASS
+
+New storage.reconciliation module exposes reconcile_partition / reconcile_all_partitions / find_inconsistent_partitions and a frozen PartitionReconciliationReport. EventKey tuples are normalised to canonical '0x' + integer-derived hex on both sides. verification.verify_report now accepts an optional partition_reconciliation_results sequence and forces complete=false with REASON_PARTITION_EVENT_INDEX_PARQUET_MISMATCH (partition_event_index_parquet_mismatch) plus per-partition detail. Tests test_reconciliation_consistent_partition, test_reconciliation_detects_missing_in_parquet, test_reconciliation_missing_partition_row_is_inconsistent, test_verifier_accepts_consistent_partitions, and test_verifier_blocks_complete_on_inconsistent_partition pass.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/src/robinhood_lp/storage/reconciliation.py
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/src/robinhood_lp/quality/verification.py
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/src/robinhood_lp/quality/reason_codes.py
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/tests/test_storage_t037.py
+
+### regression_test_no_silent_append — PASS
+
+test_runner_partition_cell_row_loss_regression writes the original 2026-09-18 cell first, then attempts a forward-progress batch with a NEW EventKey in the same cell. It asserts pytest.raises(SilentRowLossError), that missing_event_keys lists the new EventKey, that the on-disk Parquet file still has exactly the original rows, and that the event_index row count is the original count (transaction rolled back). It does NOT assert the silent-append outcome.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/tests/test_storage_t037.py
+
+### evidence_record_for_defect — PASS
+
+Defect, root cause, and remedy are recorded. The reconciliation JSON names the two missing Swap partitions and the missing EventKey tuples (tx 0x17c7...936e at log_index 53 for range=55586200-55586299 and tx 0xd754...79d4 at log_index 29 for range=55726200-55726299). Developer evidence notes both remedies applied (writer fail-closed guard AND planner grid alignment).
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/.workflow/t037-lp-data-reconciliation.json
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/todo/evidence/P03/T037/attempt-001-developer.json
+
+### pytest_tests_storage_t037 — PASS
+
+PYTHONPATH=src python -m pytest tests/test_storage_t037.py -v reports 15 passed in 4.81s.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/tests/test_storage_t037.py
+
+### pytest_full_suite — PASS
+
+PYTHONPATH=src python -m pytest tests/ --ignore=tests/test_abi_artifacts.py reports 859 passed, 6 skipped in 11.52s. The 6 skips are pre-existing (3 Foundry/gpg skips in oracle_drift and oracle_review_provenance and 1 'reordered_inputs' skip in test_protocol_ids), unrelated to T037. Expected 859 pass / 6 pre-existing skip per task contract.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/tests/
+
+### ruff_format_check — PASS
+
+python -m ruff format --check src/ tests/ reports '112 files already formatted'.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/src/
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/tests/
+
+### ruff_check — PASS
+
+python -m ruff check src/ tests/ reports 'All checks passed!'.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/src/
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/tests/
+
+### mypy_strict — PASS
+
+python -m mypy src/ reports 'Success: no issues found in 64 source files'.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/src/
+
+### real_dataset_reconciliation_two_missing_swap_rows — PASS
+
+find_inconsistent_partitions applied to /home/lpdev/lp-data/manifest.sqlite returns exactly 2 inconsistent Swap partitions: chain=4663/.../event=Swap/range=55586200-55586299 (event_index_count=3, parquet_row_count=2, missing_in_parquet=1) and chain=4663/.../event=Swap/range=55726200-55726299 (event_index_count=2, parquet_row_count=1, missing_in_parquet=1). The missing EventKey tuples match the T037 contract verbatim: tx 0x17c7771d139bbf8f8cb7d5b7b1cd0ccb09ca6aefa43b6e36df400e26fb5e936e at log_index 53 and tx 0xd75437f4a29d3763edf90eebc8cfd179f63b2f278f01d9b9663ac2ab0a5d79d4 at log_index 29. No other partitions are flagged inconsistent.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/.workflow/t037-lp-data-reconciliation.json
+- /home/lpdev/lp-data/manifest.sqlite
+
+### t031_idempotency_unchanged — PASS
+
+tests/test_storage_writer.py::test_repeat_append_with_same_records_is_idempotent, test_overlap_with_partial_range_is_idempotent, and test_cross_provider_same_content_hash_is_idempotent pass. test_writer_repeat_with_same_records_still_idempotent and test_writer_overlap_with_subset_still_idempotent in the new test_storage_t037.py also pass. The full 20-test writer suite passes. The one-line change in test_manifest_transaction_failure_does_not_corrupt_state moves the second batch from block_number=20 to block_number=200 so it lands in a fresh partition cell; the test's intent (manifest transaction rollback) is preserved and explicitly documented inline.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/tests/test_storage_writer.py
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/tests/test_storage_t037.py
+
+### no_parquet_byte_mutation — PASS
+
+Independent SHA256 of the two Swap Parquet files matches the file_sha256 recorded in the reconciliation JSON: bc6ed7f57f97242e4298f2b141043d3d735876cd9c045b331fe772eaac5174fd (21105 bytes) and 5fe40f3b72c4a85e5c93fa967e26030eea82c152aef9869c94d26ecb568dad43 (20808 bytes). The dataset is read-only by reconciliation.
+
+Evidence:
+
+- /home/lpdev/lp-data/raw/chain=4663/contract=8366a39cc670b4001a1121b8f6a443a643e40951/event=Swap/range=55586200-55586299/data.parquet
+- /home/lpdev/lp-data/raw/chain=4663/contract=8366a39cc670b4001a1121b8f6a443a643e40951/event=Swap/range=55726200-55726299/data.parquet
+
+### no_t030_t036_contract_edits — PASS
+
+git diff base..candidate -- todo/phases/P03-ingestion-and-storage/T030.md T031.md T032.md T033.md T034.md T035.md T036.md is empty.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t037-attempt-001/todo/phases/P03-ingestion-and-storage/
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- The 2026-09-18 reference dataset is left untouched per the T037 Must-not clause (no repair of the two lost Swap rows). Downstream tasks that depend on a complete dataset must run the new reconciliation check first; complete=true now requires every partition's event_index set to match the Parquet file.
+- The planner grid-aligned split only activates when max_blocks_per_sub_range is a multiple of blocks_per_partition (the production 10_000 / 100 default is a multiple, so the aligned path is the default). Tests that use smaller values (e.g. max_blocks_per_sub_range=10) fall back to the legacy contiguous split via the planner's grid_aligned=False property; the writer's fail-closed guard remains in place as the safety net for those configurations.
+- The verifier's new partition_reconciliation_results parameter is opt-in: callers that do not supply it preserve the pre-T037 behaviour (the partition reconciliation clause is skipped). Downstream call sites that build T034 reports should be updated to feed reconcile_all_partitions(manifest) into the verifier when a full quality verdict is required.
