@@ -1,0 +1,37 @@
+{
+  "task_id": "T042",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the T042 block-pinned StateView comparison runner. New module src/robinhood_lp/replay/state_comparison.py introduces: a BlockPinnedStateViewCall seam that takes the StateView method, the explicit pinned-block tag (never latest), the PoolId bytes, and any extra method args; a per-height read list (StateViewReadSpec) that pins the recorded acceptance surface (slot0, active liquidity, ticks/bitmap, fee growth where supported); a per-pool PoolComparisonInput carrying the pool alias, the replay input/output, the T041 reconstructed state, and the T037 partition-reconciliation-consistent flag consumed from T037 without re-derivation; a RecordedComparisonBounds that fixes and records the per-pool heights compared, the per-height read vocabulary, and the logical-call and compute-unit budget ceilings before any read is issued; and the per-pool / combined PoolStateComparisonReport and StateComparisonReport (the combined overall_passes is the AND of the per-pool passes — one pool's agreement is never presented as the other pool's result). The runner emits FieldComparison (with exact integer field expectations vs observed), BlockedCheckRecord (with the T034 cross_endpoint_sample_missing reason code, the height, method, and endpoint alias), and BudgetExhaustionRecord (logical-call or compute-unit dimension, the ceiling exceeded, the halt height and method). It halts on the budget before issuing the next read; it never silently reduces coverage, never substitutes latest, never substitutes another endpoint, and never counts an unserved read as a pass. New helper replay_state_at_height returns the replay's expected observable state at a given height so the comparator compares against the exact post-event snapshot. Per-pool validation isolation is enforced by the PoolStateComparisonReport structure keyed by pool_alias. 23 unit tests in tests/test_replay_t042.py with synthetic-but-faithful fixtures derived from the T040 replay and T041 reconstruction exercise multi-height matches across both pools, blocked checks (no latest substitution), budget exhaustion halts, per-pool isolation, and the T037 reconciliation consumer; they pass under pytest, Ruff format/check, and strict mypy.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_replay_t042.py --no-header",
+      "result": "23 passed, 0 failed, 0 skipped in 0.15s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest --no-header --ignore=tests/test_abi_artifacts.py",
+      "result": "1040 passed, 6 skipped in 11.27s (the 6 skips are pre-existing: oracle-drift tests require Foundry which is not on PATH in the worktree, oracle-review-provenance skips gpg, and one protocol-ids vector)"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/replay/state_comparison.py src/robinhood_lp/replay/__init__.py tests/test_replay_t042.py tests/_replay_t042_fixtures.py",
+      "result": "4 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/replay/state_comparison.py src/robinhood_lp/replay/__init__.py tests/test_replay_t042.py tests/_replay_t042_fixtures.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/robinhood_lp/",
+      "result": "Success: no issues found in 78 source files"
+    },
+    {
+      "command": "MYPYPATH=src:tests /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict tests/test_replay_t042.py tests/_replay_t042_fixtures.py",
+      "result": "Success: no issues found in 2 source files"
+    }
+  ],
+  "residual_risks": [
+    "The runner is exercised against synthetic-but-faithful event sequences and golden values derived from those events; an end-to-end run against the real Robinhood Chain mainnet endpoints would require the T038 qualified dataset (and the actual StateView payloads from the archive-state-capable endpoint). The contract names this run on the T038 dataset as the Phase 4 acceptance gate, not the unit tests.",
+    "The pre-existing tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output test fails on the worktree because tools/oracle/lib/ is not populated (the worktree's git submodule content is missing for an unrelated environment-setup reason); the failure is reproducible on the unmodified base commit so it is not introduced by T042.",
+    "fee-growth-global values are not yet reconstructed by T041 / T040, so the comparator records the StateView-observed fee-growth globals in the audit trail but does not flag a disagreement with the zero-valued expectation; this is the documented 'where supported' clause of the T042 acceptance. A future T051 / T043 layer is responsible for the comparison surface.",
+    "The fixture's reference and second-pool PoolIds are computed from the synthetic PoolKeys; an end-to-end run must use the resolved PoolIds T038 produced, with keccak256(abi.encode(PoolKey)) re-derivation as the pool-identity gate."
+  ]
+}
