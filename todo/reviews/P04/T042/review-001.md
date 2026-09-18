@@ -1,0 +1,117 @@
+# T042 independent review
+
+- Base commit: `06eedfc8db9870c8b829308d2c8b5e1ea1d84c67`
+- Candidate commit: `684a222ef145fce8bc86cd339fbee1b7ef38f43c`
+- Verdict: **PASS**
+
+## Checks
+
+### pool_set_heterogeneous_per_pool — PASS
+
+Pool set clause satisfied. run_state_comparison accepts a tuple of PoolComparisonInput, each carrying its own pool_alias, PoolId, replay_input, replay_output and reconstructed_state. StateComparisonReport.overall_passes is the AND of per-pool passes so one pool's agreement is never presented as the other pool's result.
+
+Evidence:
+
+- src/robinhood_lp/replay/state_comparison.py:299-331 (PoolComparisonInput with per-pool pool_alias, chain_id, pool_id, pool_key, replay_input, replay_output, reconstructed_state)
+- src/robinhood_lp/replay/state_comparison.py:797-820 (StateComparisonReport.pool_reports keyed by pool_alias, overall_passes = AND of per-pool passes)
+- tests/test_replay_t042.py:184-242 (test_multi_height_match_for_reference_and_secondary_pools verifies overall_passes = AND of two per-pool verdicts with distinct pool_ids/heights)
+- tests/test_replay_t042.py:429-478 (test_per_pool_validation_isolation_one_pool_fails_other_passes verifies per-pool passes flags are independent)
+
+### historical_state_routing_blocked_checks — PASS
+
+Historical-state routing clause satisfied. The block_tag is the explicit pinned hex of the requested height; a None from the StateView call records BlockedCheckRecord(reason_code='cross_endpoint_sample_missing', height, method, endpoint_alias). The runner never falls back to 'latest', an unpinned height, another height, or a different endpoint.
+
+Evidence:
+
+- src/robinhood_lp/replay/state_comparison.py:124 (BLOCK_REASON_CROSS_ENDPOINT_SAMPLE_MISSING = 'cross_endpoint_sample_missing', the T034 precedent string)
+- src/robinhood_lp/replay/state_comparison.py:193-217 (BlockPinnedStateViewCall + make_block_pinned_state_view_call — returns None on un-mapped key to surface blocked check, never a 'latest' fallback)
+- src/robinhood_lp/replay/state_comparison.py:1468-1495 (block_tag = '0x' + format(int(height), 'x'); None response appends BlockedCheckRecord with reason_code, height, method, endpoint_alias)
+- tests/test_replay_t042.py:307-359 (test_blocked_check_records_reason_code_and_endpoint_alias, test_no_latest_substitution_records_blocked_check_at_pinned_height)
+
+### recorded_bounds_pre_issue_budget_halts — PASS
+
+Recorded bounds clause satisfied. RecordedComparisonBounds is constructed before any read is issued, and its recorded ceilings plus per-height read list are surfaced on every PoolStateComparisonReport. The budget check is performed before the StateView call so a run that would exceed either ceiling halts with a BudgetExhaustionRecord instead of silently reducing coverage.
+
+Evidence:
+
+- src/robinhood_lp/replay/state_comparison.py:432-508 (RecordedComparisonBounds dataclass with heights_per_pool, per_height_read_list, logical_call_ceiling_per_pool, compute_unit_ceiling_per_pool, validated to require heights_per_pool>=1 and methods in VALID_STATE_VIEW_METHODS)
+- src/robinhood_lp/replay/state_comparison.py:1522-1579 (run_state_comparison fixes bounds BEFORE running: builds RecordedComparisonBounds, then runs _run_pool_comparison for each pool)
+- src/robinhood_lp/replay/state_comparison.py:1423-1514 (_run_pool_comparison checks logical-call and compute-unit ceiling BEFORE issuing the read and breaks out with BudgetExhaustionRecord when exceeded)
+- tests/test_replay_t042.py:367-422 (test_budget_exhaustion_halts_logical_call_run + test_budget_exhaustion_halts_compute_unit_run verify halt-without-coverage-reduction and halt_height/method recording)
+- tests/test_replay_t042.py:157-176 (test_recorded_bounds_validation_rejects_zero_heights + rejects unknown methods)
+
+### input_reconciliation_consumed_from_t037 — PASS
+
+Input reconciliation clause satisfied. T042 consumes the T037 partition-reconciliation verdict as a boolean flag in PoolComparisonInput and surfaces it on the per-pool report. The runner does not re-implement, re-derive or relax the check; an inconsistent pool never produces passes=True.
+
+Evidence:
+
+- src/robinhood_lp/replay/state_comparison.py:328 (PoolComparisonInput.partition_reconciliation_consistent: bool — boolean flag the caller provides, not re-derived)
+- src/robinhood_lp/replay/state_comparison.py:732-740 (PoolStateComparisonReport.passes requires partition_reconciliation_consistent to be True; it is the AND of reconciliation, budget_exhaustion None, no blocked_checks, and all field_comparisons.passed)
+- tests/test_replay_t042.py:486-528 (test_reconciliation_inconsistent_pool_never_passes + test_reconciliation_consumer_records_t037_verdict)
+
+### exact_integer_field_comparisons_slot0_liquidity_ticks_bitmap_fee_growth — PASS
+
+Deliverable clause satisfied. The runner compares exact integer fields for slot0 (sqrtPriceX96, tick, lpFee, protocolFee packed + token0/token1 halves), active liquidity, ticks (liquidityGross, liquidityNet, feeGrowthOutside0X128, feeGrowthOutside1X128) and bitmap words. Fee-growth-global comparison is the documented 'where supported' zero-valued expectation because T041/T040 do not yet reconstruct fee-growth globals (recorded in the audit trail).
+
+Evidence:
+
+- src/robinhood_lp/replay/state_comparison.py:902-1057 (decode_get_slot_0/4-slot uint160+int24+uint24+uint24 packed-protocol-fee, decode_get_liquidity/uint128, decode_get_tick_bitmap/uint256, decode_get_tick_liquidity/uint128+int128, decode_get_tick_info/uint128+int128+2*uint256, decode_get_fee_growth_globals/2*uint256, decode_get_tick_fee_growth_outside/2*uint256)
+- src/robinhood_lp/replay/state_comparison.py:1128-1366 (per-method comparators return FieldComparison(expected_fields/observed_fields byte-for-byte equality, with mismatch_detail naming the disagreeing field)
+- tests/test_replay_t042.py:184-242 (multi-height exact integer agreement for both pools), 245-281 (FieldComparison surfaces exact integer mismatch), 583-622 (decoder slot-size and lpFee-mismatch tests)
+
+### must_not_no_latest_no_self_validation_no_pass_for_unserved — PASS
+
+Must-not clauses satisfied. There is no 'latest' string anywhere in the runner except in docstrings describing the prohibition. A None StateView response produces a BlockedCheckRecord; passes is False whenever any blocked check is recorded, so an unserved read is never counted as a pass. The comparator compares StateView wire values to values derived from ReplayOutput — the two sources are independent (the wire values come from the StateView endpoint, the expected values come from the replay's checkpoints), so the comparison is not a replay-output-vs-itself validation.
+
+Evidence:
+
+- src/robinhood_lp/replay/state_comparison.py:1468 (block_tag = '0x' + format(int(height), 'x') — never 'latest')
+- src/robinhood_lp/replay/state_comparison.py:215 (state_call returns None for un-mapped keys, mapping layer has no 'latest' alternative path)
+- src/robinhood_lp/replay/state_comparison.py:1477-1495 (None response -> BlockedCheckRecord; field_comparisons is never appended with a None response)
+- src/robinhood_lp/replay/state_comparison.py:732-740 (PoolStateComparisonReport.passes returns False when blocked_checks is non-empty, when budget_exhaustion is set, or when partition_reconciliation_consistent is False)
+- tests/test_replay_t042.py:307-359 (no-latest-substitution and blocked-check tests verify the audit trail carries the pinned height on the blocked check)
+
+### deliverables_runner_reports_bounds_blocked_records — PASS
+
+All four deliverables from the T042 contract are present: a block-pinned StateView comparison runner; comparison reports for slot0/active-liquidity/ticks/bitmap/fee-growth-where-supported; the recorded comparison bounds (heights per pool, per-height read list, logical-call and compute-unit ceiling) on every per-pool report; and BlockedCheckRecord entries for heights or endpoints that could not serve a pinned read.
+
+Evidence:
+
+- src/robinhood_lp/replay/state_comparison.py (Block-pinned StateView comparison runner: run_state_comparison + PoolStateComparisonReport with field_comparisons, blocked_checks, budget_exhaustion, partition_reconciliation_consistent, endpoint_alias)
+- src/robinhood_lp/replay/state_comparison.py:742-789 (PoolStateComparisonReport.to_dict exposes logical_call_ceiling, compute_unit_ceiling, per_height_read_list, heights_compared for the audit trail)
+- src/robinhood_lp/replay/state_comparison.py:822-833 (StateComparisonReport.to_dict exposes the combined bounds + per-pool reports + overall_passes)
+
+### verification_pytest_ruff_mypy_workflow — PASS
+
+All T042 acceptance verification commands (pytest, Ruff format/check, strict mypy) pass; the workflow status and validate commands succeed.
+
+Evidence:
+
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_replay_t042.py --no-header -> 23 passed in 0.12s
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest --no-header --ignore=tests/test_abi_artifacts.py -> 1040 passed, 6 skipped in 12.51s (6 skips are pre-existing: foundry/gpg/protocol-ids)
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/replay/state_comparison.py src/robinhood_lp/replay/__init__.py tests/test_replay_t042.py tests/_replay_t042_fixtures.py -> '4 files already formatted'
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/replay/state_comparison.py src/robinhood_lp/replay/__init__.py tests/test_replay_t042.py tests/_replay_t042_fixtures.py -> 'All checks passed!'
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/robinhood_lp/ -> 'Success: no issues found in 78 source files'
+- MYPYPATH=src:tests /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict tests/test_replay_t042.py tests/_replay_t042_fixtures.py -> 'Success: no issues found in 2 source files'
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow status -> workflow_state=AWAITING_REVIEW, task_status=AWAITING_REVIEW, attempt 1
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow validate -> {"status": "OK"}
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- The runner is exercised against synthetic-but-faithful event sequences and golden values derived from those events. An end-to-end run against the real Robinhood Chain mainnet endpoints (using the T038 qualified dataset and a StateView archive-state-capable endpoint) is downstream of T042 itself; this is documented in the developer evidence's residual_risks section.
+- fee-growth-global values are not yet reconstructed by T041/T040, so the comparator records the StateView-observed fee-growth globals in the audit trail but expects zero. This is the documented 'where supported' clause of the T042 acceptance. A future T051/T043 layer is responsible for the comparison surface for fee-growth globals.
+- The fixture's PoolIds are computed from synthetic PoolKeys; an end-to-end run must use the resolved PoolIds T038 produced, with keccak256(abi.encode(PoolKey)) re-derivation as the pool-identity gate.
+- T042 acceptance text contains 'any tolerated derived decimal lists formula and bound'. The implementation only compares exact integer fields and produces no derived decimals, so the clause is non-applicable by design. No derived decimals are produced, so no formula or bound is needed.
