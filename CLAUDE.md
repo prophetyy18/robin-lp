@@ -5,8 +5,9 @@
 This project develops automated liquidity-provision and market-making
 strategies for Robinhood Chain / Uniswap V4.
 
-The initial research target is concentrated-liquidity LP strategies such as
-FLYBRAIN/USDG.
+The research universe may hold any number of V4 pools (ADR-014); execution runs
+one user-selected active `PoolKey` for one target token. The pinned reference
+pool is ZZZ/USDG plus a second Owner-pinned pool resolved on chain by T038.
 
 The system will eventually support:
 

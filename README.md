@@ -3,8 +3,11 @@
 Automated liquidity-provision and market-making strategies for
 **Robinhood Chain / Uniswap V4**.
 
-Initial research target: concentrated-liquidity LP strategies such as
-**FLYBRAIN / USDG**.
+Research scope: concentrated-liquidity LP strategies on Robinhood Chain. The
+research universe may hold any number of V4 pools; execution runs one
+user-selected active `PoolKey` for one target token (ADR-014). The pinned
+reference pool is ZZZ/USDG (`0x6c614c…df43ed`) plus a second Owner-pinned pool
+resolved on chain by T038.
 
 > ⚠️ **Default mode: PAPER.** Mainnet automated execution is the V1
 > acceptance condition (G-LIVE-01) and is reached only through the

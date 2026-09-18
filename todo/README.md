@@ -292,7 +292,9 @@ Do not guess these in an earlier task:
 - T024 verifies Robinhood mainnet/testnet chain identity, deployment blocks/transactions,
   runtime code hashes, archive/finality/range behavior and endpoint agreement. No address or
   chain behavior is accepted merely because it appears in a documentation artifact.
-- T023/T043 determine the selected PoolKey's actual Hook identity and semantics.
+- T027/T043 determine a pool's actual Hook identity and semantics. No PoolKey has
+  been selected: selection is a Web action, and Hook evidence is established per pool
+  rather than for a pre-chosen one.
 - T031 measures data volume and confirms storage/partition/retention parameters under ADR-002;
   T032 implements ADR-010 capability-driven A+B routing and records preflight versus actual
   calls, HTTP requests, provider units, bytes, rows, and elapsed time. A first dataset starts
