@@ -1,0 +1,41 @@
+{
+  "task_id": "T043",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented T043 hook-semantics evidence packs in src/robinhood_lp/qualification/hook_pack.py with full empty-set evidence and heterogeneous-hook-pack support. The module provides: (1) per-pool HookPack dataclass carrying hook address, code hash, proxy implementation address, upgrade authority, decoded flag bits, verified source / ABI pin, before / after delta paths, dynamic-fee behaviour, external state dependencies, adversarial tests, replay model, and explicit invalidation rule; (2) EmptySetHookEvidence artifact for the case where no included pool has nonzero hooks, carrying per-pool T023 classification outcomes, the reason no hook pack exists per pool, and an explicit no-hook-semantics-verified statement; (3) HookPackReport combining per-pool classifications with either hook packs or the empty-set record; (4) decode_hook_flag_bits and derive_before_after_deltas / derive_dynamic_fee_behavior / derive_action_delta_invariants helpers derived from the V4 Hooks.sol flag table; (5) code_change_demotes_pack and demoted_pool_record implementing the invalidation rule that demotes the pool to ingestion on a hook code-hash change. 65 new tests cover the acceptance matrix: empty-set evidence path with per-pool classification outcomes, nonzero-hook pack with every required field, code-change invalidation demoting the pool, adversarial edge cases (delta-without-action violation, dynamic-fee pool, return-delta paths, swap/add/remove/donate/initialize callbacks, frozen value objects, builder cross-checks). All pytest tests pass (1105 passed, 6 pre-existing environment skips unrelated to this task), ruff format and check pass, and mypy strict mode passes on src/. The module is float-free, deterministic, depends only on the protocol and discovery layers per ADR-006, and refuses to build a HookPack for a pool whose hooks are the zero address (the caller must build EmptySetHookEvidence instead).",
+  "commands": [
+    {
+      "command": "python -m pytest tests/test_hook_pack_t043.py -v --tb=short",
+      "result": "65 passed in 0.29s"
+    },
+    {
+      "command": "python -m pytest tests/test_eligibility.py tests/test_two_pool_t038.py tests/test_replay_t042.py tests/test_tick_liquidity_t041.py tests/test_replay_t040.py --tb=short",
+      "result": "220 passed in 1.55s"
+    },
+    {
+      "command": "python -m pytest --tb=short -q --ignore=tests/test_abi_artifacts.py",
+      "result": "1105 passed, 6 skipped in 11.92s (pre-existing environment skips for forge / gpg / reordered-inputs vectors, unrelated to this task)"
+    },
+    {
+      "command": "python -m ruff format --check src/ tests/",
+      "result": "135 files already formatted"
+    },
+    {
+      "command": "python -m ruff check src/ tests/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python -m mypy src/",
+      "result": "Success: no issues found in 79 source files"
+    },
+    {
+      "command": "MYPYPATH=src python -m mypy --explicit-package-bases tests/test_hook_pack_t043.py",
+      "result": "Success: no issues found in 1 source file"
+    }
+  ],
+  "residual_risks": [
+    "The packed hook code hash, ABI selectors, and event topics are operator observations the runtime must verify at promotion time; the build is offline so this pack is the audit-trail surface, not a substitute for on-chain bytecode verification.",
+    "The pre-existing test_artifact_byte_matches_regenerated_oracle_output forge build failure (missing tools/oracle/lib/v4-core sources) is environment-specific and unrelated to this task; the same test was already broken before this attempt.",
+    "The V4 isValidHookAddress rule-1 delta-without-action violation is recorded in invalidation_note but does not abort the pack build; the framework must refuse to promote such a pool beyond ingestion per the T038 acceptance clause.",
+    "The hooks isValidHookAddress delta flag names and (action, delta) pairs are taken from the upstream Uniswap V4 Hooks.sol convention; a future hook ABI variant will require a new pack and a spec-revision bump."
+  ]
+}
