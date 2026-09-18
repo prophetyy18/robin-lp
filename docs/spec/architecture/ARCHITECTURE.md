@@ -36,7 +36,9 @@ Goals (binding for the technical framework):
 Non-goals (binding for V1):
 
 - multi-chain operation or switching to other EVM chains;
-- multi-pool operation or automatic rebalancing across pools;
+- multi-pool *execution* or automatic rebalancing across pools. A multi-pool
+  *research* universe is in scope under ADR-014 and is disjoint from execution: it
+  holds no assets, produces no transactions and grants no authority;
 - automatic selection or switching of the target token;
 - profitability of any concrete LP strategy;
 - smart-contract deployment or custom hook authoring;
@@ -132,6 +134,11 @@ application / backtest orchestration
 | 9 | T093–T094 | review and promotion evidence | operations / controls |
 | 9 | T095 | mainnet canary execution | isolated execution service |
 | 9 | T096 | final V1 traceability dossier | presentation / ops |
+| 3 | T039 | per-pool extended-history acquisition | application / orchestration |
+| 10 | T100 | `robinhood_lp.research.dataset` | storage |
+| 10 | T101 | `robinhood_lp.research.panel` (labels, splits, training harness) | backtest / research |
+| 10 | T102 | `robinhood_lp.research.models` (model-backed strategy components) | strategy |
+| 10 | T103 | `robinhood_lp.web` research pages | presentation / controls |
 
 ## 3. Cross-cutting policies
 
@@ -141,7 +148,11 @@ Done in `todo/README.md`.
 - **Precision.** On-chain integers remain integers from RPC through protocol
   accounting. Conversion to `Decimal` or display units happens only at an
   explicitly named boundary; `float` is forbidden in protocol, replay,
-  features, valuation, and accounting code paths. See ADR-004.
+  features, valuation, and accounting code paths. See ADR-004. Statistical and
+  machine-learning code is the one additional exception, and only inside a
+  boundary that its own module names and documents: model inputs and outputs stay
+  typed, unit-carrying and integer-exact at the edge, and no float value produced
+  there may reach a protocol, accounting or valuation path (ADR-014).
 - **Determinism.** Replay, backtest, and paper runs must produce
   byte-equivalent canonical outputs across input chunking and storage order
   after excluding declared observational fields (e.g. ingestion wall time).
@@ -171,11 +182,13 @@ superseding decisions are new ADRs that explicitly reference the prior one.
 | ADR-006 | Dependency direction between layers | accepted |
 | ADR-007 | Continuous integration provider | accepted |
 | ADR-008 | Binding document precedence | accepted |
-| ADR-009 | Display / Decimal boundary | Owner (Direction 1) | 2026-09-15 |
+| ADR-009 | Display / Decimal boundary | accepted |
 | ADR-010 | Free dual-provider historical ingestion | accepted |
 | ADR-011 | Project-owned bounded JSON-RPC transport | accepted |
 | ADR-012 | Block-header time persistence and acquisition call volume | accepted (addendum to ADR-002 / ADR-010) |
-| ADR-013 | Finalized window pinning and partition reconciliation | accepted (addendum to ADR-002 / ADR-010 / ADR-012) |
+| ADR-013 | Finalized window pinning and partition reconciliation | accepted (addendum to ADR-002 / ADR-010 / ADR-012); window rule replaced by ADR-015 |
+| ADR-014 | Research universe, numeraire hierarchy, and the execution boundary | accepted (bounds ADR-005 and ADR-004 for the research scope) |
+| ADR-015 | Per-pool extended-history research window | accepted (addendum to ADR-002 / ADR-010 / ADR-011 / ADR-012; replaces ADR-013's window rule) |
 
 ## 5. Open decisions (not blocking research)
 

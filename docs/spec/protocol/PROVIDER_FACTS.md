@@ -89,7 +89,39 @@ window, and the qualification record of a named run.
 - No credential-bearing URL, API key, authorization header, or environment-file
   value is recorded in this document.
 
-## Finalized pinning and the research window (Owner decision 2026-09-18)
+## Finalized pinning and the research window (Owner decision 2026-09-19)
+
+**The per-pool rule below replaces the ten-million-block rule recorded in the
+following subsection.** The older text is retained as history: it describes the rule
+T038 implemented and the datasets that rule produced, and no clause of it may be cited
+as the research range. The replacement is recorded in `ADR-015`.
+
+- **[Owner policy, 2026-09-19]** Each pool in the research universe is acquired over
+  its own inclusive window from **that pool's `Initialize` block** to the run's agreed
+  finalized block. There is no fixed width, no extension allowance, and no
+  `pool_init_outside_window` exclusion: a pool whose `Initialize` block cannot be
+  located inside the candidate range is a failed resolution that stops the run and is
+  reported. One pool's window is never widened to reach another pool's initialization.
+- **[Measured observation, 2026-09-19 — re-probe every run]** The block interval is
+  **0.1008 seconds**, derived from this project's own persisted block headers (3,266
+  headers spanning 999,704 blocks and 100,819 seconds). A ten-million-block window is
+  therefore about **11.7 days**, and the roughly 65 million blocks observed at the last
+  probe are about **76 days** of chain history. These are observations of a mutable
+  chain, not constants.
+- **[Measured observation, 2026-09-19]** Cost scales with the pool's age rather than
+  with a fixed width: a single pool-filtered `eth_getLogs` call covered the entire
+  one-million-block reference range, and 3,266 distinct event blocks required only
+  deduplicated, batched header calls. The per-call log ceiling, not the range width,
+  is what forces a scan to be split.
+- **[Run-specific measurement — re-probe every run]** The `finalized` height, its
+  hash, each endpoint's finality-tag support, archive-state depth and accepted log
+  range remain mutable third-party observations. Every run re-probes at its own start
+  and records its own values, and a declared budget ceiling halts the run rather than
+  being exceeded silently.
+
+The remainder of this section is the superseded 2026-09-18 record.
+
+### Superseded: the ten-million-block rule (Owner decision 2026-09-18)
 
 The ten-million-block research window supersedes the 1,000,001-block reference range
 above. Its values are not all the same kind of fact, so each is labelled. Provenance:
