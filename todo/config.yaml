@@ -3,7 +3,7 @@
   "project": "robinhood-lp-v1",
   "product_baseline_commit": "6c3177883a676a06f8b571d0a598f524e319fa34",
   "intent_revision": "v1-2026-09-19-research-universe-numeraire",
-  "spec_revision": "v1-2026-09-19-research-universe",
+  "spec_revision": "v1-2026-09-19-numeraire-web-console",
   "agent_runtime": {
     "provider": "MiniMax Anthropic-compatible API",
     "model": "MiniMax-M3[1m]",
