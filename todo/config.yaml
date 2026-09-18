@@ -392,6 +392,7 @@
         "T037"
       ],
       "task_file": "todo/phases/P03-ingestion-and-storage/T038.md",
+      "superseded_by": "T039",
       "attempt": 2,
       "base_commit": "cdae0239617450634a6f3fcd6c34a25d1daa28f6",
       "candidate_commit": "4d60384a4321d7a19fa683c1f7886e563a6ee732",
