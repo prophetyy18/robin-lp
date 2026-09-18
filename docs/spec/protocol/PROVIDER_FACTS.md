@@ -19,6 +19,10 @@ for the same two endpoints are retained separately in
 `docs/implement/protocol-artifacts/rpc-mainnet-free-ab-validation-2026-09-16.json`.
 This document carries the 2026-09-17 result-bearing measurements.
 
+Two later sections are not capability measurements and are labelled where they
+appear: the Owner's finalized-pinning rule for the ten-million-block research
+window, and the qualification record of a named run.
+
 ## Reference target used for the result-bearing measurements
 
 - PoolId
@@ -84,6 +88,72 @@ This document carries the 2026-09-17 result-bearing measurements.
   not a density or volume constant for other ranges.
 - No credential-bearing URL, API key, authorization header, or environment-file
   value is recorded in this document.
+
+## Finalized pinning and the research window (Owner decision 2026-09-18)
+
+The ten-million-block research window supersedes the 1,000,001-block reference range
+above. Its values are not all the same kind of fact, so each is labelled. Provenance:
+measured values here come from the same 2026-09-17 read-only probe, chain id 4663,
+endpoint aliases A and B, as the facts above; policy values come from the Owner
+decision of 2026-09-18 and are not measurements.
+
+- **[Owner policy, 2026-09-18]** The window end is the `finalized` block read at run
+  start from both qualified endpoints (aliases A and B above). The two readings must
+  agree on block number **and** block hash; that agreed block is the window end,
+  pinned by number and hash into the run record. `latest`, a non-finalized block and
+  any wall-clock-derived bound are excluded as the window end, and there is no
+  fallback to `latest` when the tag is unavailable.
+- **[Owner policy, 2026-09-18]** The window start is
+  `min(end - 10_000_000, Initialize block of each included pool)`. The start is
+  extended below `end - 10_000_000` only when a pool's `Initialize` lies within
+  2,000,000 blocks of that bound; a pool whose `Initialize` lies further below is
+  reported `pool_init_outside_window` and excluded from the qualified dataset rather
+  than widening the window.
+- **[Chain fact, reference pool record]** The pinned reference pool's `Initialize`
+  block is `54946237` on chain id 4663 (the reference range above starts at that
+  block). It identifies that pool's initialization; it is not a rule, and an
+  acquisition still has to find the pool's own `Initialize` evidence inside the range
+  it acquires.
+- **[Run-specific measurement — re-probe every run]** The `finalized` height and its
+  hash, each endpoint's finality-tag support, archive-state depth and accepted log
+  range are mutable third-party observations. No finalized height is recorded here,
+  because a number measured today is not evidence for a later run; every run
+  re-probes at run start (ADR-010 decision 1) and records its own values.
+
+The second pool of the window is Owner-pinned by `PoolId`
+`0xEd50bDeeA8aDC232f159486192a4157281D722ff` on chain id 4663. Its `PoolKey`
+(`currency0`, `currency1`, `fee`, `tickSpacing`, `hooks`) and its `Initialize` block
+are **not** recorded here: they are unresolved and are resolved on chain by T038,
+which then verifies `keccak256(abi.encode(PoolKey)) == PoolId`. No value for those
+fields may be assumed from this document.
+
+## Dataset qualification records
+
+### `run-680e65f4a59842d98b1712a45280779d` (2026-09-18) — superseded, non-qualifying
+
+This run's dataset does **not** satisfy the Phase 3 exit gate and is **not** a Phase 4
+input. It must not be repaired, re-qualified, overwritten or merged, and no Phase 4
+contract may cite it as a satisfied entry condition. It remains immutable historical
+evidence for the defect below.
+
+- The two layers disagree: `event_index` holds 3,739 rows across 3,266 distinct event
+  blocks while the Parquet partitions hold 3,737 rows across 3,264, and the run's own
+  per-event-type comparison fails closed (`Swap` 3,157 against its pinned baseline
+  3,159).
+- The two missing rows are `Swap` events at block `55586273` (log index 53,
+  transaction
+  `0x17c7771d139bbf8f8cb7d5b7b1cd0ccb09ca6aefa43b6e36df400e26fb5e936e`) and block
+  `55726297` (log index 29, transaction
+  `0xd75437f4a29d3763edf90eebc8cfd179f63b2f278f01d9b9663ac2ab0a5d79d4`). The
+  canonical `EventKey` of each row adds its block's hash, so a re-check compares the
+  `EventKey` sets rather than row counts alone.
+- The cause is a storage-writer defect, not a chain event:
+  `RawPartitionWriter._merge_into_existing_partition`
+  (`src/robinhood_lp/storage/writer.py`) appended those rows to `event_index` and
+  deliberately did not modify the Parquet file, and the run reported `complete=1`
+  with an empty `reorg_journal`, `conflicting_observations` and
+  `run_manifest_deviations`. Closing the defect and delivering the per-partition
+  `event_index`-versus-Parquet reconciliation are owned by T037.
 
 ## Sources
 
