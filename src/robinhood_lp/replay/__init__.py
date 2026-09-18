@@ -1,10 +1,11 @@
-"""Deterministic event replay (T040).
+"""Deterministic event replay (T040) and tick-liquidity reconstruction (T041).
 
 This package sits in the reconstruction layer (ADR-006 §2.1). It
 replays a per-pool dataset of typed V4 events into a deterministic
-sequence of checkpoints. Chunking, ingestion order, or restart
-boundaries cannot change the observable pool state produced from the
-same input set.
+sequence of checkpoints (T040) and reconstructs the per-tick
+state the V4 pool carries for a pinned finalized window (T041).
+Chunking, ingestion order, or restart boundaries cannot change the
+observable pool state produced from the same input set.
 
 Public surface:
 
@@ -23,12 +24,13 @@ Public surface:
   iterable of typed event records and returns a :class:`ReplayOutput`.
 - :class:`Replayer` is the same algorithm with extra hooks for
   tests that need to inspect intermediate state.
-- :func:`load_replay_events` reads a per-pool dataset from the
-  qualified partitions under a data root. It uses the
-  :mod:`robinhood_lp.storage` reader and never touches the
-  superseded 2026-09-18 reference dataset (``run-680e65f4...``):
-  the contract that inputs must be one pool's qualified dataset
-  is enforced at the :class:`ReplayInput` boundary.
+- :func:`reconstruct_tick_liquidity` is the T041 entry point: it
+  takes a pool's typed event stream and a ``PoolKey`` and produces
+  a :class:`ReconstructedPoolTickState` carrying the per-tick
+  ``TickInfo``, the tick bitmap, the active liquidity, the crossing
+  log and the position-key set. The reconstruction is per-pool,
+  scoped to the pool's pinned finalized window, and never merged
+  across pools.
 
 Replay is float-free. It depends on the protocol package
 (``ChainId`` / ``PoolId`` / ``PoolKey`` / ``EventKey``), the
@@ -55,21 +57,67 @@ from robinhood_lp.replay.protocol_fee import (
     unpack_protocol_fee,
 )
 from robinhood_lp.replay.replayer import Replayer, replay
+from robinhood_lp.replay.ticks import (
+    CROSSING_ONE_FOR_ZERO,
+    CROSSING_ZERO_FOR_ONE,
+    MAX_LIQUIDITY,
+    VALID_CROSSING_DIRECTIONS,
+    LiquidityOverflowError,
+    PositionKey,
+    ReconstructedPoolTickState,
+    TickBitmap,
+    TickCrossing,
+    TickInfo,
+    TickLiquidityError,
+    TickLiquidityOverflowError,
+    TickMisalignedError,
+    TickOutOfBoundsError,
+    TicksMisorderedError,
+    add_liquidity,
+    compress,
+    least_significant_bit,
+    most_significant_bit,
+    position,
+    reconstruct_tick_liquidity,
+    tick_spacing_to_max_liquidity_per_tick,
+)
 
 __all__ = [
+    "CROSSING_ONE_FOR_ZERO",
+    "CROSSING_ZERO_FOR_ONE",
     "DuplicateEventError",
     "ImpossibleTransitionError",
+    "LiquidityOverflowError",
+    "MAX_LIQUIDITY",
     "MissingTransactionIndexError",
     "PoolCheckpoint",
+    "PositionKey",
+    "ReconstructedPoolTickState",
     "ReplayError",
     "ReplayInput",
     "ReplayOutput",
     "Replayer",
+    "TickBitmap",
+    "TickCrossing",
+    "TickInfo",
+    "TickLiquidityError",
+    "TickLiquidityOverflowError",
+    "TickMisalignedError",
+    "TickOutOfBoundsError",
+    "TicksMisorderedError",
     "UnknownEventTypeError",
     "UnknownPoolError",
+    "VALID_CROSSING_DIRECTIONS",
     "WindowBoundsError",
+    "add_liquidity",
+    "compress",
+    "least_significant_bit",
+    "most_significant_bit",
     "pack_protocol_fee",
+    "position",
+    "reconstruct_tick_liquidity",
     "replay",
     "replay_output_fingerprint",
+    "tick_spacing_to_max_liquidity_per_tick",
     "unpack_protocol_fee",
 ]

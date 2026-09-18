@@ -1,0 +1,37 @@
+{
+  "task_id": "T041",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented per-pool tick-liquidity state reconstruction in `src/robinhood_lp/replay/ticks.py` and exposed it through `robinhood_lp.replay`. The reconstruction is a pure function of the pool's qualified event stream and the pool's PoolKey; it builds the per-tick `TickInfo` (liquidityGross / liquidityNet / feeGrowthOutside), the V4 tick bitmap (`int16 wordPos -> uint256`), the active-liquidity view, the crossing log and the position-key set in lockstep with V4's `Pool.modifyLiquidity` / `Pool.swap` / `LiquidityMath.addDelta` / `TickBitmap.flipTick` semantics. 50 unit tests in `tests/test_tick_liquidity_t041.py` (plus the `_tick_liquidity_t041_fixtures.py` helper module) cover add / remove / poke, same-block multi-action, boundary crossings in both directions, max-liquidity-per-tick overflow, negative gross underflow, spacing and out-of-bounds misaligned ticks, per-pool isolation (unknown pool, two-pool non-sharing), determinism under shuffling and deep-copy, and the byte-exact post-swap `liquidity` reconciliation against the swap wire value. The 50 T041 tests pass; the full 1017-test unit suite (excluding the pre-existing foundry-build-dependent `test_abi_artifacts` case, which fails identically on `main` because the worktree lacks `tools/oracle/lib`) still passes; ruff format, ruff lint and strict mypy pass on every changed file.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/test_tick_liquidity_t041.py --tb=short",
+      "result": "50 passed in 0.41s"
+    },
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/test_replay_t040.py tests/test_tick_liquidity_t041.py --tb=short",
+      "result": "95 passed in 0.19s"
+    },
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/ --ignore=tests/test_abi_artifacts.py --tb=short",
+      "result": "1017 passed, 6 skipped in 15.07s (skip reasons are pre-existing: foundry not on PATH and a deliberately-unsorted pydantic-vector rejection)"
+    },
+    {
+      "command": "PYTHONPATH=src python -m ruff format --check src/ tests/",
+      "result": "130 files already formatted"
+    },
+    {
+      "command": "PYTHONPATH=src python -m ruff check src/ tests/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "PYTHONPATH=src python -m mypy src/robinhood_lp/replay/ tests/test_tick_liquidity_t041.py tests/_tick_liquidity_t041_fixtures.py",
+      "result": "Success: no issues found in 10 source files"
+    }
+  ],
+  "residual_risks": [
+    "feeGrowthOutside0X128 / feeGrowthOutside1X128 are tracked structurally but not updated on `crossTick` because feeGrowthGlobal is owned by T051 (per the T041 contract); the zero default is the safe-initialisation value V4 uses on freshly-initialized ticks.",
+    "Bootstrap tick defaults to 0 (matching the uninitialized bootstrap on `ReplayInput`). Callers with a non-zero `slot0.tick` from a StateView-style block-pinned read must pass it via `bootstrap_tick`; the same default zero is correct for the pinned ZZZ/USDG reference pool whose `Initialize` block is at tick 0 for the test fixtures.",
+    "The crossing loop verifies the post-swap `liquidity` field byte-for-byte; a swap whose event lies about `liquidity` raises `TickLiquidityError` and the reconstruction fails closed rather than returning a partial result. This matches V4's invariant that active liquidity moves only on tick crossings.",
+    "The `test_abi_artifacts::test_artifact_byte_matches_regenerated_oracle_output` failure on this worktree is a pre-existing infrastructure issue: the worktree does not have `tools/oracle/lib/` (a git submodule) so forge cannot build the v4-core / v4-periphery contracts. The same test passes on `main` where the submodule is present; this task did not touch any abi / oracle code path."
+  ]
+}
