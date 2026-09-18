@@ -150,8 +150,10 @@ preliminary paper 必须标为仅实现验证，不得显示为 live 晋级证�
 - 价格图叠加 tick Range、入场/出区间/再平衡/退出事件，不以收益曲线替代价格。
 - PnL 图可拆分本金价格变化、LP fee、Gas、滑点、Hook delta、Swap/再平衡成本
   和未解释残差。
-- 仓位图同时显示 liquidity、token0/token1 原始数量和 USDG 等值；不得把
-  `liquidityDelta` 直接标成 USDG。
+- 仓位图始终显示 liquidity 和 token0/token1 原始数量；等值展示取决于数据集资格：
+  数据集为 `QUALIFIED` 时显示其报告计价单位的等值，数据集为 `RELATIVE_ONLY` 时
+  显示相对形式并带明确的 `RELATIVE_ONLY` 标记。不得把 `liquidityDelta` 直接标成
+  USDG。
 - 对比视图采用相同数据范围、估值来源和成本口径；不同口径必须阻止直接排名。
 - 覆盖图以实测数据画出可用与缺失区间，缺失不得插值、补零或与“已覆盖”混同显示。
 - 回放时间线对齐区块、数据时间与可用时间，显示价格、tick Range、事件，以及每个

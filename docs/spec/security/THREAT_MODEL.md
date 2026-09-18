@@ -344,13 +344,122 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
 - **Residual risk:** Correlated manipulation of all approved sources.
 - **Evidence:** ADM-POOL-002, G-VALUATION-01 and T053/T070 acceptance.
 
+### T-17 Label leakage or look-ahead in the research panel
+
+- **Severity:** Critical
+- **Scenario:** A panel feature, label or split carries information that was
+  not available at its decision time — a label window overlapping the training fold
+  without a purge gap, a statistic computed over the evaluation period, or a feature
+  stamped by data time rather than availability time. The model then appears
+  predictive and is not, and the false skill feeds range, sizing or promotion
+  decisions.
+- **Controls:** `DS-020`/`DS-021` admit only pool holdout, time holdout and
+  walk-forward as split axes; `DS-022` requires a purge and embargo gap whose length
+  is derived from the declared label horizon and recorded with every split; T050
+  point-in-time bars and T101 labels carry their observation and availability times;
+  T101 acceptance fails a run when an injected future-derived feature or an unpurged
+  overlapping fold is detected; T063 records the dataset version the run consumed.
+- **Owner:** T101 (panel labels and harness) + T064 (splits and robustness) + T050
+  (point-in-time bars)
+- **Residual risk:** A leak that the artifact's own metadata does not reveal, such as
+  a source whose availability time is itself misrecorded. Mitigated by re-derivation
+  from raw partitions and manifest checksums; not eliminated.
+- **Evidence:** T101 acceptance (injected future-derived feature, overlapping label
+  window, truncation invariance);
+  `docs/spec/research/DATASET_AND_EVALUATION.md` §4 (`DS-020`–`DS-022`).
+
+### T-18 A `RELATIVE_ONLY` research artifact is read or reported as USD-denominated
+
+- **Severity:** High
+- **Scenario:** A dataset whose currencies include neither a USD asset nor a
+  qualified conversion route carries relative results only, but a result, chart or
+  export presents it with a USD unit, a dollar sign or an implied USD PnL, and an
+  operator reads relative performance as a dollar result.
+- **Controls:** ADR-014 clause 3 and `DS-003` forbid any USD-denominated field
+  anywhere in a `RELATIVE_ONLY` dataset; `WEB-GLOBAL-001` requires every page to show
+  the dataset version and the reporting numeraire and makes `RELATIVE_ONLY` textually
+  and visually distinguishable; T053 records the qualification per numeraire; T052
+  keeps attribution relative; T084, T086 and T103 acceptance require the distinction
+  on every view that displays a result.
+- **Owner:** T053 (valuation qualification) + T084/T086 (console display) + T103
+  (research pages and saved definitions)
+- **Residual risk:** A hand-built export or a screenshot taken out of context loses
+  the marker; the dataset's qualification record is the only durable evidence.
+- **Evidence:** `WEB-GLOBAL-001`, ADR-014 clause 3, `DS-003`, T084/T086/T103
+  acceptance.
+
+### T-19 A research artifact or model acquires execution authority
+
+- **Severity:** Critical
+- **Scenario:** A dataset, model, saved research definition or model assessment is
+  treated as an execution approval, appears in an approval list, becomes the active
+  strategy default, or is reachable from an execution-shaped control, so an
+  unreviewed model reaches paper or live.
+- **Controls:** ADR-014 clauses 1 and 5 and `G-ML-01`; T085's versioned write path
+  records a research definition as a research artifact, and its acceptance forbids
+  one from being read as, converted into, or offered as an execution approval and
+  forbids an execution-shaped control from creating, promoting or referencing one;
+  T103 may not let a definition become an execution approval or appear in an
+  execution-shaped control; T086 journeys prove that no research page is reachable
+  from, or confusable with, an execution-shaped control; T070 and T094 admit an
+  intent only against an explicit scoped approval; T102 may not let a model become
+  the live default.
+- **Owner:** T085 (write path) + T103 (research pages) + T086 (journeys) + T070/T094
+  (the execution gate)
+- **Residual risk:** An operator who copies a model assessment into a live parameter
+  by hand; outside the framework's reach, but visible in the version/audit trail.
+- **Evidence:** T085 acceptance; T086 journeys; `WEB-GLOBAL-003`; ADR-014 clauses 1
+  and 5; `G-ML-01`.
+
+### T-20 Model output bypasses or weakens the central risk gateway
+
+- **Severity:** Critical
+- **Scenario:** A model-backed regime or fee-opportunity implementation is consulted
+  before the central risk check instead of after it, its uncertainty is converted
+  into a relaxed limit, or a second, weaker check is placed ahead of the gateway, so
+  an intent the gateway would refuse is created or its limits are widened.
+- **Controls:** `G-RISK-01` requires one independent, central and non-bypassable
+  check; T070 owns the gateway that admits intents; the T060 component contract
+  confines a model to the regime and fee-opportunity interfaces and forbids it from
+  altering risk semantics, while T102's must-not clauses forbid bypassing, weakening
+  or duplicating the gateway and its acceptance re-verifies that substituting the
+  model changes no ledger, risk, execution or audit contract; ADR-006 keeps strategy
+  free of RPC, storage and execution imports.
+- **Owner:** T070 (risk gateway) + T060 (strategy contract) + T102 (model components)
+- **Residual risk:** A future task that adds a second admission path ahead of the
+  gateway; the contract text forbids it, and only the T102 substitution test and T070
+  acceptance would detect it.
+- **Evidence:** T070 and T102 acceptance; `G-RISK-01`; ADR-006.
+
+### T-21 A published dataset version, numeraire or split boundary is mutated
+
+- **Severity:** Medium
+- **Scenario:** A published dataset version has its member pools, block ranges,
+  reporting numeraire, valuation qualification or split boundaries edited in place,
+  so a published result can no longer be reproduced and its stated provenance is
+  wrong.
+- **Controls:** ADR-014 clause 4 and `DS-002` make publishing additive and forbid
+  editing an existing version; `DS-043` requires every model artifact to carry a
+  content hash and full provenance (dataset version, feature configuration, split
+  definition, hyperparameters, seed, code revision); T063's manifest records the
+  dataset version and reporting numeraire and fails validation when either is missing
+  or disagrees with the dataset's qualification record; T100's registry and T103's
+  saved definitions re-open to the same pools, ranges and segment roles; T031/T032
+  compare partition manifests and checksums.
+- **Owner:** T100 (dataset registry) + T063 (manifest) + T101 (artifact provenance)
+  + T103 (saved definitions)
+- **Residual risk:** A mutation is detected only when a run is repeated; without a
+  durable record of the original version, tampering that also rewrites the manifest
+  cannot be proven.
+- **Evidence:** `DS-002`, `DS-043`, ADR-014 clause 4, T101/T103 acceptance.
+
 ## 4. Severity rubric
 
 | Severity | Definition | Examples |
 | --- | --- | --- |
-| Critical | Wrong economic output that the user cannot detect; data corruption; secret exposure; unauthorized control or live execution | T-01, T-02, T-03, T-04, T-12–T-16 |
-| High | Wrong operator action enabled by the framework; leak of an identifier that is non-public but not a key | T-05, T-06 |
-| Medium | Operability or correctness degradation that the user can detect and recover from | T-07, T-08, T-09, T-10, T-11 |
+| Critical | Wrong economic output that the user cannot detect; data corruption; secret exposure; unauthorized control or live execution | T-01, T-02, T-03, T-04, T-12–T-17, T-19, T-20 |
+| High | Wrong operator action enabled by the framework; leak of an identifier that is non-public but not a key | T-05, T-06, T-18 |
+| Medium | Operability or correctness degradation that the user can detect and recover from | T-07, T-08, T-09, T-10, T-11, T-21 |
 | Low | Cosmetic, performance, or recoverable nuisance | (none in V1) |
 
 ## 5. Controls matrix
@@ -373,6 +482,11 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
 | T-14 | Bound signer request + deterministic planner/executor | T090–T095 evidence |
 | T-15 | Encrypted Keystore + interactive unlock + locked restart | T081/T090 evidence |
 | T-16 | Qualified point-in-time USDG quotes + fail-closed risk | T049/T053/T070 evidence |
+| T-17 | Point-in-time features/labels, horizon-derived purge/embargo, temporal-only splits | T101 acceptance; `DS-020`–`DS-022` |
+| T-18 | Qualification record + `RELATIVE_ONLY` display rule (no USD-denominated field) | `WEB-GLOBAL-001`; T084/T086/T103 acceptance |
+| T-19 | Research artifacts stay research: no execution authority, approval appearance or reachability | T085 acceptance; T086 journeys; ADR-014 clauses 1 and 5 |
+| T-20 | One central, non-bypassable risk gateway ahead of any model output | T070 + T060/T102 acceptance; `G-RISK-01` |
+| T-21 | Additive publishing, content hashes, dataset-version binding in the manifest | T100/T063/T101 acceptance; `DS-002`/`DS-043` |
 
 ## 6. Residual risks and owner follow-ups
 
