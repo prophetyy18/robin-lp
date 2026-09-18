@@ -106,6 +106,31 @@ the target tasks remain `PLANNED`. FAIL retains the amendment worktree and uses
 use the same retry gate. One amendment may target at most eight tasks. Only one
 amendment may be active, and none may start while a product task is unfinished.
 
+#### Retiring approved work
+
+An `APPROVED` task is terminal: no other route may alter it. When an Owner
+decision makes completed work obsolete, use the `SUPERSEDE` layer rather than
+leaving an unexplained replacement task beside a stale rule:
+
+```bash
+python -m tools.workflow prepare-amendment \
+  --task T038 --layer SUPERSEDE \
+  --summary "retire the ten-million-block window rule in favour of T039" \
+  --owner-direction "<exact Owner direction>"
+```
+
+`SUPERSEDE` targets `APPROVED` tasks and may change exactly one config field —
+`superseded_by`, which must name an existing task — plus the target contract
+text. It may touch no document and no approval evidence: `status`, `attempt`,
+every commit SHA, the evidence pointer and the review record stay byte-identical,
+so the approval still describes exactly what was reviewed and the retirement is
+an annotation recorded on top of it. `depends_on` is editable as in every other
+layer, so a *planned* task whose dependency was retired must be re-pointed at the
+successor before it can be `ready`; `ready` refuses a dependency that carries
+`superseded_by`. The reason for a retirement lives in the amendment record under
+`todo/amendments/<id>/`, and the successor's contract must state what it
+replaces.
+
 ### Claude Code as the Manager
 
 The interactive Claude Code session in the main checkout may orchestrate these

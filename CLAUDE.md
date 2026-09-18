@@ -50,7 +50,10 @@ unless the user separately requests it.
 An explicit Owner request to amend one or more still-`PLANNED` contracts may use
 the separate `prepare-amendment` → Planner → `finish-amendment` → independent
 amendment-review route. This does not require a synthetic Developer failure and
-must not activate the target tasks or consume implementation attempts.
+must not activate the target tasks or consume implementation attempts. Work that
+is already `APPROVED` is retired through the same route with `--layer SUPERSEDE`,
+which records the successor task and leaves every approval field untouched; a
+retired decision is never edited or deleted.
 If a Developer returns `CONTINUATION_REQUIRED`, use the controller's continuation
 gate and invoke the returned fresh Developer in the retained worktree. If the
 visible Agent is stopped specifically by `maxTurns` before writing that handoff,

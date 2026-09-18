@@ -124,6 +124,14 @@ through an independent planning review. Passing that review merges only the
 planning amendment; target tasks remain `PLANNED` with their implementation
 attempt counters unchanged.
 
+A `SUPERSEDE`-layer amendment retires work that is already `APPROVED` instead of
+planning work that is not. It records the successor in the target's
+`superseded_by` field and may change nothing else — status, attempts, commits,
+evidence pointers and review records stay byte-identical, so an approval keeps
+describing the exact candidate it reviewed. Retirement is therefore an
+annotation on the history, not a rewrite of it, and "which approved work is
+still live" is the set of `APPROVED` tasks whose `superseded_by` is null.
+
 Every handoff binds the task contract, base commit and candidate commit. Review of uncommitted
 files is invalid. A repaired implementation always receives a new candidate commit and a fresh
 Reviewer context.

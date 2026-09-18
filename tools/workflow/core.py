@@ -21,6 +21,12 @@ TASK_PATTERN = re.compile(r"^T[0-9]{3}$")
 MAINTENANCE_PATTERN = re.compile(r"^M[0-9]{4}$")
 AMENDMENT_PATTERN = re.compile(r"^A[0-9]{4}$")
 PHASE_PATTERN = re.compile(r"^P[0-9]{2}$")
+#: Owner amendment layers, narrowest first. CONTRACT edits the target task
+#: contracts and their dependency fields; SPEC additionally edits ``docs/spec/``;
+#: INTENT additionally edits ``docs/intent/``. SUPERSEDE is a separate axis: it
+#: retires already-APPROVED tasks by recording their successor, and may touch no
+#: document and no approval evidence.
+AMENDMENT_LAYERS = frozenset({"CONTRACT", "SPEC", "INTENT", "SUPERSEDE"})
 REQUIRED_AGENT_MODEL = "MiniMax-M3[1m]"
 MAX_DEVELOPMENT_CONTINUATIONS = 1
 
@@ -220,7 +226,7 @@ class AmendmentRecord:
         if status not in {"PLANNING", "AWAITING_REVIEW", "CHANGES_REQUESTED", "BLOCKED"}:
             raise WorkflowError(f"invalid amendment status {status!r}")
         layer = _required_string(value, "layer")
-        if layer not in {"CONTRACT", "SPEC", "INTENT"}:
+        if layer not in AMENDMENT_LAYERS:
             raise WorkflowError(f"invalid amendment layer {layer!r}")
         raw_task_ids = value.get("task_ids")
         if not isinstance(raw_task_ids, list) or not raw_task_ids:
@@ -437,6 +443,8 @@ def _without_amendment_owned_config_fields(
     comparable = cast(dict[str, Any], json.loads(json.dumps(config)))
     for task_id in task_ids:
         comparable["tasks"][task_id].pop("depends_on", None)
+        if layer == "SUPERSEDE":
+            comparable["tasks"][task_id].pop("superseded_by", None)
     if layer in {"SPEC", "INTENT"}:
         comparable.pop("spec_revision", None)
     if layer == "INTENT":
@@ -593,6 +601,20 @@ class WorkflowManager:
                     raise WorkflowError(f"{task_id} depends on unknown task {dependency}")
             if not isinstance(task_file, str) or not (base / task_file).is_file():
                 raise WorkflowError(f"{task_id} task file does not exist: {task_file!r}")
+            superseded_by = raw.get("superseded_by")
+            if superseded_by is not None:
+                if not isinstance(superseded_by, str) or not TASK_PATTERN.fullmatch(superseded_by):
+                    raise WorkflowError(f"{task_id} superseded_by must be a task ID")
+                if superseded_by == task_id:
+                    raise WorkflowError(f"{task_id} superseded_by must not reference itself")
+                if superseded_by not in tasks:
+                    raise WorkflowError(
+                        f"{task_id} superseded_by references unknown task {superseded_by}"
+                    )
+                if status != "APPROVED":
+                    raise WorkflowError(
+                        f"{task_id} superseded_by requires APPROVED status, found {status}"
+                    )
             if raw.get("attempt") is None or not isinstance(raw.get("attempt"), int):
                 raise WorkflowError(f"{task_id} attempt must be an integer")
             for key in ("base_commit", "candidate_commit", "approved_commit"):
@@ -708,6 +730,16 @@ class WorkflowManager:
         ]
         if incomplete:
             raise WorkflowError(f"{task_id} has unapproved dependencies: {', '.join(incomplete)}")
+        retired = [
+            dependency
+            for dependency in task["depends_on"]
+            if config["tasks"][dependency].get("superseded_by")
+        ]
+        if retired:
+            raise WorkflowError(
+                f"{task_id} depends on superseded task(s): {', '.join(retired)}; "
+                "re-point the dependency at the successor through an owner amendment"
+            )
 
     def ready(self, task_id: str) -> str:
         self._ensure_clean_main()
@@ -1317,15 +1349,19 @@ class WorkflowManager:
             raise WorkflowError("an amendment requires at least one target task")
         if len(normalized) > 8:
             raise WorkflowError("an amendment may target at most eight tasks")
+        layer = layer.upper()
+        if layer not in AMENDMENT_LAYERS:
+            raise WorkflowError("amendment layer must be " + ", ".join(sorted(AMENDMENT_LAYERS)))
+        # A SUPERSEDE amendment retires already-approved work by pointing it at
+        # its successor; every other layer corrects work that has not run yet.
+        required_status = "APPROVED" if layer == "SUPERSEDE" else "PLANNED"
         for task_id in normalized:
             task = self._task(config, task_id)
-            if task["status"] != "PLANNED":
+            if task["status"] != required_status:
                 raise WorkflowError(
-                    f"owner amendment targets must be PLANNED, found {task_id}={task['status']}"
+                    f"{layer} amendment targets must be {required_status}, "
+                    f"found {task_id}={task['status']}"
                 )
-        layer = layer.upper()
-        if layer not in {"CONTRACT", "SPEC", "INTENT"}:
-            raise WorkflowError("amendment layer must be CONTRACT, SPEC, or INTENT")
         if not summary.strip() or not owner_direction.strip():
             raise WorkflowError("amendment summary and owner direction must be non-empty")
         amendment_id = self._next_amendment_id()
@@ -1351,6 +1387,7 @@ class WorkflowManager:
             "amendment_id": amendment_id,
             "task_ids": list(normalized),
             "layer": layer,
+            "target_status": required_status,
             "summary": summary.strip(),
             "owner_direction": owner_direction.strip(),
         }
@@ -1360,12 +1397,12 @@ class WorkflowManager:
         _write_json(request_path, request)
         task_files = [config["tasks"][task_id]["task_file"] for task_id in normalized]
         prompt = (
-            f"Apply Owner-directed amendment {amendment_id} to exactly these PLANNED tasks: "
-            f"{', '.join(normalized)}. Read {request_path}. Target contracts: "
-            f"{', '.join(task_files)}. Layer: {layer}. Work only in {worktree}. Do not implement "
-            "business code or change workflow state. Make only the smallest planning changes "
-            "required by the recorded Owner direction. Write the structured result only to "
-            f"{worktree / '.workflow' / 'amendment-result.json'}."
+            f"Apply Owner-directed amendment {amendment_id} to exactly these "
+            f"{required_status} tasks: {', '.join(normalized)}. Read {request_path}. Target "
+            f"contracts: {', '.join(task_files)}. Layer: {layer}. Work only in {worktree}. "
+            "Do not implement business code or change workflow state. Make only the smallest "
+            "planning changes required by the recorded Owner direction. Write the structured "
+            f"result only to {worktree / '.workflow' / 'amendment-result.json'}."
         )
         return {**record.to_dict(), "agent": "planner", "prompt": prompt}
 

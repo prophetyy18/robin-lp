@@ -341,6 +341,158 @@ def test_owner_amendment_updates_planned_contract_without_activating_task(tmp_pa
     }
 
 
+def test_supersede_amendment_retires_an_approved_task(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    before = manager.load_config()["tasks"]["T000"]
+    prepared = manager.prepare_amendment(
+        task_ids=["T000"],
+        layer="SUPERSEDE",
+        summary="retire the T000 decision in favour of T001",
+        owner_direction="T001 supersedes T000; record the successor and keep the history.",
+    )
+    assert prepared["layer"] == "SUPERSEDE"
+    amendment = Path(str(prepared["worktree"]))
+    request = json.loads(
+        (amendment / ".workflow" / "amendment-request.json").read_text(encoding="utf-8")
+    )
+    assert request["target_status"] == "APPROVED"
+    config_path = amendment / "todo" / "config.yaml"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["tasks"]["T000"]["superseded_by"] = "T001"
+    _write_json(config_path, config)
+    _write_json(
+        amendment / ".workflow" / "amendment-result.json",
+        {
+            "amendment_id": "A0001",
+            "outcome": "AMENDMENT_READY",
+            "summary": "pointed T000 at its successor",
+            "rationale": "implements the recorded Owner direction",
+            "unresolved_questions": [],
+        },
+    )
+    candidate = manager.finish_amendment("A0001")
+    review = manager.prepare_amendment_review("A0001")
+    review_worktree = Path(str(review["review_worktree"]))
+    _write_json(
+        review_worktree / ".workflow" / "amendment-review-result.json",
+        {
+            "amendment_id": "A0001",
+            "base_commit": candidate.base_commit,
+            "candidate_commit": candidate.candidate_commit,
+            "verdict": "PASS",
+            "summary": "retirement is recorded and the history is untouched",
+            "required_changes": [],
+            "unknowns": [],
+        },
+    )
+    state, _ = manager.finish_amendment_review("A0001")
+    assert state == "APPROVED"
+    after = manager.load_config()["tasks"]["T000"]
+    assert after["superseded_by"] == "T001"
+    # Retirement is an annotation on approved work: the approval evidence stays
+    # byte-identical so the audit record still describes what was reviewed.
+    assert after["status"] == "APPROVED"
+    assert after["attempt"] == before["attempt"]
+    assert after["approved_commit"] == before["approved_commit"]
+    assert after["base_commit"] == before["base_commit"]
+
+
+def test_supersede_amendment_cannot_alter_approved_evidence(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    before = manager.load_config()["tasks"]["T000"]
+    prepared = manager.prepare_amendment(
+        task_ids=["T000"],
+        layer="SUPERSEDE",
+        summary="retire the T000 decision",
+        owner_direction="Retire T000 in favour of T001.",
+    )
+    amendment = Path(str(prepared["worktree"]))
+    config_path = amendment / "todo" / "config.yaml"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["tasks"]["T000"]["superseded_by"] = "T001"
+    config["tasks"]["T000"]["approved_commit"] = None
+    _write_json(config_path, config)
+    _write_json(
+        amendment / ".workflow" / "amendment-result.json",
+        {
+            "amendment_id": "A0001",
+            "outcome": "AMENDMENT_READY",
+            "summary": "retired the task and cleared its approval",
+            "rationale": "implements the recorded Owner direction",
+            "unresolved_questions": [],
+        },
+    )
+    with pytest.raises(WorkflowError, match="workflow state, evidence, model, SHA"):
+        manager.finish_amendment("A0001")
+    assert manager.load_config()["tasks"]["T000"]["approved_commit"] == before["approved_commit"]
+
+
+def test_amendment_layers_require_their_target_status(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    with pytest.raises(WorkflowError, match="SUPERSEDE amendment targets must be APPROVED"):
+        manager.prepare_amendment(
+            task_ids=["T001"],
+            layer="SUPERSEDE",
+            summary="invalid target status",
+            owner_direction="Not a valid retirement target.",
+        )
+    with pytest.raises(WorkflowError, match="CONTRACT amendment targets must be PLANNED"):
+        manager.prepare_amendment(
+            task_ids=["T000"],
+            layer="CONTRACT",
+            summary="invalid target status",
+            owner_direction="Not a valid planning target.",
+        )
+    with pytest.raises(WorkflowError, match="amendment layer must be"):
+        manager.prepare_amendment(
+            task_ids=["T001"],
+            layer="WHATEVER",
+            summary="invalid layer",
+            owner_direction="Not a valid layer.",
+        )
+
+
+def test_validate_config_rejects_invalid_superseded_by(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    valid = manager.load_config()
+
+    unknown = json.loads(json.dumps(valid))
+    unknown["tasks"]["T000"]["superseded_by"] = "T099"
+    with pytest.raises(WorkflowError, match="references unknown task"):
+        manager.validate_config(unknown)
+
+    itself = json.loads(json.dumps(valid))
+    itself["tasks"]["T000"]["superseded_by"] = "T000"
+    with pytest.raises(WorkflowError, match="must not reference itself"):
+        manager.validate_config(itself)
+
+    malformed = json.loads(json.dumps(valid))
+    malformed["tasks"]["T000"]["superseded_by"] = "T1"
+    with pytest.raises(WorkflowError, match="superseded_by must be a task ID"):
+        manager.validate_config(malformed)
+
+    not_approved = json.loads(json.dumps(valid))
+    not_approved["tasks"]["T001"]["superseded_by"] = "T000"
+    with pytest.raises(WorkflowError, match="superseded_by requires APPROVED status"):
+        manager.validate_config(not_approved)
+
+
+def test_a_superseded_dependency_must_be_repointed(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    config = manager.load_config()
+    config["tasks"]["T000"]["superseded_by"] = "T001"
+    with pytest.raises(WorkflowError, match="depends on superseded task"):
+        manager._check_dependencies(config, "T001")
+
+
 def test_owner_amendment_rejects_an_unfinished_active_task(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
     manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
