@@ -26,3 +26,7 @@ reserved for explicitly enumerated block-pinned verification.
 - [T032 — Implement checkpointed historical ingestion](T032.md)
 - [T033 — Handle confirmations and reorgs](T033.md)
 - [T034 — Produce data-quality and completeness reports](T034.md)
+- [T035 — Persist block-time evidence and wire real-mainnet ingestion](T035.md)
+- [T036 — Qualify the real-mainnet reference dataset](T036.md)
+- [T037 — Close the silent partition row-loss defect](T037.md)
+- [T038 — Acquire and qualify the two-pool ten-million-block window](T038.md)
