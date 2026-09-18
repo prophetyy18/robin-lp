@@ -100,6 +100,7 @@ from robinhood_lp.qualification.runbook import (
 )
 from robinhood_lp.qualification.second_pool import (
     RESOLVE_CHAIN_ID_MISMATCH,
+    RESOLVE_HOOK_ADDRESS_AMBIGUOUS,
     RESOLVE_OK,
     RESOLVE_PINNED_POOL_ID_SIZE_DEFECT,
     RESOLVE_POOL_ID_MISMATCH,
@@ -114,6 +115,7 @@ from robinhood_lp.qualification.second_pool import (
     build_second_pool_resolve_result_from_resolved_fields,
     classify_second_pool_support_level,
     resolve_second_pool_identity,
+    resolve_second_pool_via_hook_scan,
 )
 from robinhood_lp.qualification.state_spot_check import (
     StateSpotCheckResult,
@@ -159,6 +161,7 @@ from robinhood_lp.qualification.two_pool_window import (
     PIN_DISAGREEMENT,
     PIN_OK,
     PIN_UNAVAILABLE,
+    SECOND_POOL_HOOK_ADDRESS_HEX,
     SECOND_POOL_POOL_ID_HEX,
     TWO_POOL_CHAIN_ID,
     TWO_POOL_INIT_EXTENSION_CAP_BLOCKS,
@@ -219,6 +222,7 @@ __all__ = [
     "REFERENCE_STATE_VIEW_ADDRESS_HEX",
     "REFERENCE_TARGET",
     "RESOLVE_CHAIN_ID_MISMATCH",
+    "RESOLVE_HOOK_ADDRESS_AMBIGUOUS",
     "RESOLVE_OK",
     "RESOLVE_PINNED_POOL_ID_SIZE_DEFECT",
     "RESOLVE_POOL_ID_MISMATCH",
@@ -229,6 +233,7 @@ __all__ = [
     "ReferenceTarget",
     "ResolvedPoolKey",
     "SECOND_POOL_CHAIN_ID",
+    "SECOND_POOL_HOOK_ADDRESS_HEX",
     "SECOND_POOL_POOL_ID_HEX",
     "SUPPORT_LEVEL_INGESTION",
     "SUPPORT_LEVEL_REJECTED",
@@ -272,5 +277,6 @@ __all__ = [
     "perform_state_spot_check",
     "reference_pool_candidate",
     "resolve_second_pool_identity",
+    "resolve_second_pool_via_hook_scan",
     "second_pool_candidate",
 ]

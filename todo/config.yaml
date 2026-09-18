@@ -12,7 +12,7 @@
   },
   "active_phase": "P03",
   "active_task": "T038",
-  "workflow_state": "CHANGES_REQUESTED",
+  "workflow_state": "AWAITING_REVIEW",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -356,13 +356,13 @@
     },
     "T038": {
       "phase": "P03",
-      "status": "CHANGES_REQUESTED",
+      "status": "AWAITING_REVIEW",
       "depends_on": [
         "T036",
         "T037"
       ],
       "task_file": "todo/phases/P03-ingestion-and-storage/T038.md",
-      "attempt": 1,
+      "attempt": 2,
       "base_commit": "cdae0239617450634a6f3fcd6c34a25d1daa28f6",
       "candidate_commit": null,
       "approved_commit": null,

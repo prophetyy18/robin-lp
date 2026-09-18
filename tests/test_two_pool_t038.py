@@ -38,6 +38,7 @@ import json
 import pytest
 from eth_hash.auto import keccak
 
+from robinhood_lp.discovery.initialize_log import DecodedInitialize
 from robinhood_lp.protocol import (
     Address,
     Currency,
@@ -68,12 +69,14 @@ from robinhood_lp.qualification import (
     REFERENCE_POOL_ID_HEX,
     REFERENCE_TARGET,
     RESOLVE_CHAIN_ID_MISMATCH,
+    RESOLVE_HOOK_ADDRESS_AMBIGUOUS,
     RESOLVE_OK,
     RESOLVE_PINNED_POOL_ID_SIZE_DEFECT,
     RESOLVE_POOL_ID_MISMATCH,
     RESOLVE_POOL_KEY_DECODE_ERROR,
     RESOLVE_WINDOW_UNRESOLVED,
     SECOND_POOL_CHAIN_ID,
+    SECOND_POOL_HOOK_ADDRESS_HEX,
     SECOND_POOL_POOL_ID_HEX,
     SUPPORT_LEVEL_INGESTION,
     EndpointFinalizedObservation,
@@ -96,6 +99,7 @@ from robinhood_lp.qualification import (
     finalize_window_pin,
     reference_pool_candidate,
     resolve_second_pool_identity,
+    resolve_second_pool_via_hook_scan,
     second_pool_candidate,
 )
 from robinhood_lp.qualification.reference import build_reference_pool_key
@@ -529,15 +533,22 @@ def test_resolve_second_pool_identity_halts_on_pool_id_mismatch() -> None:
     assert "keccak256" in result.error_detail
 
 
-def test_owner_pinned_pool_id_is_20_bytes_contract_defect() -> None:
-    """The T038 contract pins the second-pool PoolId as a 40-char
-    hex string (``0xEd50bDeeA8aDC232f159486192a4157281D722ff``).
-    A V4 PoolId is keccak256(abi.encode(PoolKey)), which is 32
-    bytes / 64 hex chars. The pinned value is address-sized (20
-    bytes), so the offline keccak256 re-derivation check cannot
-    agree by construction. The resolver surfaces this contract
-    defect explicitly via ``resolve_pinned_pool_id_size_defect``
-    rather than the generic ``resolve_pool_id_mismatch``.
+def test_owner_pinned_20_byte_value_surfaces_as_hook_address_defensive_guard() -> None:
+    """Defensive-guard test: when a caller explicitly feeds the
+    20-byte Owner-pinned hook contract address as a V4 ``PoolId``
+    (the attempt-1 misuse pattern), the resolver surfaces
+    ``resolve_pinned_pool_id_size_defect`` with an error detail
+    that names the 2026-09-18 T038 amendment semantics.
+
+    Per the 2026-09-18 amendment, the Owner-pinned value
+    ``0xEd50bDeeA8aDC232f159486192a4157281D722ff`` is a **hook
+    contract address** (a 20-byte lookup signal), NOT a V4
+    ``PoolId`` (which is ``keccak256(abi.encode(PoolKey))`` and 32
+    bytes). The resolver's defensive guard rejects the misuse
+    rather than silently producing a wrong answer; the new entry
+    point ``resolve_second_pool_via_hook_scan`` is the supported
+    path that scans ``Initialize`` logs filtered by the pinned
+    hook address.
     """
     # Sanity: confirm the pinned identifier is address-sized.
     assert len(SECOND_POOL_POOL_ID_HEX) - 2 == 40
@@ -548,10 +559,14 @@ def test_owner_pinned_pool_id_is_20_bytes_contract_defect() -> None:
     )
     assert result.outcome == RESOLVE_PINNED_POOL_ID_SIZE_DEFECT
     assert result.ok is False
-    assert "address-sized" in result.error_detail
-    assert "keccak256(abi.encode(PoolKey))" in result.error_detail
+    # The new error text reflects the 2026-09-18 amendment: the
+    # pinned value is a hook contract address (lookup signal),
+    # not a V4 PoolId.
+    assert "hook contract address" in result.error_detail
+    assert "lookup signal" in result.error_detail
     assert "20 bytes" in result.error_detail
     assert "32 bytes" in result.error_detail
+    assert "resolve_second_pool_via_hook_scan" in result.error_detail
 
 
 def test_two_pool_report_incomplete_with_owner_pinned_20_byte_pool_id() -> None:
@@ -612,6 +627,338 @@ def test_resolve_second_pool_identity_halts_on_chain_id_mismatch() -> None:
     assert "chain_id" in result.error_detail
 
 
+# ---------------------------------------------------------------------------
+# Hook-address-scanning resolver (T038 amendment, 2026-09-18)
+# ---------------------------------------------------------------------------
+
+
+def _decoded_initialize_log(
+    *,
+    pool_key: PoolKey | None = None,
+    block_number: int = 60_000_000,
+    tx_hash: str | None = None,
+    log_index: int | None = 0,
+) -> DecodedInitialize:
+    """Build a synthetic ``DecodedInitialize`` for hook-scan tests.
+
+    Each log is decoded end-to-end: the 32-byte ``pool_id`` field is
+    the keccak256 re-derivation of ``pool_key`` (so the decoder's
+    internal consistency check, which the resolver inherits, is
+    satisfied). The ``pool_key`` defaults to the synthetic
+    second-pool PoolKey with the pinned hook contract address; tests
+    that exercise non-matching hooks pass an explicit ``pool_key``.
+    """
+    pk = (
+        pool_key
+        if pool_key is not None
+        else _second_pool_pool_key(hooks=Address.from_hex(SECOND_POOL_HOOK_ADDRESS_HEX))
+    )
+    derived_int = compute_pool_id(pk)
+    return DecodedInitialize(
+        pool_key=pk,
+        pool_id=PoolId(derived_int),
+        block_number=block_number,
+        tx_hash=tx_hash if tx_hash is not None else "0x" + "ab" * 32,
+        log_index=log_index,
+        sqrt_price_x96=(1 << 96),
+        initial_tick=0,
+    )
+
+
+def test_resolve_second_pool_via_hook_scan_matches_pinned_address() -> None:
+    """The hook-scanning resolver picks the ``Initialize`` log whose
+    decoded ``hooks`` field equals the Owner-pinned hook contract
+    address and returns ``resolve_ok`` with the chain-emitted
+    32-byte ``PoolId`` recorded in the ``ResolvedPoolKey``.
+
+    The PoolKey re-derivation check
+    ``keccak256(abi.encode(PoolKey)) == PoolId`` holds because the
+    decoder enforces it and the resolver re-verifies it
+    defensively.
+    """
+    log = _decoded_initialize_log(block_number=60_000_000)
+    result = resolve_second_pool_via_hook_scan(
+        initialize_logs=(log,),
+        search_bounds=(50_000_000, 70_000_000),
+    )
+    assert result.outcome == RESOLVE_OK
+    assert result.ok is True
+    assert result.resolved is not None
+    # The resolved PoolId is the 32-byte chain-emitted keccak256
+    # digest, NOT the 20-byte pinned hook contract address.
+    assert len(result.resolved.pool_id_hex) == 2 + 64
+    assert result.resolved.pool_id_hex == log.pool_id.to_hex()
+    # The hooks field of the resolved PoolKey equals the pinned
+    # hook address (compared case-insensitively: the canonical
+    # ``Address.to_hex()`` rendering is lowercase).
+    assert result.resolved.pool_key.hooks.to_hex() == SECOND_POOL_HOOK_ADDRESS_HEX.lower()
+    # PoolKey re-derivation check: derived == chain-emitted.
+    derived_int = compute_pool_id(result.resolved.pool_key)
+    derived_hex = "0x" + derived_int.to_bytes(32, "big").hex()
+    assert derived_hex == result.resolved.pool_id_hex
+    assert result.resolved.derived_pool_id_hex == derived_hex
+    # Init block and chain id propagate.
+    assert result.resolved.init_block == 60_000_000
+    assert result.resolved.chain_id == SECOND_POOL_CHAIN_ID
+
+
+def test_resolve_second_pool_via_hook_scan_ignores_non_matching_logs() -> None:
+    """The hook-scanning resolver ignores ``Initialize`` logs whose
+    decoded ``hooks`` field differs from the Owner-pinned hook
+    contract address; a matching log later in the batch is still
+    picked."""
+    non_match_pk = PoolKey(
+        currency0=Currency.from_hex("0x" + "11" * 20),
+        currency1=Currency.from_hex("0x" + "22" * 20),
+        fee=3000,
+        tick_spacing=60,
+        hooks=Address.zero(),  # not the pinned hook address
+    )
+    non_match = _decoded_initialize_log(pool_key=non_match_pk, block_number=60_000_000)
+    match = _decoded_initialize_log(block_number=60_000_001)
+    result = resolve_second_pool_via_hook_scan(
+        initialize_logs=(non_match, match),
+        search_bounds=(50_000_000, 70_000_000),
+    )
+    assert result.outcome == RESOLVE_OK
+    assert result.resolved is not None
+    assert result.resolved.pool_key.hooks.to_hex() == SECOND_POOL_HOOK_ADDRESS_HEX.lower().lower()
+    assert result.resolved.init_block == 60_000_001
+
+
+def test_resolve_second_pool_via_hook_scan_reports_pool_init_outside_window() -> None:
+    """When no hook-matched ``Initialize`` is found inside the
+    candidate window the resolver returns
+    ``resolve_window_unresolved`` with the search bounds recorded
+    for the audit trail; the second pool is excluded rather than
+    the resolver guessing values.
+
+    The contract forbids guessing the second pool's ``PoolKey``,
+    fee, tick spacing or hooks from the pinned hook address or
+    from any other identifier without a hook-matched
+    ``Initialize`` log inside the candidate window.
+    """
+    non_match_pk = PoolKey(
+        currency0=Currency.from_hex("0x" + "11" * 20),
+        currency1=Currency.from_hex("0x" + "22" * 20),
+        fee=3000,
+        tick_spacing=60,
+        hooks=Address.zero(),
+    )
+    non_match = _decoded_initialize_log(pool_key=non_match_pk, block_number=60_000_000)
+    bounds = (50_000_000, 70_000_000)
+    result = resolve_second_pool_via_hook_scan(
+        initialize_logs=(non_match,),
+        search_bounds=bounds,
+    )
+    assert result.outcome == RESOLVE_WINDOW_UNRESOLVED
+    assert result.pool_init_outside_window is True
+    assert result.resolved is None
+    assert result.search_bounds == bounds
+    assert result.candidate.pool_id_hex == SECOND_POOL_HOOK_ADDRESS_HEX
+    assert "0xEd50bDeeA8aDC232f159486192a4157281D722ff".lower() in result.error_detail
+    assert "no Initialize log matched" in result.error_detail
+
+
+def test_resolve_second_pool_via_hook_scan_reports_pool_init_outside_window_empty() -> None:
+    """An empty ``Initialize`` log batch (the operator scanned the
+    candidate window and found no logs at all) also returns
+    ``resolve_window_unresolved`` with the search bounds; no
+    PoolKey guess is produced."""
+    bounds = (60_000_000, 70_000_000)
+    result = resolve_second_pool_via_hook_scan(
+        initialize_logs=(),
+        search_bounds=bounds,
+    )
+    assert result.outcome == RESOLVE_WINDOW_UNRESOLVED
+    assert result.resolved is None
+    assert result.search_bounds == bounds
+    assert result.candidate.pool_id_hex == SECOND_POOL_HOOK_ADDRESS_HEX
+
+
+def test_resolve_second_pool_via_hook_scan_ambiguous_matches_halt() -> None:
+    """When more than one ``Initialize`` log matches the pinned
+    hook contract address the resolver halts closed with
+    ``resolve_hook_address_ambiguous``; the lookup signal is
+    ambiguous and the resolver refuses to pick one without
+    operator intervention."""
+    pk_a = _second_pool_pool_key(hooks=Address.from_hex(SECOND_POOL_HOOK_ADDRESS_HEX))
+    pk_b = PoolKey(
+        currency0=Currency.from_hex("0x" + "33" * 20),
+        currency1=Currency.from_hex("0x" + "44" * 20),
+        fee=500,
+        tick_spacing=10,
+        hooks=Address.from_hex(SECOND_POOL_HOOK_ADDRESS_HEX),
+    )
+    log_a = _decoded_initialize_log(pool_key=pk_a, block_number=60_000_000, log_index=0)
+    log_b = _decoded_initialize_log(pool_key=pk_b, block_number=60_000_001, log_index=0)
+    result = resolve_second_pool_via_hook_scan(
+        initialize_logs=(log_a, log_b),
+        search_bounds=(50_000_000, 70_000_000),
+    )
+    assert result.outcome == RESOLVE_HOOK_ADDRESS_AMBIGUOUS
+    assert result.resolved is None
+    assert result.search_bounds == (50_000_000, 70_000_000)
+    assert "ambiguous" in result.error_detail
+    assert log_a.pool_id.to_hex() in result.error_detail
+    assert log_b.pool_id.to_hex() in result.error_detail
+
+
+def test_resolve_second_pool_via_hook_scan_defaults_to_pinned_hook_address() -> None:
+    """The hook-scanning resolver defaults the pinned hook address
+    to the Owner-pinned value
+    ``0xEd50bDeeA8aDC232f159486192a4157281D722ff`` so the
+    operator does not have to repeat it. The default matches the
+    contract value exactly.
+    """
+    assert SECOND_POOL_HOOK_ADDRESS_HEX == "0xEd50bDeeA8aDC232f159486192a4157281D722ff"
+    log = _decoded_initialize_log()
+    result = resolve_second_pool_via_hook_scan(initialize_logs=(log,))
+    assert result.outcome == RESOLVE_OK
+    assert result.resolved is not None
+    assert result.resolved.pool_key.hooks.to_hex() == SECOND_POOL_HOOK_ADDRESS_HEX.lower()
+
+
+def test_resolve_second_pool_via_hook_scan_accepts_str_hook_address() -> None:
+    """The hook-scanning resolver accepts either a typed
+    :class:`Address` or a 0x-hex string for ``pinned_hook_address``
+    so operators can pass whichever form they already hold."""
+    pk = _second_pool_pool_key(hooks=Address.from_hex("0x" + "ab" * 20))
+    log = _decoded_initialize_log(pool_key=pk)
+    # Pass the hook address as a 0x-hex string.
+    result = resolve_second_pool_via_hook_scan(
+        pinned_hook_address="0x" + "ab" * 20,
+        initialize_logs=(log,),
+    )
+    assert result.outcome == RESOLVE_OK
+    assert result.resolved is not None
+    assert result.resolved.pool_key.hooks.to_hex() == "0x" + "ab" * 20
+
+
+def test_resolve_second_pool_via_hook_scan_result_propagates_block_number() -> None:
+    """The hook-scanning resolver records the ``Initialize`` block
+    number on the :class:`ResolvedPoolKey` so the window rule can
+    place the second pool in the coverage plan."""
+    log = _decoded_initialize_log(block_number=58_000_000)
+    result = resolve_second_pool_via_hook_scan(initialize_logs=(log,))
+    assert result.outcome == RESOLVE_OK
+    assert result.resolved is not None
+    assert result.resolved.init_block == 58_000_000
+
+
+def test_resolve_second_pool_via_hook_scan_propagates_to_window_plan() -> None:
+    """The resolved ``init_block`` from the hook-scan resolver
+    flows through :func:`apply_window_rule` so the second pool is
+    placed in the coverage plan with the correct extension below
+    ``end - 10_000_000``."""
+    log = _decoded_initialize_log(block_number=60_000_000)
+    result = resolve_second_pool_via_hook_scan(initialize_logs=(log,))
+    assert result.ok is True
+    resolved_init = result.resolved.init_block if result.resolved is not None else 0
+    pin = _window_pin(block_number=70_000_000)
+    plan = apply_window_rule(
+        window_pin=pin,
+        candidates=(second_pool_candidate(pool_init_block=resolved_init),),
+    )
+    assert plan.included_pool_aliases == ("second",)
+    assert plan.pool_outcomes[0].pool_init_block == 60_000_000
+    assert plan.pool_outcomes[0].coverage_from_block == 60_000_000
+
+
+def test_resolve_second_pool_via_hook_scan_does_not_trigger_defensive_guard() -> None:
+    """The hook-scan resolver does NOT surface
+    ``resolve_pinned_pool_id_size_defect``; it is the new entry
+    point and the defensive guard is retained only on the
+    ``resolve_second_pool_identity`` / convenience wrapper APIs
+    that still accept ``pinned_pool_id_hex``."""
+
+    log = _decoded_initialize_log()
+    result = resolve_second_pool_via_hook_scan(initialize_logs=(log,))
+    assert result.outcome == RESOLVE_OK
+    assert result.outcome != RESOLVE_PINNED_POOL_ID_SIZE_DEFECT
+
+
+def test_two_pool_report_complete_with_hook_scan_resolved_pool() -> None:
+    """The combined T038 machine report is ``complete=True`` when
+    the second-pool resolver outcome is ``resolve_ok`` produced
+    by the hook-scan path; the per-pool T034 reports agree and
+    the per-pool data roots are recorded.
+
+    This is the end-to-end happy path the new contract requires:
+    the second pool's ``PoolKey`` and 32-byte ``PoolId`` were
+    resolved on chain by scanning ``Initialize`` logs filtered by
+    the pinned hook contract address.
+    """
+    pin = _window_pin(block_number=70_000_000)
+    log = _decoded_initialize_log(block_number=60_000_000)
+    result = resolve_second_pool_via_hook_scan(
+        initialize_logs=(log,),
+        search_bounds=(50_000_000, 70_000_000),
+    )
+    resolved = result.resolved
+    assert resolved is not None
+    plan = apply_window_rule(
+        window_pin=pin,
+        candidates=(
+            reference_pool_candidate(pool_init_block=60_000_000),
+            second_pool_candidate(pool_init_block=resolved.init_block),
+        ),
+    )
+    report = build_two_pool_report(
+        window_plan=plan,
+        reference_pool=REFERENCE_TARGET,
+        reference_pool_data_root="/data/reference",
+        reference_pool_manifest_checksum="0x" + "ab" * 32,
+        reference_pool_partition_reconciliation_agreement=True,
+        reference_pool_event_index_parquet_match=True,
+        second_pool_data_root="/data/second",
+        second_pool_manifest_checksum="0x" + "cd" * 32,
+        second_pool_partition_reconciliation_agreement=True,
+        second_pool_event_index_parquet_match=True,
+        second_pool_resolution=result,
+        second_pool_resolved=resolved,
+    )
+    assert report.complete is True
+    assert report.second_pool_resolution is not None
+    assert report.second_pool_resolution.outcome == RESOLVE_OK
+    assert report.second_pool_support_level == SUPPORT_LEVEL_INGESTION
+
+
+def test_two_pool_report_incomplete_when_hook_scan_finds_no_match() -> None:
+    """When the hook-scan resolver returns
+    ``resolve_window_unresolved`` (no hook-matched ``Initialize``
+    in the search bounds) the combined T038 report is
+    ``complete=False`` and the second pool is excluded from the
+    qualified dataset rather than the resolver guessing values.
+    """
+    pin = _window_pin(block_number=70_000_000)
+    bounds = (60_000_000, 70_000_000)
+    result = resolve_second_pool_via_hook_scan(
+        initialize_logs=(),
+        search_bounds=bounds,
+    )
+    plan = apply_window_rule(
+        window_pin=pin,
+        candidates=(
+            reference_pool_candidate(pool_init_block=60_000_000),
+            second_pool_candidate(pool_init_block=None),
+        ),
+    )
+    report = build_two_pool_report(
+        window_plan=plan,
+        reference_pool=REFERENCE_TARGET,
+        reference_pool_data_root="/data/reference",
+        reference_pool_manifest_checksum="0x" + "ab" * 32,
+        reference_pool_partition_reconciliation_agreement=True,
+        reference_pool_event_index_parquet_match=True,
+        second_pool_resolution=result,
+    )
+    assert report.complete is False
+    # The resolver outcome is ``resolve_window_unresolved``; the
+    # combined report's blockers list includes it.
+    assert RESOLVE_WINDOW_UNRESOLVED in report.qualification_blockers
+
+
 def test_build_resolved_pool_key_compute_hash_keccak_offline() -> None:
     """The offline keccak256 re-derivation check reproduces the
     canonical V4 ``PoolId`` exactly when the PoolKey matches the
@@ -669,12 +1016,19 @@ def test_build_second_pool_resolve_result_surfaces_owner_20_byte_defect() -> Non
 def test_build_second_pool_resolve_result_decode_error() -> None:
     """A ``PoolKey`` whose constructor rejects the structural fields
     is surfaced as ``resolve_pool_key_decode_error`` rather than
-    raising."""
+    raising.
+
+    The wrapper is fed a 64-byte placeholder ``pool_id_hex`` (the
+    shape a chain-resolved PoolId carries); a 20-byte input would
+    surface the ``RESOLVE_PINNED_POOL_ID_SIZE_DEFECT`` defensive
+    guard instead and bypass the constructor.
+    """
+    placeholder_pool_id = "0x" + "11" * 32
     # The ``0x...ZZZ`` currency is malformed; the constructor must
     # surface the error rather than silently reconstructing the key.
     result = build_second_pool_resolve_result_from_resolved_fields(
         chain_id=SECOND_POOL_CHAIN_ID,
-        pool_id_hex=SECOND_POOL_POOL_ID_HEX,
+        pool_id_hex=placeholder_pool_id,
         currency0_address="not_a_hex",
         currency1_address="0x" + "22" * 20,
         fee=3000,
@@ -689,10 +1043,15 @@ def test_build_second_pool_resolve_result_currency_ordering_violation() -> None:
     """A resolved PoolKey whose currency ordering violates the V4
     invariant ``currency0 < currency1`` is surfaced as
     ``resolve_pool_key_decode_error`` (the contract forbids silent
-    reordering)."""
+    reordering).
+
+    The wrapper is fed a 64-byte placeholder ``pool_id_hex`` (the
+    shape a chain-resolved PoolId carries).
+    """
+    placeholder_pool_id = "0x" + "11" * 32
     result = build_second_pool_resolve_result_from_resolved_fields(
         chain_id=SECOND_POOL_CHAIN_ID,
-        pool_id_hex=SECOND_POOL_POOL_ID_HEX,
+        pool_id_hex=placeholder_pool_id,
         # currency0 > currency1 (uint160): this is a violation.
         currency0_address="0x" + "ff" * 20,
         currency1_address="0x" + "11" * 20,

@@ -1,0 +1,41 @@
+{
+  "task_id": "T038",
+  "outcome": "CANDIDATE_READY",
+  "summary": "T038 attempt 2 candidate ready for review. Replaced the attempt-1 '20-byte pinned value treated as PoolId' surface with the new hook-address-scanning resolver mandated by the 2026-09-18 Owner amendment. Implementation summary: (a) Added resolve_second_pool_via_hook_scan() to src/robinhood_lp/qualification/second_pool.py: it scans operator-supplied Initialize logs filtered by hooks == pinned hook address, decodes the matching PoolKey, builds a ResolvedPoolKey carrying the chain-emitted 32-byte keccak256 PoolId, and re-verifies keccak256(abi.encode(PoolKey)) == PoolId defensively. Multiple matches surface as RESOLVE_HOOK_ADDRESS_AMBIGUOUS (new outcome); no match inside search_bounds surfaces RESOLVE_WINDOW_UNRESOLVED with bounds recorded, excluding the second pool rather than guessing. (b) Reworked RESOLVE_PINNED_POOL_ID_SIZE_DEFECT into a defensive guard only: the resolve_second_pool_identity() and the build_second_pool_resolve_result_from_resolved_fields() convenience wrapper now refuse a 20-byte pinned_pool_id_hex / pool_id_hex with an error_detail that names the 2026-09-18 amendment semantics (hook contract address, lookup signal, 20 bytes, 32-byte keccak256 digest) and points callers to resolve_second_pool_via_hook_scan(). The default pinned_pool_id_hex is now None (no pin), so the guard fires only on explicit misuse. (c) Renamed SECOND_POOL_POOL_ID_HEX to SECOND_POOL_HOOK_ADDRESS_HEX in src/robinhood_lp/qualification/two_pool_window.py and kept the old name as a back-compat alias carrying the same 20-byte value; second_pool_candidate() and TwoPoolCandidate.docstring updated to reflect the hook-address semantics. (d) Exported new names from src/robinhood_lp/qualification/__init__.py (RESOLVE_HOOK_ADDRESS_AMBIGUOUS, SECOND_POOL_HOOK_ADDRESS_HEX, resolve_second_pool_via_hook_scan). (e) Added 12 new tests in tests/test_two_pool_t038.py covering the hook-scan happy path, non-matching logs ignored, pool_init_outside_window reporting (empty batch + non-matching logs), ambiguous matches, default hook address, str-form hook address, init-block propagation, end-to-end window-plan flow, no defensive-guard trigger from the new entry point, and complete/incomplete T038 reports driven by the hook-scan resolver. Refreshed test_owner_pinned_pool_id_is_20_bytes_contract_defect into test_owner_pinned_20_byte_value_surfaces_as_hook_address_defensive_guard with rewritten expected text; refreshed two decode-error tests to use 64-byte placeholder pool_id_hex (the shape a chain-resolved PoolId carries); refreshed test_resolve_second_pool_identity_halts_on_pool_id_mismatch internally (the error detail still contains 'keccak256'). Did not edit T030-T037, T036, or other protected files; did not modify the 2026-09-18 reference dataset. attempt=2; base_commit=cdae0239617450634a6f3fcd6c34a25d1daa28f6. candidate_commit=null (controller fills this in). Verification (re-run at end of attempt 2): pytest tests/test_two_pool_t038.py -> 63 passed; pytest --ignore=tests/test_abi_artifacts.py -> 922 passed, 6 skipped (the abi_artifacts test failure is pre-existing, caused by the Solidity v4-core submodule not being checked out under tools/oracle/lib/, unrelated to T038); ruff check src/ tests/ -> All checks passed; ruff format --check src/ tests/ -> 118 files already formatted; mypy --strict src/ -> Success: no issues found in 69 source files; mypy --strict src/robinhood_lp/qualification/ -> Success: no issues found in 14 source files; mypy --strict tests/test_two_pool_t038.py -> Success: no issues found in 1 source file. Changed paths: src/robinhood_lp/qualification/__init__.py, src/robinhood_lp/qualification/second_pool.py, src/robinhood_lp/qualification/two_pool_window.py, tests/test_two_pool_t038.py. Evidence paths: src/robinhood_lp/qualification/second_pool.py (the new resolver module), tests/test_two_pool_t038.py (12 new tests for the hook-scan path + refreshed existing tests).",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_two_pool_t038.py",
+      "result": "63 passed in 0.29s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest --ignore=tests/test_abi_artifacts.py",
+      "result": "922 passed, 6 skipped in 14.91s (pre-existing skips for Foundry / gpg / reordered_inputs vector; abi_artifacts test excluded because tools/oracle/lib/v4-core is not checked out in this worktree, an environment issue unrelated to T038)"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/ tests/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/ tests/",
+      "result": "118 files already formatted"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/",
+      "result": "Success: no issues found in 69 source files"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/robinhood_lp/qualification/",
+      "result": "Success: no issues found in 14 source files"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict tests/test_two_pool_t038.py",
+      "result": "Success: no issues found in 1 source file"
+    }
+  ],
+  "residual_risks": [
+    "The full pytest suite (without the abi_artifacts ignore) has one pre-existing failure: tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails because tools/oracle/lib/v4-core (a Solidity submodule) is not checked out under tools/oracle/lib/. This is an environment issue unrelated to T038; the rest of the suite passes cleanly (922 passed, 6 skipped for Foundry / gpg / reordered_inputs reasons).",
+    "The hook-scan resolver is the new entry point and is exercised by 12 new tests; the convenience wrapper build_second_pool_resolve_result_from_resolved_fields retains the 20-byte defensive guard so legacy attempt-1 misuse patterns surface explicitly. New code should call resolve_second_pool_via_hook_scan directly.",
+    "SECOND_POOL_POOL_ID_HEX is retained as a back-compat alias to SECOND_POOL_HOOK_ADDRESS_HEX (same 20-byte value). External code that imports it as a PoolId will receive the RESOLVE_PINNED_POOL_ID_SIZE_DEFECT outcome from the resolver; the resolver's error_detail names the new entry point (resolve_second_pool_via_hook_scan) so the audit trail points operators to the supported path.",
+    "The window plan still uses the second_pool_candidate(pool_init_block) plumbing; the hook-scan resolver sets pool_init_block=None until a matching Initialize log is observed, then the resolved.init_block is fed back into second_pool_candidate so apply_window_rule places the pool. No silent fallback to a guessed Initialize block."
+  ]
+}

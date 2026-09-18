@@ -7,8 +7,8 @@ range whose end must be a **finalized** block, not ``latest``.
 This module is the deterministic, offline implementation of the rule.
 It is the audit-trail surface the operator runbook and the per-pool
 T034 machine report consume; the actual ``finalized`` block reading
-and the PoolId-filtered Initialize scan are operator-side actions whose
-evidence is pinned into the inputs this module consumes.
+and the hook-address-filtered ``Initialize`` scan are operator-side
+actions whose evidence is pinned into the inputs this module consumes.
 
 The window rule (Owner decision 2026-09-18, delegated):
 
@@ -28,6 +28,15 @@ The window rule (Owner decision 2026-09-18, delegated):
    ``pool_init_outside_window`` and **excluded** from the qualified
    dataset rather than extending the window. Extended and excluded
    pools are both named in the report.
+
+The second pool's identity is pinned by the Owner by its **hook
+contract address** (a 20-byte lookup signal), NOT by its V4
+``PoolId``. V4 ``PoolId`` is ``keccak256(abi.encode(PoolKey))`` and
+is therefore a 32-byte keccak256 digest emitted on chain; it is
+unknown as of this contract and is resolved on chain by the T038
+hook-scanning resolver in
+:mod:`robinhood_lp.qualification.second_pool`, which scans
+``Initialize`` events filtered by the pinned hook address.
 """
 
 from __future__ import annotations
@@ -39,10 +48,25 @@ from typing import Any, Final
 # Constants (T038 contract; not planning choices)
 # ---------------------------------------------------------------------------
 
-#: The Owner-pinned second pool PoolId (chain id 4663). The remaining
-#: PoolKey fields are UNKNOWN as of the contract and must be resolved on
-#: chain by an operator-side ``PoolId``-filtered Initialize scan.
-SECOND_POOL_POOL_ID_HEX: Final[str] = "0xEd50bDeeA8aDC232f159486192a4157281D722ff"
+#: The Owner-pinned second pool **hook contract address** on chain id
+#: 4663. Per the T038 amendment of 2026-09-18 this value is a
+#: **lookup signal** (the ``hooks`` field of the second pool's
+#: ``PoolKey``), NOT a V4 ``PoolId``. V4 ``PoolId`` is
+#: ``keccak256(abi.encode(PoolKey))`` and is therefore a 32-byte
+#: keccak256 digest emitted on chain; the pinned 20-byte value
+#: below is the hook contract address the resolver scans ``Initialize``
+#: logs for. The remaining ``PoolKey`` fields and the 32-byte
+#: ``PoolId`` are UNKNOWN as of this contract and are resolved on
+#: chain by the T038 hook-scanning resolver.
+SECOND_POOL_HOOK_ADDRESS_HEX: Final[str] = "0xEd50bDeeA8aDC232f159486192a4157281D722ff"
+
+#: Back-compat alias for the Owner-pinned second pool lookup signal.
+#: The value is the hook contract address (20 bytes), not a V4
+#: ``PoolId`` (32 bytes); callers that treat it as a ``PoolId``
+#: receive the ``resolve_pinned_pool_id_size_defect`` outcome from
+#: the resolver as a defensive guard. New code should use
+#: :data:`SECOND_POOL_HOOK_ADDRESS_HEX`.
+SECOND_POOL_POOL_ID_HEX: Final[str] = SECOND_POOL_HOOK_ADDRESS_HEX
 
 #: The Owner-pinned chain id (Robinhood Chain mainnet).
 TWO_POOL_CHAIN_ID: Final[int] = 4663
@@ -272,18 +296,25 @@ class TwoPoolCandidate:
 
     ``pool_alias`` is a short opaque token (e.g. ``reference``,
     ``second``); ``pool_id_hex`` is the canonical lowercase 0x-hex
-    PoolId the Owner pinned. ``pool_init_block`` is the block the
-    operator resolved from the chain; a value of ``None`` represents
+    identifier the planner uses for the audit trail. For the
+    reference pool this is the pinned 32-byte V4 ``PoolId``; for the
+    second pool this is the Owner-pinned **hook contract address**
+    (a 20-byte lookup signal) until the on-chain
+    ``Initialize``-filtered scan resolves the actual ``PoolKey`` /
+    ``PoolId``. ``pool_init_block`` is the block the operator
+    resolved from the chain; a value of ``None`` represents
     "Initialize not yet resolved / Initialize outside the search
     bounds" and forces the ``pool_init_outside_window`` outcome
     without an on-chain guess.
 
-    The validator accepts both 20-byte (address-sized) and 32-byte
-    (keccak256-sized) pool identifiers so the owner-pinned value
-    (which the T038 contract pins as a 40-char hex) does not
-    silently abort the planner; the second-pool identity resolver
-    is the audit-trail surface that surfaces the contract defect
-    when the pinned hex is not a 32-byte keccak256 digest.
+    The validator accepts both 20-byte (address-sized, used for the
+    second pool's hook address) and 32-byte (keccak256-sized, used
+    for the reference pool's PoolId) hex identifiers so neither
+    pinned value silently aborts the planner. The second-pool
+    identity resolver is the audit-trail surface that distinguishes
+    the two cases by treating the 20-byte value as a hook address
+    (running the ``Initialize`` log scan) rather than treating it
+    as a PoolId (the original attempt-1 contract defect).
     """
 
     pool_alias: str
@@ -578,12 +609,18 @@ def second_pool_candidate(pool_init_block: int | None) -> TwoPoolCandidate:
 
     The function is the deterministic surface the operator runbook
     and the second-pool identity resolver share: only the resolved
-    ``pool_init_block`` is operator-supplied; the PoolId is the
-    pinned second-pool identity the contract names.
+    ``pool_init_block`` is operator-supplied. The ``pool_id_hex``
+    field carries the Owner-pinned **hook contract address**
+    (a 20-byte lookup signal) until the on-chain ``Initialize``
+    log scan resolves the actual ``PoolKey`` / ``PoolId`` for the
+    second pool. The hook-scanning resolver in
+    :mod:`robinhood_lp.qualification.second_pool` consumes this
+    address and returns a :class:`ResolvedPoolKey` carrying the
+    real 32-byte ``PoolId``.
     """
     return TwoPoolCandidate(
         pool_alias="second",
-        pool_id_hex=SECOND_POOL_POOL_ID_HEX,
+        pool_id_hex=SECOND_POOL_HOOK_ADDRESS_HEX,
         pool_init_block=pool_init_block,
     )
 
@@ -615,6 +652,7 @@ __all__ = [
     "PIN_UNAVAILABLE",
     "EndpointFinalizedObservation",
     "PoolWindowOutcome",
+    "SECOND_POOL_HOOK_ADDRESS_HEX",
     "SECOND_POOL_POOL_ID_HEX",
     "TWO_POOL_CHAIN_ID",
     "TWO_POOL_INIT_EXTENSION_CAP_BLOCKS",
