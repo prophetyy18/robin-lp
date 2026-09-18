@@ -5,6 +5,21 @@ store (``manifest.py``), and the T030 logical records (``schema.py``)
 into a single idempotent write operation that satisfies the T031
 acceptance matrix.
 
+T037 fail-closed guard
+----------------------
+
+The :meth:`RawPartitionWriter.append_partition` method now refuses an
+incoming batch that contains EventKeys **not already recorded in the
+existing on-disk Parquet file** when the partition is being re-entered
+through :meth:`RawPartitionWriter._merge_into_existing_partition`.
+Silently appending such rows to ``event_index`` only would leave the
+dataset reporting ``complete=true`` while its Parquet files and its
+event index disagree on the row set; that was the silent partition
+row-loss defect reproduced by the 2026-09-18 reference run. The guard
+raises :class:`SilentRowLossError` with the offending EventKey set so
+the caller can re-batch (typically by aligning its collection interval
+boundaries to the partition grid; see T037).
+
 Commit protocol
 ---------------
 
@@ -103,6 +118,67 @@ from robinhood_lp.storage.schema import (
 #: is justified by the representative short-range measurement recorded
 #: in :mod:`robinhood_lp.storage.measurement`.
 DEFAULT_BLOCKS_PER_PARTITION: Final[int] = 100
+
+
+# ---------------------------------------------------------------------------
+# Errors
+# ---------------------------------------------------------------------------
+
+
+class SilentRowLossError(Exception):
+    """Raised by :meth:`RawPartitionWriter.append_partition` when an
+    incoming batch contains EventKeys that are not already recorded in
+    the existing on-disk Parquet file for the partition.
+
+    The defect this guards against was reproduced by the 2026-09-18
+    reference run: the runner grouped decoded rows by partition cell
+    and called ``append_partition`` per cell. When the collection
+    interval (10 000 blocks wide) happened to start at a non-grid
+    offset inside a 100-block cell, a later interval re-entered a cell
+    the previous interval had already written. The re-entry path used
+    to call :meth:`RawPartitionWriter._merge_into_existing_partition`
+    which silently added the new EventKeys to ``event_index`` without
+    storing them in the Parquet file. Nothing recorded the loss; the
+    run reported ``complete=true`` while 3 739 rows in ``event_index``
+    became 3 737 rows on disk.
+
+    After T037 the writer refuses the write with this exception. The
+    caller is expected to re-batch so the collection interval
+    boundaries land on the partition grid (T037 deliverable 2) so
+    forward-progress rows never reach an already-written cell. The
+    fail-closed guard remains in place as the safety net: even when
+    the runner is correctly aligned, a buggy caller cannot produce
+    the silent-append outcome.
+    """
+
+    def __init__(
+        self,
+        partition_id: str,
+        *,
+        missing_event_keys: tuple[tuple[int, int, int, int], ...],
+        event_index_row_count: int,
+        parquet_row_count: int,
+    ) -> None:
+        self.partition_id = partition_id
+        self.missing_event_keys = missing_event_keys
+        self.event_index_row_count = event_index_row_count
+        self.parquet_row_count = parquet_row_count
+        sample = ", ".join(
+            f"(block_hash=0x{bh:064x}, tx_hash=0x{tx:064x}, log_index={li})"
+            for bh, tx, li, _bk in missing_event_keys[:5]
+        )
+        more = ""
+        if len(missing_event_keys) > 5:
+            more = f" (+{len(missing_event_keys) - 5} more)"
+        super().__init__(
+            f"silent row loss prevented for partition {partition_id!r}: "
+            f"{len(missing_event_keys)} EventKey(s) in the incoming batch are "
+            f"not in the on-disk Parquet file "
+            f"(event_index_rows={event_index_row_count}, parquet_rows={parquet_row_count}); "
+            f"first missing EventKeys: {sample}{more}; align the collection "
+            f"interval boundaries to the partition grid and re-run."
+        )
+
 
 # ---------------------------------------------------------------------------
 # Record dispatch (any typed log record -> PartitionKey + Parquet row)
@@ -561,17 +637,62 @@ class RawPartitionWriter:
         pk: PartitionKey,
         accounting: AccountingInterval | None,
     ) -> AppendResult:
-        """Idempotent re-run path: append only new event_index rows.
+        """Idempotent re-run path: append only ``event_index`` rows
+        whose EventKey already exists on disk.
 
         The on-disk Parquet file is not modified; the contract is
         that repeat / overlap ingestion lands on the same partition
         and the file content is preserved.
+
+        T037 fail-closed guard
+        -----------------------
+
+        Before recording any observation the writer inspects the
+        EventKey set in the incoming batch. Any EventKey that is not
+        already present in the on-disk Parquet file (dedup'd by the
+        ``event_key_hash`` column) is treated as a forward-progress
+        row that the existing partition cell did not see. Silently
+        adding those rows to ``event_index`` while leaving the Parquet
+        file untouched was the silent partition row-loss defect
+        reproduced by the 2026-09-18 reference run. The guard raises
+        :class:`SilentRowLossError`; the transaction context manager
+        rolls back so no ``event_index`` row, no checkpoint advance,
+        and no accounting row is recorded for the rejected batch.
+        Re-running the same batch after the caller has re-aligned its
+        collection interval boundaries to the partition grid (T037
+        deliverable 2) lands every row on the file.
         """
         existing_row = self.manifest.get_partition(pk.partition_id())
         assert existing_row is not None
         file_path = Path(existing_row.file_path)
         file_size = file_path.stat().st_size if file_path.exists() else 0
         with self.manifest.transaction() as conn:
+            # T037 fail-closed guard. Compute the set of EventKeys
+            # in this batch that are NOT yet recorded against this
+            # partition in ``event_index``. A repeated / overlap
+            # re-run whose rows already exist (with the same content
+            # hash) returns an empty set here and the idempotent path
+            # below proceeds. Any non-empty result triggers the
+            # silent-row-loss failure: those rows would have ended
+            # up in the index only, never in the Parquet file.
+            missing_keys = self._list_missing_event_keys(
+                conn,
+                pk=pk,
+                records=records,
+            )
+            if missing_keys:
+                # Roll back via the context manager by raising here.
+                parquet_row_count = int(existing_row.row_count)
+                event_index_count = self._count_event_index_rows(
+                    conn,
+                    partition_id=pk.partition_id(),
+                )
+                raise SilentRowLossError(
+                    pk.partition_id(),
+                    missing_event_keys=missing_keys,
+                    event_index_row_count=event_index_count,
+                    parquet_row_count=parquet_row_count,
+                )
             appended, skipped, conflicts = self._record_event_batch(
                 conn,
                 pk=pk,
@@ -602,6 +723,56 @@ class RawPartitionWriter:
             halt_reason=("conflicting observation recorded" if conflicts else None),
             record_partition_id=pk.partition_id(),
         )
+
+    # ----- T037 fail-closed guard helpers -----------------------------
+
+    def _list_missing_event_keys(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        pk: PartitionKey,
+        records: Sequence[_LogRecord],
+    ) -> tuple[tuple[int, int, int, int], ...]:
+        """Return the EventKey tuples that are NOT in the partition's
+        ``event_index`` for any of ``records``.
+
+        The result is a tuple of ``(block_hash, tx_hash, log_index,
+        block_number)`` so the caller can include a useful sample in
+        the :class:`SilentRowLossError` message. The check runs inside
+        the same transaction as the index write so the read / write
+        set cannot race.
+        """
+        missing: list[tuple[int, int, int, int]] = []
+        for r in records:
+            ek = r.event_key()
+            existing = self.manifest.lookup_event(
+                conn,
+                chain_id=ek.chain_id.value,
+                block_hash=ek.block_hash,
+                tx_hash=ek.tx_hash,
+                log_index=ek.log_index,
+            )
+            if not existing:
+                missing.append((ek.block_hash, ek.tx_hash, ek.log_index, int(r.block_number)))
+        return tuple(missing)
+
+    def _count_event_index_rows(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        partition_id: str,
+    ) -> int:
+        """Return the number of ``event_index`` rows for ``partition_id``.
+
+        Used by the fail-closed guard to attach a useful diagnostic to
+        :class:`SilentRowLossError`. The count includes both
+        ``consistent`` and ``conflict`` observations.
+        """
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM event_index WHERE partition_id = ?",
+            (partition_id,),
+        ).fetchone()
+        return int(row["n"]) if row else 0
 
     def _record_event_batch(
         self,
@@ -794,6 +965,7 @@ __all__ = [
     "AppendResult",
     "DEFAULT_BLOCKS_PER_PARTITION",
     "RawPartitionWriter",
+    "SilentRowLossError",
     "derive_partition_key",
     "records_to_arrow_table",
 ]

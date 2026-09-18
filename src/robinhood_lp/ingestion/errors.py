@@ -64,6 +64,21 @@ REASON_INTERNAL: Final[str] = "internal_error"
 # ``block_timestamp`` / ``parent_hash`` fields.
 REASON_HEADER_FETCH_FAILED: Final[str] = "header_fetch_failed"
 
+# T037 — fail-closed guard in the partition writer raised when an
+# incoming batch contains EventKeys that are not already in the
+# existing on-disk Parquet file. The defect this guards against was
+# reproduced by the 2026-09-18 reference run: the runner grouped
+# decoded rows by partition cell and called ``append_partition`` per
+# cell; a non-grid-aligned collection interval boundary re-entered a
+# cell the previous interval had already written, and the writer used
+# to silently append those rows to ``event_index`` without storing
+# them in the Parquet file. The guard (storage/writer.py) raises
+# :class:`SilentRowLossError`; the runner maps it to this reason
+# code and halts the run non-complete so the operator sees a
+# concrete failure instead of a partial dataset reported as
+# ``complete=True``.
+REASON_PARTITION_ROW_LOSS_GUARD: Final[str] = "partition_row_loss_guard"
+
 # The umbrella budget_exhausted reason code that the manifest records
 # at the run level when the qualification halt is triggered by budget
 # depletion. Sub-tags identify which budget ran out (calls / CU / time
@@ -99,6 +114,7 @@ ALL_REASON_CODES: Final[frozenset[str]] = frozenset(
         REASON_BUDGET_EXHAUSTED,
         REASON_CANCELLED_BY_OPERATOR,
         REASON_SKIPPED_NOT_REQUIRED,
+        REASON_PARTITION_ROW_LOSS_GUARD,
     }
 )
 

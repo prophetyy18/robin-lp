@@ -1,0 +1,42 @@
+[
+  {
+    "partition_id": "chain=4663/contract=8366a39cc670b4001a1121b8f6a443a643e40951/event=Swap/range=55586200-55586299",
+    "consistent": false,
+    "event_index_count": 3,
+    "parquet_row_count": 2,
+    "missing_in_parquet": [
+      [
+        "4663",
+        "0x5b5da112574a3012c75ec916c49986d17cc5c901f4a330c568bc8f1cc00fd962",
+        "0x17c7771d139bbf8f8cb7d5b7b1cd0ccb09ca6aefa43b6e36df400e26fb5e936e",
+        "53"
+      ]
+    ],
+    "missing_in_event_index": [],
+    "detail": {
+      "file_path": "/home/lpdev/lp-data/raw/chain=4663/contract=8366a39cc670b4001a1121b8f6a443a643e40951/event=Swap/range=55586200-55586299/data.parquet",
+      "file_sha256": "0xbc6ed7f57f97242e4298f2b141043d3d735876cd9c045b331fe772eaac5174fd",
+      "verdict": "missing_in_parquet"
+    }
+  },
+  {
+    "partition_id": "chain=4663/contract=8366a39cc670b4001a1121b8f6a443a643e40951/event=Swap/range=55726200-55726299",
+    "consistent": false,
+    "event_index_count": 2,
+    "parquet_row_count": 1,
+    "missing_in_parquet": [
+      [
+        "4663",
+        "0x3d26fd58832d9f0012700ff68706d99efb8a58399ee8cbce561f1007d424b859",
+        "0xd75437f4a29d3763edf90eebc8cfd179f63b2f278f01d9b9663ac2ab0a5d79d4",
+        "29"
+      ]
+    ],
+    "missing_in_event_index": [],
+    "detail": {
+      "file_path": "/home/lpdev/lp-data/raw/chain=4663/contract=8366a39cc670b4001a1121b8f6a443a643e40951/event=Swap/range=55726200-55726299/data.parquet",
+      "file_sha256": "0x5fe40f3b72c4a85e5c93fa967e26030eea82c152aef9869c94d26ecb568dad43",
+      "verdict": "missing_in_parquet"
+    }
+  }
+]

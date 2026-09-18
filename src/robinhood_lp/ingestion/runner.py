@@ -69,6 +69,7 @@ from robinhood_lp.ingestion.errors import (
     REASON_HEADER_FETCH_FAILED,
     REASON_INVALID_RESPONSE,
     REASON_OK,
+    REASON_PARTITION_ROW_LOSS_GUARD,
     STATE_CANCELLED,
     STATE_FAILED,
     STATE_SCANNED_EMPTY,
@@ -103,6 +104,7 @@ from robinhood_lp.storage.schema import (
 from robinhood_lp.storage.writer import (
     DEFAULT_BLOCKS_PER_PARTITION,
     RawPartitionWriter,
+    SilentRowLossError,
 )
 
 # ---------------------------------------------------------------------------
@@ -934,6 +936,20 @@ class IngestionRunner:
                     detail=(
                         f"writer.append_partition rejected batch "
                         f"{event_name}: {type(exc).__name__}: {exc}"
+                    ),
+                )
+            except SilentRowLossError as exc:
+                # T037 fail-closed path. The writer's guard rejected a
+                # batch that would have left ``event_index`` ahead of
+                # the on-disk Parquet file; surface the failure as a
+                # concrete reason code so the run halts non-complete
+                # rather than reporting a partial dataset.
+                return _failed_decision(
+                    decision,
+                    reason_code=REASON_PARTITION_ROW_LOSS_GUARD,
+                    detail=(
+                        f"writer.append_partition refused a forward-progress "
+                        f"batch for event {event_name!r}: {type(exc).__name__}: {exc}"
                     ),
                 )
         # Persist the dedup'd headers to the manifest ``block_headers``

@@ -275,18 +275,51 @@ class RangePlanner:
         self,
         *,
         max_blocks_per_sub_range: int = 10_000,
+        blocks_per_partition: int = 100,
     ) -> None:
         if max_blocks_per_sub_range <= 0:
             raise ValueError(
                 f"max_blocks_per_sub_range: must be positive, got {max_blocks_per_sub_range}"
             )
+        if blocks_per_partition <= 0:
+            raise ValueError(f"blocks_per_partition: must be positive, got {blocks_per_partition}")
+        # The T037 grid-aligned split is only meaningful when
+        # ``max_blocks_per_sub_range`` is a multiple of
+        # ``blocks_per_partition``. When the two are not aligned
+        # (e.g. tests that use ``max_blocks_per_sub_range=10`` with
+        # the default 100-block cell) the planner falls back to the
+        # pre-T037 simple contiguous split; the writer's fail-closed
+        # guard still rejects any silent row loss on the resulting
+        # batches. Production runs use ``max_blocks=10_000`` with
+        # ``blocks_per_partition=100`` so the aligned path is the
+        # default.
         self._max_blocks = int(max_blocks_per_sub_range)
+        self._blocks_per_partition = int(blocks_per_partition)
+        self._grid_aligned = self._max_blocks % self._blocks_per_partition == 0
 
     # ----- public API --------------------------------------------------
 
     @property
     def max_blocks_per_sub_range(self) -> int:
         return self._max_blocks
+
+    @property
+    def blocks_per_partition(self) -> int:
+        return self._blocks_per_partition
+
+    @property
+    def grid_aligned(self) -> bool:
+        """True iff the planner emits grid-aligned sub-ranges.
+
+        T037 deliverable 2 closes the silent partition row-loss defect
+        by aligning the collection interval boundaries to the partition
+        grid so a forward-progress batch never lands in an
+        already-written cell. When this property is ``False`` the
+        planner falls back to the pre-T037 simple contiguous split;
+        the writer's fail-closed guard (deliverable 1) remains in place
+        as the safety net.
+        """
+        return self._grid_aligned
 
     def plan(self, inputs: RangePlannerInputs) -> PlannedRun:
         """Compute the topology + sub-ranges for the run."""
@@ -320,7 +353,15 @@ class RangePlanner:
             requested_end_block=inputs.requested_end_block,
             coverage_from_block=coverage_from,
             coverage_to_block=coverage_to,
-            sub_ranges=tuple(_split_into_windows(coverage_from, coverage_to, self._max_blocks)),
+            sub_ranges=tuple(
+                _split_into_windows(
+                    coverage_from,
+                    coverage_to,
+                    self._max_blocks,
+                    blocks_per_partition=self._blocks_per_partition,
+                    grid_aligned=self._grid_aligned,
+                )
+            ),
             existing_checkpoint=None,
         )
 
@@ -350,7 +391,15 @@ class RangePlanner:
             requested_end_block=inputs.requested_end_block,
             coverage_from_block=coverage_from,
             coverage_to_block=coverage_to,
-            sub_ranges=tuple(_split_into_windows(coverage_from, coverage_to, self._max_blocks)),
+            sub_ranges=tuple(
+                _split_into_windows(
+                    coverage_from,
+                    coverage_to,
+                    self._max_blocks,
+                    blocks_per_partition=self._blocks_per_partition,
+                    grid_aligned=self._grid_aligned,
+                )
+            ),
             existing_checkpoint=cp,
         )
 
@@ -437,11 +486,87 @@ class RangePlanner:
 
 
 def _split_into_windows(
-    coverage_from: int, coverage_to: int, max_blocks: int
+    coverage_from: int,
+    coverage_to: int,
+    max_blocks: int,
+    *,
+    blocks_per_partition: int = 100,
+    grid_aligned: bool = False,
 ) -> list[PlannedSubRange]:
-    """Greedy contiguous windows covering ``[coverage_from, coverage_to]``."""
-    out: list[PlannedSubRange] = []
+    """Greedy contiguous windows covering ``[coverage_from, coverage_to]``.
+
+    T037 grid alignment
+    -------------------
+
+    The collection interval is normally wider than the partition cell
+    (``max_blocks_per_sub_range = 10_000`` vs
+    ``blocks_per_partition = 100``). If the cold-start begins inside
+    a cell rather than on its grid boundary, a naive window split
+    would put every full window except the first across the trailing
+    edge of a cell the previous interval had already written. The
+    runner's per-batch writer call would then re-enter that cell and
+    silently drop its new rows in the event index (the silent
+    partition row-loss defect reproduced by the 2026-09-18 reference
+    run; see T037 deliverable 2).
+
+    When ``grid_aligned=True`` the function:
+
+    1. prepends a short pre-window that covers the partial first cell
+       ``[coverage_from, first_grid_boundary - 1]`` only when
+       ``coverage_from`` is not already aligned;
+    2. emits every subsequent window so it starts AND ends on grid
+       boundaries. The first full window starts at
+       ``first_grid_boundary``; each subsequent window starts at
+       ``previous_end + 1``, which is automatically grid-aligned
+       because ``max_blocks`` is a multiple of ``blocks_per_partition``.
+
+    The trailing window is allowed to end mid-cell when
+    ``coverage_to`` is not itself grid-aligned: that window is the
+    last window in the run and there is no following window to
+    overlap with.
+
+    When ``grid_aligned=False`` (the default when
+    ``max_blocks_per_sub_range`` is not a multiple of
+    ``blocks_per_partition``) the function returns the original
+    pre-T037 contiguous split. Tests that use
+    ``max_blocks_per_sub_range=10`` against the default 100-block
+    cell fall back to the legacy split so the existing planner test
+    matrix continues to pass; the writer's fail-closed guard (T037
+    deliverable 1) is the safety net that catches the silent append
+    in that mode.
+    """
+    if max_blocks <= 0:
+        raise ValueError(f"max_blocks: must be positive, got {max_blocks}")
+    if blocks_per_partition <= 0:
+        raise ValueError(f"blocks_per_partition: must be positive, got {blocks_per_partition}")
+    if coverage_from > coverage_to:
+        return []
+    if not grid_aligned:
+        out: list[PlannedSubRange] = []
+        cursor = coverage_from
+        while cursor <= coverage_to:
+            end = min(cursor + max_blocks - 1, coverage_to)
+            out.append(PlannedSubRange(cursor, end))
+            cursor = end + 1
+        return out
+    out = []
     cursor = coverage_from
+    # Snap the first cursor up to the next grid boundary when the
+    # cold start began inside a cell. We cover the partial cell with
+    # a short pre-window so the pool's Initialize event (which may
+    # live at ``coverage_from``) is not skipped.
+    grid_step = int(blocks_per_partition)
+    if cursor % grid_step != 0:
+        first_grid = ((cursor // grid_step) + 1) * grid_step
+        if first_grid - 1 >= cursor:
+            pre_end = min(first_grid - 1, coverage_to)
+            out.append(PlannedSubRange(cursor, pre_end))
+            cursor = pre_end + 1
+            if cursor > coverage_to:
+                return out
+    # Emit full grid-aligned windows until the next one would extend
+    # past ``coverage_to``. The last window is allowed to end mid-cell
+    # so the requested range is covered end-to-end.
     while cursor <= coverage_to:
         end = min(cursor + max_blocks - 1, coverage_to)
         out.append(PlannedSubRange(cursor, end))

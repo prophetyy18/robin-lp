@@ -1,0 +1,46 @@
+{
+  "task_id": "T037",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Closed the silent partition row-loss defect reproduced by the 2026-09-18 reference run. The writer now refuses (fail-closed) any incoming batch whose EventKeys are not already recorded in the existing on-disk Parquet file, raising a new :class:`SilentRowLossError` with the offending EventKey set; the runner maps that to a ``partition_row_loss_guard`` reason code and halts the run with ``complete=False``. The planner now aligns collection interval boundaries to the partition grid whenever ``max_blocks_per_sub_range`` is a multiple of ``blocks_per_partition`` (the production default of 10 000 / 100 is a multiple, so grid alignment is the default), prepending a short pre-window for the partial first cell so the pool's Initialize event is preserved. A new ``storage.reconciliation`` module compares every partition's ``event_index`` EventKey set against the rows the on-disk Parquet file carries; the data-quality verifier accepts the reconciliation reports and forces ``complete=false`` with the new ``partition_event_index_parquet_mismatch`` reason code while any partition disagrees. Re-checking the real ``/home/lpdev/lp-data`` dataset through the new reconciliation path surfaces exactly the two missing Swap partitions the contract names (``range=55586200-55586299`` and ``range=55726200-55726299``), each with one EventKey missing from the Parquet file. The 2026-09-18 dataset is left untouched; this task records the observation as evidence and does not repair the bytes. Re-run idempotency remains intact (T031 contract re-stated) — repeated writes of the same batch are silently skipped without triggering the guard.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_storage_t037.py -q",
+      "result": "15 passed in 4.74s (all five deliverables covered: writer fail-closed guard, re-run/overlap idempotency, per-partition reconciliation, verifier integration, planner grid alignment, regression fixture, and the real /home/lpdev/lp-data observation)"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ -q --ignore=tests/test_abi_artifacts.py",
+      "result": "859 passed, 6 skipped in 10.61s. The six skips are pre-existing Forge/gpg/skipped-fixture reasons unrelated to T037. Full unit suite plus every T030–T036 contract test passes."
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_storage_writer.py -q",
+      "result": "20 passed in 0.49s. The existing T031 storage writer tests pass unchanged (one legacy transaction-failure test was updated to use a different partition cell because the new guard refuses batches whose new EventKeys would land in an already-written cell; the test's intent — manifest rollback — is preserved)."
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_e2e_t035.py tests/test_ingestion_runner.py tests/test_ingestion_planner.py -q",
+      "result": "All passed. The end-to-end T035 path and the runner / planner fixture matrix still pass with the new guard and the planner grid alignment (the legacy split path is exercised by the max_blocks=10 fixtures via the planner's ``grid_aligned=False`` fallback)."
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/ tests/",
+      "result": "112 files already formatted"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/ tests/",
+      "result": "All checks passed"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/",
+      "result": "Success: no issues found in 64 source files"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -c \"from robinhood_lp.storage import ManifestStore, find_inconsistent_partitions; m = ManifestStore('/home/lpdev/lp-data/manifest.sqlite'); r = find_inconsistent_partitions(m); print(len(r))\"",
+      "result": "2 — the new reconciliation check, applied to the real /home/lpdev/lp-data dataset, surfaces exactly the two Swap partitions the T037 contract names (range=55586200-55586299 and range=55726200-55726299), each with verdict='missing_in_parquet' and one EventKey present in event_index but missing from the on-disk Parquet file. The full JSON evidence is captured in .workflow/t037-lp-data-reconciliation.json. The dataset itself was not modified."
+    }
+  ],
+  "residual_risks": [
+    "The 2026-09-18 reference dataset is left untouched per the T037 Must-not clause (no repair of the two lost Swap rows). Downstream tasks that depend on a complete dataset must run the new reconciliation check first; ``complete=true`` now requires every partition's event_index set to match the Parquet file.",
+    "The planner grid-aligned split only activates when ``max_blocks_per_sub_range`` is a multiple of ``blocks_per_partition`` (the production 10 000 / 100 default is a multiple, so the aligned path is the default). Tests that use smaller values (e.g. ``max_blocks_per_sub_range=10``) fall back to the legacy contiguous split via the planner's ``grid_aligned=False`` property; the writer's fail-closed guard remains in place as the safety net for those configurations.",
+    "The transaction-failure test ``tests/test_storage_writer.py::test_manifest_transaction_failure_does_not_corrupt_state`` was updated to use a fresh partition cell for the failing batch. The test's intent — verifying manifest rollback — is preserved; the change is documented inline in the test. T031 re-run / overlap idempotency behaviour is otherwise unchanged.",
+    "The verifier's new ``partition_reconciliation_results`` parameter is opt-in: callers that do not supply it preserve the pre-T037 behaviour (the partition reconciliation clause is simply skipped). Downstream call sites that build T034 reports should be updated to feed ``reconcile_all_partitions(manifest)`` into the verifier when a full quality verdict is required."
+  ],
+  "blocking_question": null
+}

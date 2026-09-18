@@ -445,6 +445,13 @@ def test_manifest_transaction_failure_does_not_corrupt_state(tmp_path: Path) -> 
     # record_event_observation to raise on the second call onwards.
     # The transaction must roll back so the partition row from the
     # first write survives.
+    #
+    # The second writer call lands in a *different* partition cell
+    # (block 200 is in the ``range=200-299`` cell, while block 10 is
+    # in ``range=0-99``). The T037 fail-closed guard rejects batches
+    # that would add EventKeys to an already-written cell; placing
+    # the second batch in a fresh cell keeps that guard out of the
+    # way so this test exercises only the manifest rollback path.
     original = manifest.record_event_observation
     call_count = {"n": 0}
 
@@ -463,7 +470,7 @@ def test_manifest_transaction_failure_does_not_corrupt_state(tmp_path: Path) -> 
             writer.append_partition(
                 [
                     make_swap_record(
-                        block_number=20,
+                        block_number=200,
                         log_index=2,
                         transaction_index=2,
                         tx_hash=0xDD,

@@ -83,6 +83,20 @@ REASON_CROSS_ENDPOINT_SAMPLE_INFRASTRUCTURE_UNCLEAR: Final[str] = (
 
 REASON_CHECKPOINT_MISMATCH: Final[str] = "checkpoint_mismatch"
 
+# ---------------------------------------------------------------------------
+# Partition reconciliation (T037)
+# ---------------------------------------------------------------------------
+
+#: The per-partition reconciliation check (storage/reconciliation.py)
+#: compares every partition's ``event_index`` EventKey set against the
+#: rows the on-disk Parquet file carries. A mismatch — rows present in
+#: the index but not the file (silent append), or rows present in the
+#: file but not the index (manifest corruption) — surfaces this reason
+#: code and forces ``complete=false``. The data-quality verifier
+#: (quality/verification.py) accepts the reconciliation reports and
+#: refuses to mark the dataset complete while any partition disagrees.
+REASON_PARTITION_EVENT_INDEX_PARQUET_MISMATCH: Final[str] = "partition_event_index_parquet_mismatch"
+
 ALL_REASON_CODES: Final[frozenset[str]] = frozenset(
     {
         REASON_BLOCK_HASH_GAP,
@@ -98,6 +112,7 @@ ALL_REASON_CODES: Final[frozenset[str]] = frozenset(
         REASON_IMPOSSIBLE_VALUE,
         REASON_METADATA_FAILURE,
         REASON_MISORDERED_LOG,
+        REASON_PARTITION_EVENT_INDEX_PARQUET_MISMATCH,
         REASON_RANGE_COVERAGE_GAP,
         REASON_STALE_ENDPOINT,
         REASON_UNKNOWN_POOL,
@@ -114,6 +129,7 @@ QUALIFICATION_FATAL_REASON_CODES: Final[frozenset[str]] = frozenset(
         REASON_CROSS_ENDPOINT_SAMPLE_DISAGREE,
         REASON_CROSS_ENDPOINT_SAMPLE_INFRASTRUCTURE_UNCLEAR,
         REASON_CROSS_ENDPOINT_SAMPLE_MISSING,
+        REASON_PARTITION_EVENT_INDEX_PARQUET_MISMATCH,
     }
 )
 
@@ -139,6 +155,7 @@ __all__ = [
     "REASON_IMPOSSIBLE_VALUE",
     "REASON_METADATA_FAILURE",
     "REASON_MISORDERED_LOG",
+    "REASON_PARTITION_EVENT_INDEX_PARQUET_MISMATCH",
     "REASON_RANGE_COVERAGE_GAP",
     "REASON_STALE_ENDPOINT",
     "REASON_UNKNOWN_POOL",

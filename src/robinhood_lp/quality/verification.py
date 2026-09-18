@@ -23,9 +23,9 @@ with the failing clause surfaced as a blocker.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 from robinhood_lp.quality.quality_report import (
     QualityFinding,
@@ -35,6 +35,7 @@ from robinhood_lp.quality.reason_codes import (
     REASON_BUDGET_EXHAUSTED,
     REASON_CROSS_ENDPOINT_SAMPLE_DISAGREE,
     REASON_CROSS_ENDPOINT_SAMPLE_MISSING,
+    REASON_PARTITION_EVENT_INDEX_PARQUET_MISMATCH,
 )
 
 #: The set of reason codes that prevent ``complete=true``. Any
@@ -45,8 +46,25 @@ _BLOCKING_REASON_CODES: Final[frozenset[str]] = frozenset(
         REASON_BUDGET_EXHAUSTED,
         REASON_CROSS_ENDPOINT_SAMPLE_MISSING,
         REASON_CROSS_ENDPOINT_SAMPLE_DISAGREE,
+        REASON_PARTITION_EVENT_INDEX_PARQUET_MISMATCH,
     }
 )
+
+
+class _ReconciliationLike(Protocol):
+    """The minimum surface :func:`verify_report` consumes from a
+    T037 partition reconciliation report.
+
+    Defined as a :class:`Protocol` so the verifier does not import
+    the concrete :class:`PartitionReconciliationReport` class from
+    :mod:`robinhood_lp.storage.reconciliation` (which would couple
+    the quality module to the storage module).
+    """
+
+    partition_id: str
+    consistent: bool
+    missing_in_parquet: tuple[tuple[Any, ...], ...]
+    missing_in_event_index: tuple[tuple[Any, ...], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +96,7 @@ def verify_report(
     sample_agreement: Iterable[bool] | None = None,
     has_result_bearing_sample: bool | None = None,
     empty_capability_probe_only: bool = False,
+    partition_reconciliation_results: Sequence[_ReconciliationLike] | None = None,
 ) -> VerificationResult:
     """Verify ``report`` against the acceptance criteria.
 
@@ -105,6 +124,16 @@ def verify_report(
         ``empty_capability_probe_only`` blocker — an all-empty
         capability probe proves range acceptance only, never event
         completeness.
+    partition_reconciliation_results:
+        T037 reconciliation reports, one per partition (the result
+        of :func:`robinhood_lp.storage.reconciliation.reconcile_all_partitions`).
+        Any report whose ``consistent`` flag is False forces
+        ``complete=false`` with the
+        ``partition_event_index_parquet_mismatch`` reason code, plus
+        a per-partition blocker that names the partition. When the
+        parameter is ``None`` the partition reconciliation clause is
+        skipped (preserves the pre-T037 caller surface; the
+        reconciliation path is opt-in).
     """
     blockers: list[str] = []
     details: dict[str, Any] = {}
@@ -150,6 +179,17 @@ def verify_report(
     # 6. Infrastructure-correlation state must be set (never blank).
     if report.infrastructure_state is None or report.infrastructure_state == "":
         blockers.append("infrastructure_correlation_state_unrecorded")
+
+    # 7. T037 — per-partition reconciliation must be consistent.
+    #    Any partition whose ``event_index`` set disagrees with its
+    #    Parquet file (the silent row-loss defect) blocks
+    #    ``complete=true`` even when no other finding is raised.
+    if partition_reconciliation_results is not None:
+        reconciliation_blockers, reconciliation_details = _check_partition_reconciliation(
+            partition_reconciliation_results
+        )
+        blockers.extend(reconciliation_blockers)
+        details["partition_reconciliation"] = reconciliation_details
 
     complete = len(blockers) == 0
     return VerificationResult(
@@ -230,6 +270,39 @@ def _check_topology_basis(report: QualityReport) -> str | None:
             return "backtest_window_only_no_initialize_or_checkpoint"
         return None
     return None
+
+
+def _check_partition_reconciliation(
+    reports: Sequence[_ReconciliationLike],
+) -> tuple[list[str], dict[str, Any]]:
+    """Return the verifier-side blockers and details for the T037
+    partition reconciliation clause.
+
+    The function records the umbrella reason code in the blocker
+    list (once, even when multiple partitions disagree) and the
+    per-partition partition id + verdict in the returned details
+    dict so downstream tooling can show which partition failed.
+    """
+    inconsistent = [r for r in reports if not r.consistent]
+    if not inconsistent:
+        return [], {
+            "checked_partitions": len(reports),
+            "inconsistent_partitions": [],
+        }
+    blockers: list[str] = [REASON_PARTITION_EVENT_INDEX_PARQUET_MISMATCH]
+    per_partition: list[dict[str, Any]] = []
+    for r in inconsistent:
+        per_partition.append(
+            {
+                "partition_id": r.partition_id,
+                "missing_in_parquet_count": len(r.missing_in_parquet),
+                "missing_in_event_index_count": len(r.missing_in_event_index),
+            }
+        )
+    return blockers, {
+        "checked_partitions": len(reports),
+        "inconsistent_partitions": per_partition,
+    }
 
 
 __all__ = [
