@@ -1,0 +1,45 @@
+{
+  "task_id": "T040",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented deterministic event replay (T040) in the new robinhood_lp.replay package. The replay consumes typed V4 log records (InitializeLogRecord, ModifyLiquidityLogRecord, SwapLogRecord, DonateLogRecord, ProtocolFeeUpdatedLogRecord) for one pool's qualified dataset and produces a deterministic sequence of PoolCheckpoint records. Total ordering is by (block_number, transaction_index, log_index); duplicates, missing transaction_index, impossible transitions, unknown pool, unknown event type, and out-of-window events all fail explicitly with named exception classes. The replay preserves the effective combined swap fee emitted by every Swap byte-for-byte (so dynamic-fee pools are honoured) and tracks the directional ProtocolFeeUpdated state across both directions of change with same-block update-before-swap ordering applied via (transaction_index, log_index). The replay consumes a bootstrap snapshot (initial_sqrt_price_x96, initial_tick) on the ReplayInput because V4's Initialize log event does not carry those values on chain. Each PoolCheckpoint carries the per-event wire values (event_swap_fee, event_protocol_fee_packed) downstream consumers (T051) need to separate protocol fees from LP fee growth under pinned V4 rounding. 45 unit tests pass: shuffled/chunked/restarted inputs are deterministic; duplicates, missing/unusable transaction_index, impossible transitions (swap/modify/donate before initialize, second_initialize, swap_with_zero_price), unknown pool, unknown event type, and out-of-window events fail explicitly; protocol-fee state survives both directions of change; same-block update-before-swap ordering is correct; zero-protocol-fee initialization state matches the pinned core vector; dynamic-fee pools preserve per-swap emitted fee without reconstructing unobserved between-swap fee updates.",
+  "commands": [
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_replay_t040.py",
+      "result": "45 passed in 0.12s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ --ignore=tests/test_abi_artifacts.py",
+      "result": "967 passed, 6 skipped in 11.84s (skips are pre-existing forge / gpg / PoolKey-vector skips)"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/replay tests/test_replay_t040.py tests/_replay_t040_fixtures.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/replay tests/test_replay_t040.py tests/_replay_t040_fixtures.py",
+      "result": "9 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/robinhood_lp/replay tests/test_replay_t040.py tests/_replay_t040_fixtures.py",
+      "result": "Success: no issues found in 9 source files"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/",
+      "result": "Success: no issues found in 76 source files"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check .",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check .",
+      "result": "291 files already formatted"
+    }
+  ],
+  "residual_risks": [
+    "The replay's 'active liquidity' view is a simplified event-only model: Swap events overwrite active_liquidity directly from the event's emitted value, and ModifyLiquidity updates active_liquidity only when the current tick is inside [tick_lower, tick_upper]. A full liquidity_net bitmap model that crosses ticks without an intervening Swap is owned by T041 (Reconstruct tick-liquidity state) and is out of scope for T040.",
+    "The replay consumes the bootstrap snapshot (initial_sqrt_price_x96, initial_tick) from the ReplayInput because V4's Initialize log event does not carry those values on chain. Sourcing that snapshot from a block-pinned StateView read at the pool's Initialize block is owned by T041/T042; T040 only defines the input shape.",
+    "Replay does not currently consult the superseded 2026-09-18 reference dataset. The contract forbids it and the ReplayInput carries the data root as an opaque Path; T041/T042's data-root loader is responsible for refusing to load that path.",
+    "Dynamic-fee pools: the replay preserves the per-swap emitted fee byte-for-byte (last_swap_fee, event_swap_fee). It does not attempt to reconstruct unobserved between-swap fee updates from ProtocolFeeUpdated history or from prior swap fees. This is a contract-level must-not, not a residual risk; the wording is preserved here so the independent reviewer sees it next to the implementation."
+  ]
+}
