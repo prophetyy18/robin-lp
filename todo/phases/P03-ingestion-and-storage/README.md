@@ -10,7 +10,11 @@ unexplained gaps; at least one real Robinhood Chain mainnet range has been acqui
 through the live path with `complete=true`, its block time and parent hash are pinned
 to canonical block headers, and the dataset has been cross-checked against block-pinned
 on-chain state; its report separates RPC calls, HTTP requests, bytes, rows, provider
-units, and storage size.
+units, and storage size. The phase is not closed while T039 is outstanding: each pool
+in the research universe must be acquired from its own `Initialize` block to an agreed
+finalized block, carrying its own data root, coverage report and cost record, and the
+fixed ten-million-block window of T038 is retired as a superseded rule rather than
+kept as the research range.
 
 **Phase prohibitions:** no in-place destruction of raw history, future-state calls,
 silent schema coercion, interpolation, or completion based only on “no rows”. Acquisition
@@ -30,3 +34,4 @@ reserved for explicitly enumerated block-pinned verification.
 - [T036 — Qualify the real-mainnet reference dataset](T036.md)
 - [T037 — Close the silent partition row-loss defect](T037.md)
 - [T038 — Acquire and qualify the two-pool ten-million-block window](T038.md)
+- [T039 — Acquire the per-pool extended-history research window](T039.md)

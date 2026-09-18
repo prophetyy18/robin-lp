@@ -226,6 +226,7 @@ engines may later consume its validated outputs, but cannot replace it.
 - [P07 — Central risk and paper execution](phases/P07-risk-and-paper/README.md)
 - [P08 — Operations, observability, and release evidence](phases/P08-operations-and-web/README.md)
 - [P09 — Isolated signer, testnet proof and gated mainnet execution](phases/P09-signer-testnet-and-live/README.md)
+- [P10 — Research universe, datasets, and the model laboratory](phases/P10-research-and-models/README.md)
 
 ## 5. Reference catalogue
 

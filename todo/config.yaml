@@ -368,6 +368,21 @@
       "approved_commit": "4d60384a4321d7a19fa683c1f7886e563a6ee732",
       "latest_review": "todo/reviews/P03/T038/review-002.json"
     },
+    "T039": {
+      "phase": "P03",
+      "status": "PLANNED",
+      "depends_on": [
+        "T035",
+        "T036",
+        "T038"
+      ],
+      "task_file": "todo/phases/P03-ingestion-and-storage/T039.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
+    },
     "T040": {
       "phase": "P04",
       "status": "APPROVED",
@@ -835,6 +850,64 @@
         "T095"
       ],
       "task_file": "todo/phases/P09-signer-testnet-and-live/T096.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
+    },
+    "T100": {
+      "phase": "P10",
+      "status": "PLANNED",
+      "depends_on": [
+        "T034",
+        "T039",
+        "T053"
+      ],
+      "task_file": "todo/phases/P10-research-and-models/T100.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
+    },
+    "T101": {
+      "phase": "P10",
+      "status": "PLANNED",
+      "depends_on": [
+        "T050",
+        "T063",
+        "T100"
+      ],
+      "task_file": "todo/phases/P10-research-and-models/T101.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
+    },
+    "T102": {
+      "phase": "P10",
+      "status": "PLANNED",
+      "depends_on": [
+        "T061",
+        "T101"
+      ],
+      "task_file": "todo/phases/P10-research-and-models/T102.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
+    },
+    "T103": {
+      "phase": "P10",
+      "status": "PLANNED",
+      "depends_on": [
+        "T085",
+        "T102"
+      ],
+      "task_file": "todo/phases/P10-research-and-models/T103.md",
       "attempt": 0,
       "base_commit": null,
       "candidate_commit": null,
