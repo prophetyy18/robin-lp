@@ -488,9 +488,13 @@ def test_a_superseded_dependency_must_be_repointed(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
     manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
     config = manager.load_config()
-    config["tasks"]["T000"]["superseded_by"] = "T001"
+    config["tasks"]["T000"]["superseded_by"] = "T002"
     with pytest.raises(WorkflowError, match="depends on superseded task"):
         manager._check_dependencies(config, "T001")
+    # A successor legitimately builds on the work it replaces: T000 names T001 as
+    # its successor, so T001 depending on T000 is the deliberate case, not the trap.
+    config["tasks"]["T000"]["superseded_by"] = "T001"
+    manager._check_dependencies(config, "T001")
 
 
 def test_owner_amendment_rejects_an_unfinished_active_task(tmp_path: Path) -> None:

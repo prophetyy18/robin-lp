@@ -134,11 +134,14 @@ application / backtest orchestration
 | 9 | T093–T094 | review and promotion evidence | operations / controls |
 | 9 | T095 | mainnet canary execution | isolated execution service |
 | 9 | T096 | final V1 traceability dossier | presentation / ops |
+| 2 | T026 | `robinhood_lp.discovery.registry` (pool-first entry, research universe) | storage |
+| 2 | T027 | `robinhood_lp.discovery.eligibility` (research-universe classification) | storage |
 | 3 | T039 | per-pool extended-history acquisition | application / orchestration |
 | 10 | T100 | `robinhood_lp.research.dataset` | storage |
 | 10 | T101 | `robinhood_lp.research.panel` (labels, splits, training harness) | backtest / research |
 | 10 | T102 | `robinhood_lp.research.models` (model-backed strategy components) | strategy |
 | 10 | T103 | `robinhood_lp.web` research pages | presentation / controls |
+| 10 | T104 | `robinhood_lp.replay.fee_surface` | reconstruction |
 
 ## 3. Cross-cutting policies
 

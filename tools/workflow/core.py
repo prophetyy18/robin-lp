@@ -730,10 +730,14 @@ class WorkflowManager:
         ]
         if incomplete:
             raise WorkflowError(f"{task_id} has unapproved dependencies: {', '.join(incomplete)}")
+        # A task may depend on the work it supersedes -- that is the one case where
+        # building on a retired contract is the point. Any other dependency on a
+        # retired task must be re-pointed at the successor deliberately.
         retired = [
             dependency
             for dependency in task["depends_on"]
             if config["tasks"][dependency].get("superseded_by")
+            and config["tasks"][dependency]["superseded_by"] != task_id
         ]
         if retired:
             raise WorkflowError(

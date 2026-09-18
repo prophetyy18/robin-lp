@@ -29,3 +29,4 @@ prediction metric is never reported as strategy performance.
 - [T101 — Build the panel labels and the training/evaluation harness](T101.md)
 - [T102 — Evaluate trained models as strategy components through the event-driven engine](T102.md)
 - [T103 — Build the research console](T103.md)
+- [T104 — Publish the per-window fee-growth surface](T104.md)

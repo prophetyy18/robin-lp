@@ -192,6 +192,7 @@
         "T024"
       ],
       "task_file": "todo/phases/P02-chain-access-and-discovery/T022.md",
+      "superseded_by": "T026",
       "attempt": 1,
       "base_commit": "b93f3a7cada2ccbe76fb2ec444bb12a30c625785",
       "candidate_commit": "8b219f696c5bf6aad4c29eeb01873d1e13deb549",
@@ -205,6 +206,7 @@
         "T022"
       ],
       "task_file": "todo/phases/P02-chain-access-and-discovery/T023.md",
+      "superseded_by": "T027",
       "attempt": 1,
       "base_commit": "e7319cfebaef006c3d7fd1293398d9cf243fa272",
       "candidate_commit": "6514a0b3d05e7977122e8d8b61bea72320fed7bd",
@@ -240,6 +242,34 @@
       "candidate_commit": "78fb19f17991191de3c70a6f16db2c457405e809",
       "approved_commit": "78fb19f17991191de3c70a6f16db2c457405e809",
       "latest_review": "todo/reviews/P02/T025/review-001.json"
+    },
+    "T026": {
+      "phase": "P02",
+      "status": "PLANNED",
+      "depends_on": [
+        "T022",
+        "T024"
+      ],
+      "task_file": "todo/phases/P02-chain-access-and-discovery/T026.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
+    },
+    "T027": {
+      "phase": "P02",
+      "status": "PLANNED",
+      "depends_on": [
+        "T023",
+        "T026"
+      ],
+      "task_file": "todo/phases/P02-chain-access-and-discovery/T027.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
     },
     "T030": {
       "phase": "P03",
@@ -877,7 +907,8 @@
       "depends_on": [
         "T050",
         "T063",
-        "T100"
+        "T100",
+        "T104"
       ],
       "task_file": "todo/phases/P10-research-and-models/T101.md",
       "attempt": 0,
@@ -908,6 +939,20 @@
         "T102"
       ],
       "task_file": "todo/phases/P10-research-and-models/T103.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
+    },
+    "T104": {
+      "phase": "P10",
+      "status": "PLANNED",
+      "depends_on": [
+        "T039",
+        "T041"
+      ],
+      "task_file": "todo/phases/P10-research-and-models/T104.md",
       "attempt": 0,
       "base_commit": null,
       "candidate_commit": null,
