@@ -12,7 +12,7 @@
   },
   "active_phase": "P04",
   "active_task": "T040",
-  "workflow_state": "AWAITING_REVIEW",
+  "workflow_state": "APPROVED",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -370,7 +370,7 @@
     },
     "T040": {
       "phase": "P04",
-      "status": "AWAITING_REVIEW",
+      "status": "APPROVED",
       "depends_on": [
         "T012",
         "T030",
@@ -381,9 +381,9 @@
       "task_file": "todo/phases/P04-state-reconstruction/T040.md",
       "attempt": 1,
       "base_commit": "7ed5725f8276e2a842efb13c7efde9814625dd92",
-      "candidate_commit": null,
-      "approved_commit": null,
-      "latest_review": null
+      "candidate_commit": "98af26d0a6386ed0727f4df7849c3704ea040a13",
+      "approved_commit": "98af26d0a6386ed0727f4df7849c3704ea040a13",
+      "latest_review": "todo/reviews/P04/T040/review-001.json"
     },
     "T041": {
       "phase": "P04",
