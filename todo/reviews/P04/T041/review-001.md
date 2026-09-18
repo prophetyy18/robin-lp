@@ -1,0 +1,172 @@
+# T041 independent review
+
+- Base commit: `1535efc8bf47c2495410e2954434f0527f48d3d2`
+- Candidate commit: `9f1daf1fdbc0d2839b87c25033167557a7df8924`
+- Verdict: **PASS**
+
+## Checks
+
+### input_scope_per_pool_no_merge — PASS
+
+reconstruct_tick_liquidity creates a fresh _MutablePoolTickState per call; events from other pools raise UnknownPoolError (verified by test_unknown_pool_raises). Two-pool isolation test confirms no state sharing across reconstructions.
+
+Evidence:
+
+- src/robinhood_lp/replay/ticks.py:1067-1132
+- src/robinhood_lp/replay/ticks.py:1126-1132
+- tests/test_tick_liquidity_t041.py:1235-1300
+
+### excluded_pool_not_reconstructed — PASS
+
+The function is per-pool and has no fallback to partial window, later bootstrap, or neighbour data. The caller contract (T040/T042 chain) is documented at lines 50-56 and 1067-1075; pool_init_outside_window exclusion is T038's responsibility upstream. There is no code path in ticks.py that silently substitutes a different window or pool.
+
+Evidence:
+
+- src/robinhood_lp/replay/ticks.py:50-56
+- src/robinhood_lp/replay/ticks.py:1067-1075
+- src/robinhood_lp/qualification/second_pool.py:251-252
+
+### v4_math_primitives_byte_exact — PASS
+
+compress(), position(), tick_spacing_to_max_liquidity_per_tick(), add_liquidity(), most_significant_bit(), least_significant_bit() are faithful ports of the pinned v4-core commit e50237c. compress Python // equals Solidity sdiv+smod correction for negative-with-remainder. position uses Python's arithmetic shift which matches sar. add_liquidity mirrors LiquidityMath.addDelta uint128/int128 bounds. Independently verified the math by running the primitives against expected values (compress(-60,60)=-1, position(-1)=(-1,255), max_liquidity_per_tick(60)=11505354575363080317263139282924270).
+
+Evidence:
+
+- src/robinhood_lp/replay/ticks.py:233-339
+- tools/oracle/lib/v4-core/src/libraries/TickBitmap.sol:16-41
+- tests/test_tick_liquidity_t041.py:102-220
+
+### tick_bitmap_flip_is_initialized_next_search — PASS
+
+TickBitmap.flip(), is_initialized(), and next_initialized_tick_within_oneWord() match the V4 TickBitmap.sol source line-by-line: the lte=True mask is (2^256-1)>>(255-bitPos); the lte=False path increments compressed, masks ~(1<<bitPos)-1, and the no-init fall-through returns compressed-bitPos or compressed+(255-bitPos) respectively. Cross-word scanning is provided by _next_initialized_tick().
+
+Evidence:
+
+- src/robinhood_lp/replay/ticks.py:347-448
+- tools/oracle/lib/v4-core/src/libraries/TickBitmap.sol:85-121
+- tests/test_tick_liquidity_t041.py:228-302
+
+### tick_info_position_key_treatment — PASS
+
+TickInfo carries liquidity_gross (uint128), liquidity_net (int128), fee_growth_outside_0/1 (uint256). PositionKey is (tick_lower, tick_upper, salt) — owner is intentionally omitted. Same (tl, tu, salt) triples are hash-equal; distinct salt is a distinct position.
+
+Evidence:
+
+- src/robinhood_lp/replay/ticks.py:456-546
+- tests/test_tick_liquidity_t041.py:309-345
+
+### gross_net_updates_and_bitmap_flip — PASS
+
+Pool.updateTick + flipTick semantics: gross_after = add_liquidity(gross_before, delta); flipped = (gross_after==0) != (gross_before==0); net_delta = -delta on upper, +delta on lower. Tick is removed from state when gross drops to zero (matching V4's cleared-tick invariant). Tests cover add, remove-clears-ticks-and-bitmap, partial-remove-keeps-other, and poke.
+
+Evidence:
+
+- src/robinhood_lp/replay/ticks.py:787-895
+- tests/test_tick_liquidity_t041.py:353-505
+
+### crossing_logic_both_directions — PASS
+
+zeroForOne applies -liquidityNet at each crossed tick; oneForZero applies +liquidityNet. The post-swap tick and liquidity are reconciled byte-for-byte against the swap event; a lying event fails closed (TickLiquidityError). Multi-tick crossings log each one with EventKey fields, before/after active liquidity, and direction.
+
+Evidence:
+
+- src/robinhood_lp/replay/ticks.py:903-1040
+- tests/test_tick_liquidity_t041.py:513-735
+
+### max_liquidity_negative_gross — PASS
+
+V4 Pool.TickLiquidityOverflow fires when gross_after > max_per_tick on add (delta >= 0); V4 LiquidityMath.addDelta SafeCast fires on negative-gross (delta drives x+y<0). Both raise their dedicated exception types with the V4 error name in the message; reconstruction fails closed.
+
+Evidence:
+
+- src/robinhood_lp/replay/ticks.py:804-809
+- src/robinhood_lp/replay/ticks.py:293-314
+- tests/test_tick_liquidity_t041.py:852-934
+
+### spacing_misalignment_out_of_bounds — PASS
+
+checkTicks enforces tick_lower<tick_upper, MIN_TICK<=tick_lower, tick_upper<=MAX_TICK (TicksMisorderedError / TickOutOfBoundsError). tickLower/tickUpper must be multiples of tick_spacing (TickMisalignedError). Negative-tick alignment test confirms word -1 bit 254/255 layout matches V4.
+
+Evidence:
+
+- src/robinhood_lp/replay/ticks.py:777-784
+- src/robinhood_lp/replay/ticks.py:865-868
+- tests/test_tick_liquidity_t041.py:942-1103
+
+### same_block_multi_action_determinism — PASS
+
+Events sorted by (block_number, transaction_index, log_index) before application; shuffling inputs yields identical ReconstructedPoolTickState. Same-block multi-action test covers three logs in one block crossing two initialized ticks with the correct cumulative active liquidity.
+
+Evidence:
+
+- src/robinhood_lp/replay/ticks.py:1099-1106
+- tests/test_tick_liquidity_t041.py:743-844
+
+### must_not_owner_inventory — PASS
+
+PositionKey carries tick_lower/tick_upper/salt only. The docstring explicitly states owner is not emitted by V4 and is not reconstructible. No code path constructs an owner field or derives inventory.
+
+Evidence:
+
+- src/robinhood_lp/replay/ticks.py:507-546
+- src/robinhood_lp/replay/ticks.py:58-65
+
+### must_not_event_equals_position — PASS
+
+Pokes (delta=0) record a position key but do not touch ticks/bitmap; add+remove of the same triple collapses to one PositionKey entry; distinct salt yields a distinct position. The model treats one (tickLower, tickUpper, salt) as one position lifecycle, not one event.
+
+Evidence:
+
+- src/robinhood_lp/replay/ticks.py:870-880
+- tests/test_tick_liquidity_t041.py:1111-1151
+
+### must_not_cross_pool_state_sharing — PASS
+
+Cross-pool events raise UnknownPoolError; two independent reconstructions over different pools produce independent state (verified).
+
+Evidence:
+
+- src/robinhood_lp/replay/ticks.py:1126-1132
+- tests/test_tick_liquidity_t041.py:1235-1300
+
+### must_not_reconstruct_excluded_pool — PASS
+
+Function has no implicit window widening, no partial-window bootstrap, no neighbouring-pool fallback. Caller contract is documented at lines 50-56 and 1067-1075; the exclusion is the caller's responsibility (T038 output). The reconstruction itself does not silently produce a partial result.
+
+Evidence:
+
+- src/robinhood_lp/replay/ticks.py:50-56
+- src/robinhood_lp/replay/ticks.py:1067-1075
+
+### tooling_pytest_ruff_mypy — PASS
+
+T041 suite: 50/50 passed in 0.15s. T040+T041 combined: 95/95 passed in 0.32s. Full unit suite (1017 tests): 1017 passed, 6 pre-existing skips (foundry unavailable, gpg out of scope, pydantic vector). Ruff format: 130 files already formatted. Ruff check: All checks passed! Mypy strict on the replay package and T041 tests: Success: no issues found in 10 source files.
+
+Evidence:
+
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_tick_liquidity_t041.py
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_replay_t040.py tests/test_tick_liquidity_t041.py
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ --ignore=tests/test_abi_artifacts.py
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/ tests/
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/ tests/
+- PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/robinhood_lp/replay/ tests/test_tick_liquidity_t041.py tests/_tick_liquidity_t041_fixtures.py
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- feeGrowthOutside0X128 / feeGrowthOutside1X128 are carried structurally but not updated on crossTick because feeGrowthGlobal is owned by T051 (per the T041 contract); the zero default is the safe-initialisation value V4 uses on freshly-initialized ticks.
+- Bootstrap tick defaults to 0; callers with a non-zero slot0.tick from a StateView-style block-pinned read must pass it via bootstrap_tick. This matches the uninitialized bootstrap on ReplayInput.
+- The crossing loop verifies the post-swap liquidity field byte-for-byte; a swap whose event lies about liquidity raises TickLiquidityError and fails closed. This matches V4's invariant that active liquidity moves only on tick crossings.
+- reconstruct_tick_liquidity is exposed but not yet called from T040; integration into the T040→T041 chain is the T042 task's responsibility (per todo/config.yaml).
+- The pre-existing test_abi_artifacts::test_artifact_byte_matches_regenerated_oracle_output is skipped on this worktree because the oracle submodule (tools/oracle/lib/) is absent; the developer reports it fails identically on main. The T041 task did not touch any abi/oracle code path.
