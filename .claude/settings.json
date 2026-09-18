@@ -1,5 +1,34 @@
 {
   "worktree": {
     "baseRef": "head"
+  },
+  "permissions": {
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(git clean:*)",
+      "Bash(git stash:*)",
+      "Bash(git reset:*)",
+      "Bash(git checkout:*)",
+      "Bash(git worktree add:*)",
+      "Bash(git worktree remove:*)",
+      "Bash(git worktree prune:*)",
+      "Bash(rm:*)",
+      "Bash(sudo:*)",
+      "Bash(pip install:*)",
+      "Bash(pip3 install:*)",
+      "Bash(conda install:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(gh:*)",
+      "Bash(cast send:*)",
+      "Bash(cast call:*)",
+      "Bash(python -m robinhood_lp ingest:*)",
+      "Bash(/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m robinhood_lp ingest:*)",
+      "Read(./.env*)",
+      "Read(./secrets/**)",
+      "Read(./**/*.keystore)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)"
+    ]
   }
 }
