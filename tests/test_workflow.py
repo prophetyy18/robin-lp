@@ -1085,6 +1085,69 @@ def test_a_prophet_change_targets_no_task_and_names_the_prophet_agent(tmp_path: 
     assert prepared["task_ids"] == []
 
 
+def test_prophet_retry_is_authored_by_the_prophet(tmp_path: Path) -> None:
+    """A retry must be authored by the role that authored the first attempt. The
+    planner is not scoped to the documents a PROPHET change writes, so handing it
+    the repair produced a candidate the path rules then reject: a retry route that
+    could never succeed."""
+    manager, worktree = _prepare_prophet_change(tmp_path)
+    target = worktree / "todo" / "README.md"
+    target.write_text(target.read_text(encoding="utf-8") + "\nA note.\n", encoding="utf-8")
+    _seal_prophet_result(worktree)
+    candidate = manager.finish_amendment("A0001")
+    review = manager.prepare_amendment_review("A0001")
+    _write_json(
+        Path(str(review["review_worktree"])) / ".workflow" / "amendment-review-result.json",
+        {
+            "amendment_id": "A0001",
+            "base_commit": candidate.base_commit,
+            "candidate_commit": candidate.candidate_commit,
+            "verdict": "FAIL",
+            "summary": "the note is in the wrong section",
+            "required_changes": ["move the note"],
+            "unknowns": [],
+        },
+    )
+    state, _ = manager.finish_amendment_review("A0001")
+    retry = manager.prepare_amendment_retry("A0001")
+    assert state == "CHANGES_REQUESTED"
+    assert retry["agent"] == "prophet"
+    assert retry["attempt"] == 2
+    assert retry["worktree"] == str(worktree)
+
+
+def test_a_contract_amendment_retry_is_still_a_planner(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    prepared = manager.prepare_amendment(
+        task_ids=["T001"],
+        layer="CONTRACT",
+        summary="clarify future acceptance",
+        owner_direction="Require an explicit deterministic assertion.",
+    )
+    amendment = Path(str(prepared["worktree"]))
+    contract = amendment / "todo" / "phases" / "P00" / "T001.md"
+    contract.write_text(contract.read_text(encoding="utf-8") + "\nExtra.\n", encoding="utf-8")
+    _seal_prophet_result(amendment)
+    candidate = manager.finish_amendment("A0001")
+    review = manager.prepare_amendment_review("A0001")
+    _write_json(
+        Path(str(review["review_worktree"])) / ".workflow" / "amendment-review-result.json",
+        {
+            "amendment_id": "A0001",
+            "base_commit": candidate.base_commit,
+            "candidate_commit": candidate.candidate_commit,
+            "verdict": "FAIL",
+            "summary": "wrong clause",
+            "required_changes": ["fix the clause"],
+            "unknowns": [],
+        },
+    )
+    manager.finish_amendment_review("A0001")
+    assert manager.prepare_amendment_retry("A0001")["agent"] == "planner"
+
+
 def test_prophet_change_refuses_a_task_it_would_only_ignore(tmp_path: Path) -> None:
     """--task is a restriction, not an instruction, and it says nothing about a
     PROPHET change. Accepting one silently would let a caller believe it had

@@ -78,7 +78,13 @@ before writing it and conform exactly: include `task_id`, `outcome`, `summary`,
 For a formal Owner amendment run, the controller may supply one amendment that
 targets multiple still-`PLANNED` task contracts. Follow the recorded Owner
 direction without requiring a synthetic Developer failure. Stay within the
-declared `CONTRACT`, `SPEC`, or `INTENT` layer and the exact target tasks. Do not
-change task status, attempts, evidence, commit SHAs, runtime configuration, or
-approval data. Write only `.workflow/amendment-result.json`, validated against
+declared `CONTRACT` or `SPEC` layer and the exact target tasks. Do not change task
+status, attempts, evidence, commit SHAs, runtime configuration, or approval data.
+Write only `.workflow/amendment-result.json`, validated against
 `todo/schemas/amendment-result.schema.json`.
+
+Two layers are not yours. `SUPERSEDE` retires already-`APPROVED` work and
+`PROPHET` states goals, restructures the plan and corrects collateral documents;
+both are authored by other roles with their own reviews. If you are handed one of
+them, or a target set that does not match the layer you were given, stop and
+return `BLOCKED` rather than adapting the direction to what your paths allow.

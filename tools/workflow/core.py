@@ -1769,13 +1769,25 @@ class WorkflowManager:
         request = _load_json(self._amendment_request_path(amendment_id))
         request_path = worktree / ".workflow" / "amendment-request.json"
         _write_json(request_path, request)
+        # The retry must be authored by the same role that authored the first
+        # attempt. A PROPHET change is written by the prophet agent, whose writable
+        # paths include documents the planner is not scoped to touch, so handing
+        # its repair to the planner would produce a candidate the path rules then
+        # reject -- a retry route that cannot succeed.
+        if record.layer == "PROPHET":
+            author = "prophet"
+            scope = f"Repair PROPHET change {amendment_id} after independent review"
+        else:
+            author = "planner"
+            scope = f"Repair Owner amendment {amendment_id} after independent review"
         prompt = (
-            f"Repair Owner amendment {amendment_id} after independent review. Read {request_path} "
+            f"{scope}. Read {request_path} "
             f"and prior review under todo/amendments/{amendment_id}/review-{record.attempt:03d}.json. "
-            f"Work only in {worktree}; preserve the target tasks and layer. Write the structured "
+            f"Work only in {worktree}; preserve the layer and, for a task-targeted layer, the "
+            f"target tasks. Write the structured "
             f"result only to {worktree / '.workflow' / 'amendment-result.json'}."
         )
-        return {**updated.to_dict(), "agent": "planner", "prompt": prompt}
+        return {**updated.to_dict(), "agent": author, "prompt": prompt}
 
     def amendment_status(self, amendment_id: str) -> dict[str, object]:
         record = self.load_amendment(amendment_id)
