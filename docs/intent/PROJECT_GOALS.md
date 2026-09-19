@@ -209,7 +209,7 @@ USDG 换算。
 首个版本采用可解释的规则或统计基线。模型、特征、窗口和阈值可以在后续实验中
 调整，但必须版本化、可复现并重新验证；USDG 账本口径、时间可用性、硬门槛、
 风险网关和审计接口不得随模型调整而漂移。详细规则以
-[`STRATEGY_ECONOMICS.md`](../specs/STRATEGY_ECONOMICS.md) 为准。
+[`STRATEGY_ECONOMICS.md`](../spec/strategy/STRATEGY_ECONOMICS.md) 为准。
 
 V1 的主要策略方向是自适应区间 LP：使用决策时已知的价格变化确定候选区间
 中心与宽度，使用交易量和流动性分布判断入场机会、区间拥挤程度及再平衡价值。
@@ -367,7 +367,7 @@ V1 自动操作范围包括：
 策略自动退出；合约/Hook、身份、账本、钱包、nonce、密钥和未知执行语义异常
 默认锁定并通知，不盲目自动退出。人工接管必须先冻结新意图、核对 pending
 交易与链上状态，再由用户选择并重新模拟风险降低动作；退出成功不能自动恢复
-策略。详细规则以 [`OPERATOR_CONTROL.md`](../specs/OPERATOR_CONTROL.md) 为准。
+策略。详细规则以 [`OPERATOR_CONTROL.md`](../spec/operations/OPERATOR_CONTROL.md) 为准。
 
 进入任一级暂停、暂停等级升级以及暂停解除时，系统必须通过用户配置的企业微信
 群机器人发送通知。Webhook URL 视为秘密，只能在部署时通过秘密配置注入，不得
@@ -381,7 +381,7 @@ Keystore 密码、RPC 凭据、原始签名请求或其他认证材料。
 ## 7. Token 与 Pool 资格审批
 
 本节定义稳定的产品目标；详细、可测试的准入要求以
-[`ASSET_ADMISSION.md`](./ASSET_ADMISSION.md) 为准。
+[`ASSET_ADMISSION.md`](../spec/product/ASSET_ADMISSION.md) 为准。
 
 系统必须将三类批准分开：
 
@@ -560,11 +560,11 @@ post-testnet paper/shadow 证据锁定并审批，然后才能进入 T094。这�
 - Token/Pool 审批规则写入 `docs/spec/product/ASSET_ADMISSION.md`；
 - 可量化成功指标以后写入 `docs/intent/SUCCESS_CRITERIA.md`；
 - USDG 本位策略经济口径、决策分层与实验纪律写入
-  [`STRATEGY_ECONOMICS.md`](../specs/STRATEGY_ECONOMICS.md)；
+  [`STRATEGY_ECONOMICS.md`](../spec/strategy/STRATEGY_ECONOMICS.md)；
 - 暂停、人工接管与保护性退出规格写入
-  [`OPERATOR_CONTROL.md`](../specs/OPERATOR_CONTROL.md)；
+  [`OPERATOR_CONTROL.md`](../spec/operations/OPERATOR_CONTROL.md)；
 - Web 页面、操作和可视化规格写入
-  [`WEB_CONSOLE.md`](./WEB_CONSOLE.md)；
-- 目标到任务的计划级映射写入 [`TRACEABILITY.md`](./TRACEABILITY.md)，最终验收
+  [`WEB_CONSOLE.md`](../spec/product/WEB_CONSOLE.md)；
+- 目标到任务的计划级映射写入 [`TRACEABILITY.md`](../implement/TRACEABILITY.md)，最终验收
   时由 T096 补全到具体测试、manifest、报告和链上证据；
 - 实现步骤始终留在 `todo/README.md`。
