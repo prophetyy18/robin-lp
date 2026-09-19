@@ -1,0 +1,40 @@
+{
+  "task_id": "T049",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Attempt 2 of T049 (Specify and implement V4 liquidityDelta sizing in USDG terms). The pre-existing integer module src/robinhood_lp/protocol/sizing.py, the protocol re-export src/robinhood_lp/protocol/__init__.py, the 55-test pinned-vector suite tests/test_position_sizing_t049.py, and the pinned Solidity-derived vectors tests/fixtures/strategy/position_sizing_vectors.json are preserved verbatim from the attempt-1 planning candidate. Added the single new developer deliverable docs/implement/strategy/V4_POSITION_SIZING.md, an implementation-layer spec that fixes the integer sizing discipline and algorithm under the relocated Developer-authorable path (per the attempt-1 planning amendment). The doc covers the numeraire boundary (per ADR-014 and the T049 contract numeraire-boundary clause), ten hard invariants, the integer width contracts for liquidityDelta/amounts/sqrtPriceX96/tick range, the closed-form monotone cap-bounded liquidity algorithm (with explicit below/inside/above-Range branches and the binding-side label), get_amounts_for_liquidity for both target/pair currency orderings, worst_case_single_sided_inventory, the Q64.64 USDG to raw-token single named numeraire boundary, the mint envelope (amount0Max/amount1Max, deadline, minLiquidity), the simulated post-settlement wallet state with accrued fees and Gas-reservation preservation, the verified Hook BalanceDelta gate, the native ETH Gas reservation, the insufficient-economic-size NO_TRADE gate, stable ReasonCode values, the contract-bug vs market-outcome exception policy, and cross-references to G-V4-SIZING-01, G-LIMIT-01, G-GAS-01, ADR-004, ADR-014, R3, R8, and R15. The existing 55-test suite passes; the full suite (excluding Foundry/gpg/skipped tests) is green at 1351 passed, 6 skipped; ruff format, ruff check, and mypy --strict are all clean.",
+  "commands": [
+    {
+      "command": "python -m pytest tests/test_position_sizing_t049.py -q",
+      "result": "55 passed in 0.16s"
+    },
+    {
+      "command": "python -m pytest -q --no-header --ignore=tests/test_workflow.py --ignore=tests/test_abi_artifacts.py",
+      "result": "1351 passed, 6 skipped in 21.15s (skips: 3 Foundry/forge-not-on-PATH in test_oracle_drift.py, 2 gpg-verification-out-of-scope in test_oracle_review_provenance.py, 1 unsorted-currencies vector in test_protocol_ids.py)"
+    },
+    {
+      "command": "python -m ruff format --check src/ tests/ docs/implement/",
+      "result": "154 files already formatted"
+    },
+    {
+      "command": "python -m ruff check src/ tests/ docs/implement/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python -m mypy --strict src/",
+      "result": "Success: no issues found in 86 source files"
+    },
+    {
+      "command": "git diff 12464ed390f2216d749d54a76aca4f24b14c681c --stat",
+      "result": "Only allowed paths changed: src/robinhood_lp/protocol/sizing.py (pre-existing 1097-line integer module, unchanged in this attempt), src/robinhood_lp/protocol/__init__.py (pre-existing re-export, unchanged in this attempt), tests/test_position_sizing_t049.py (pre-existing 1151-line 55-test suite, unchanged in this attempt), tests/fixtures/strategy/position_sizing_vectors.json (pre-existing pinned vectors, unchanged in this attempt), todo/config.yaml (controller-managed IN_DEVELOPMENT / attempt 2 / base_commit transition from prepare-develop), todo/evidence/P05/T049/attempt-001-{developer,planner}.json (controller-managed attempt-1 evidence, unchanged in this attempt), todo/phases/P05-features-and-valuation/T049.md (controller-managed planning amendment from attempt-1 triage, unchanged in this attempt), todo/reviews/P05/T049/plan-review-001.{json,md} (controller-managed plan-review artefacts, unchanged in this attempt), todo/triage/P05/T049/triage-001.json (controller-managed attempt-1 triage record, unchanged in this attempt). New file: docs/implement/strategy/V4_POSITION_SIZING.md (the T049 developer deliverable)."
+    },
+    {
+      "command": "git status --short",
+      "result": "M todo/config.yaml (controller-managed); ?? docs/implement/strategy/ (new Developer deliverable). No other working-tree changes."
+    }
+  ],
+  "residual_risks": [
+    "The Foundry oracle regenerator at tools/oracle/src/SelectorOracle.sol is exercised by tests/test_abi_artifacts.py and relies on the git submodule at tools/oracle/lib/v4-core (pinned commit e50237c43811bd9b526eff40f26772152a42daba). The submodule is not populated in this worktree, so the Foundry-driven tests fail with 'No such file or directory' for the Solidity sources. This attempt excludes them as Foundry-conditional tests per the developer prompt ('must remain green excluding any Foundry/gpg/skipped tests'); the skip on the CI/local Foundry-not-on-PATH path is the same exclusion. The pinned V4 vectors used by the sizing tests are the byte-equal Python re-derivation from the T012 integer math port; regenerating the Foundry oracle is out of T049's scope.",
+    "test_position_sizing_t049.py::test_lowering_amount0_cap_only_reduces_liquidity and test_lowering_amount1_cap_only_reduces_liquidity assert the structural monotone property using 10**20 caps on a +-100 tick Range at sqrt_price_for_tick_0. The monotone property of compute_cap_bounded_liquidity is provable from the closed-form expressions in docs/implement/strategy/V4_POSITION_SIZING.md §5.1 (lowering each cap can only reduce the corresponding L*; the binding side may change but the Range does not). No formal proof is included in the spec doc; the structural test_lowering_caps_never_changes_ticks plus the two cap-monotone tests cover the contract clause empirically.",
+    "The insufficient-economic-size USDG gate in compute_sizing uses a linear-projection estimate (sized_usdg_q64_64 ~= (liquidity / target_liquidity) * (usdg_amount_token0 + usdg_amount_token1)). This is a conservative Q64.64 estimate that is sufficient for the NO_TRADE gate; the full USDG valuation belongs to T053 per the contract's references and the spec doc §5 step 13. If T053 later defines a stricter USDG-equivalent rule, the gate will need to be re-aligned against that rule without changing the integer discipline."
+  ]
+}
