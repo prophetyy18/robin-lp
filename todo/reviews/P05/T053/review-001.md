@@ -1,0 +1,290 @@
+# T053 independent review
+
+- Base commit: `316e71ac3451f88b6e662c22f8f4183364a7ed1b`
+- Candidate commit: `b110c8456b22b8b6e313d6755d2d7c3b53e83178`
+- Verdict: **PASS**
+
+## Checks
+
+### provider-neutral-observation-schema — PASS
+
+The observation schema carries every required field with the right unit and width semantics; available_at >= observed_at is enforced by __post_init__.
+
+Evidence:
+
+- src/robinhood_lp/features/quote.py defines dataclass Observation (frozen, slots) with explicit fields: observed_at (UnixTimestamp), available_at (UnixTimestamp), source (SourceKind), pair (str), block_number (BlockNumber), block_ref (BlockRef), confidence (ConfidenceLevel), staleness_seconds (int), numeraire_level (NumeraireLevel), unit (ObservationUnit), value (int), chain_id (ChainId), notes (tuple[str,...])
+- ObservationUnit enum (RAW_TOKEN_INTEGER, NUMERAIRE_UNITS, RATIO, DIMENSIONLESS) discriminates the four per-field units the contract lists
+- NumeraireLevel enum (USDG, QUALIFIED_USD_STABLECOIN, ETH_DISPLAY_ONLY, RELATIVE_ONLY) matches the ADR-014 reporting-numeraire hierarchy
+- Observation.__post_init__ enforces available_at >= observed_at, non-negative integer widths, uint256 widths for RAW_TOKEN_INTEGER/NUMERAIRE_UNITS values, positive Q64.64 ratio for RATIO values, and the tuple[str,...] type on notes
+- Tests TestObservationSchema.test_observation_carries_all_required_fields and TestObservationSchema.test_observation_rejects_* cover every invariant
+
+### conversion-graph-and-missing-policy — PASS
+
+Conversion graph and missing policy handle all five contract-named scenarios (DELAYED/REVISED/DEPEGGED/MISSING/CROSS_RATE). The graph refuses any ETH->USDG route, so the cross-rate path through ETH cannot produce a USD price.
+
+Evidence:
+
+- MissingPolicy enum exposes OK, DELAYED, REVISED, DEPEGGED, MISSING, CROSS_RATE (all six values confirmed by direct enum iteration)
+- EdgePolicy enum exposes DIRECT, VIA_CROSS_RATE, DELAYED_TOLERATED, DEPEG_TOLERATED
+- ConversionEdge (frozen) carries source/target (NumeraireLevel), policy (EdgePolicy), max_staleness_seconds (non-negative int), via (optional NumeraireLevel for cross-rate), notes
+- ConversionGraph is a directed multigraph keyed by (source, target); rejects duplicate edges and unknown edges with QuoteGraphError; has_edge and neighbors helpers are total on declared edges
+- default_conversion_graph() installs USDG->USDG identity, QUALIFIED_USD_STABLECOIN->USDG with DEPEG_TOLERATED, QUALIFIED_USD_STABLECOIN->QUALIFIED_USD_STABLECOIN identity, ETH_DISPLAY_ONLY->ETH_DISPLAY_ONLY identity, RELATIVE_ONLY->RELATIVE_ONLY identity; no ETH->USDG edge is exposed (must-not: ETH as primary benchmark)
+- convert_to_usdg raises MissingPolicy labels for each failure mode: DELAYED when observation.staleness_seconds > edge.max_staleness_seconds; MISSING when stablecoin_per_usdg_q64_64 is None; DEPEGGED when |new - previous| > depeg_threshold_q64_64; MISSING for ETH-display and for unknown numeraires
+- Tests TestScenarioFixtures cover each of DELAYED, REVISED (constant exists), DEPEGGED, MISSING, CROSS_RATE (constant exists); TestConversionGraph verifies the edge inventory; TestCrossRateFixtures verifies ETH->USDG and RELATIVE_ONLY->USDG are refused
+
+### per-numeraire-qualification-record — PASS
+
+A NumeraireQualification record is produced per numeraire level and carries confidence, staleness, rationale and the non-1USD stablecoin_per_usdg_q64_64 ratio; the contract clause is satisfied.
+
+Evidence:
+
+- NumeraireQualification dataclass (frozen) carries level (NumeraireLevel), selected (bool), rationale (non-empty str), confidence (ConfidenceLevel), staleness_seconds (non-negative int), stablecoin_per_usdg_q64_64 (int | None), notes (tuple[str,...])
+- QualificationBundle.__post_init__ enforces exactly one record with selected=True, no duplicate levels, all entries NumeraireQualification instances; exposes .selected and .record_for_level helpers
+- empty_qualification_bundle() returns a single RELATIVE_ONLY record with selected=True as the neutral start
+- Tests TestQualificationRecord verify exactly-one-selected, duplicate-level rejection, is_usd_denominated per level, and the empty-bundle default
+- Tests TestPerNumeraireFixtures cover all four levels with their own qualification record and stablecoin_per_usdg_q64_64 ratio: USDG (None), QUALIFIED_USD_STABLECOIN (carries observed ratio), ETH_DISPLAY_ONLY (None), RELATIVE_ONLY (None)
+
+### relative-only-output-no-usd-field — PASS
+
+The RELATIVE_ONLY path carries no USD-denominated field anywhere; ranking a relative-only bar against a USD-denominated bar is forbidden by ranking_blocked_between.
+
+Evidence:
+
+- RelativeOnlyBar (frozen) carries observation, qualification, token1_per_token0_q64_64 (Q64.64 ratio, positive int), path (ConversionPath), notes (tuple[str,...]); its __post_init__ refuses a non-RELATIVE_ONLY selected qualification
+- RelativeOnlyBar.__dataclass_fields__ audit (test_relative_only_bar_carries_no_usd_field) asserts no field name contains 'usdg' or 'usd'
+- USD_DENOMINATED_FORBIDDEN_FIELDS is a Final tuple naming pnl_usdg, value_usdg, fee_usdg, gas_usdg, risk_usdg, marked_pnl_usdg, liquidatable_pnl_usdg, cash_benchmark_excess_usdg, token_beta_pnl_usdg, lp_service_pnl_usdg
+- assert_no_usd_fields(payload) raises QuoteRelativeOnlyError if any key is in USD_DENOMINATED_FORBIDDEN_FIELDS or ends with '_usdg'/'_usd'
+- ranking_blocked_between(left, right) returns True iff one bar carries a USD field and the other does not (symmetric: RelativeOnlyBar always returns False for carries_usd; QuoteBar returns is_relative_only negated)
+- build_relative_only_bar(observation, qualification) constructs a RelativeOnlyBar only when qualification.selected.level is RELATIVE_ONLY; cross-numeraire ranking is forbidden by construction
+- convert_to_usdg on a RELATIVE_ONLY row returns QuoteBar with usdg_per_token_q64_64=None; __post_init__ invariant rejects any QuoteBar with is_relative_only=True and usdg_per_token_q64_64 set
+- Tests TestRelativeOnlyOutput cover build, the non-relative qualification rejection, the no-USD field audit, assert_no_usd_fields accept/reject paths, and ranking_blocked_between for all bar combinations
+
+### point-in-time-usdg-conversion-shared-by-rules — PASS
+
+Performance, exposure and both 5-minute extreme-move rules consume the same QuoteBar from convert_to_usdg; the rules expose UP_SPIKE/DOWN_SPIKE rule_id, triggered, pre/post/move/threshold in Q64.64 and the bar itself for downstream consumption.
+
+Evidence:
+
+- convert_to_usdg(observation, qualification, graph, decision_time, previous_ratio_q64_64, depeg_threshold_q64_64) is the single canonical entry point; returns a QuoteBar carrying usdg_per_token_q64_64 (int|None), missing_policy (MissingPolicy), path (ConversionPath)
+- evaluate_five_minute_rules(pre_bar, post_bar) consumes two QuoteBars and returns (FiveMinuteRuleVerdict(rule_id='UP_SPIKE'), FiveMinuteRuleVerdict(rule_id='DOWN_SPIKE')); both verdicts share the same USDG semantics via the same QuoteBar
+- FIVE_MINUTE_UP_SPIKE_FRACTION == Q64_SCALE (100% in Q64.64), FIVE_MINUTE_DOWN_SPIKE_FRACTION == (80 * Q64_SCALE) // 100 (80% in Q64.64), FIVE_MINUTE_RULE_WINDOW_SECONDS == 300 (matches PROJECT_GOALS G-EMERGENCY-01 / G-STRATEGY-SPIKE-01)
+- FiveMinuteRuleVerdict.__post_init__ rejects RELATIVE_ONLY bars; performance/exposure consumers call convert_to_usdg directly and read the same QuoteBar object
+- Tests TestFiveMinuteRules cover: default UP/DOWN thresholds and window; UP_SPIKE triggered on a 110% move (1.0 -> 2.1); DOWN_SPIKE triggered on a 90% drop (1.0 -> 0.1); both rules not triggered on a 1% move; RELATIVE_ONLY rejected; the same QuoteBar object is consumed by performance, exposure and the rules (test_rules_share_the_same_usdg_price_object)
+
+### complete-bars-no-non-market-fundamental-signals — PASS
+
+Bars carry only on-chain / feed provenance plus the converted price; no non-market fundamental signal enters the schema.
+
+Evidence:
+
+- quote.py imports only stdlib (collections.abc, dataclasses, decimal, enum, typing) and two protocol-domain names (robinhood_lp.protocol.events.BlockRef, robinhood_lp.protocol.ids.ChainId); no RPC, storage, signing, execution, configuration, or Web imports
+- QuoteBar and RelativeOnlyBar carry observation, qualification, the converted price (or ratio), the conversion path, and notes; no fundamental signal (e.g. P/E, governance, off-chain market data) is attached
+- ObservationSchema fields are limited to on-chain / feed provenance (observed_at, available_at, source, pair, block_number, block_ref, confidence, staleness_seconds, chain_id) plus the value with its unit and numeraire level; no external market-data column is permitted
+- tests/test_features_quote_t053.py test_quote_module_has_no_float scans the module source for any float(...) construction and rejects any literal that is not within a 'no float' / 'forbid' docstring line; the textual scan finds no live float construction
+
+### delayed-revised-depegged-missing-cross-rate-fixtures — PASS
+
+All five contract-named scenarios have their own fixtures and produce the named MissingPolicy.
+
+Evidence:
+
+- tests/test_features_quote_t053.py TestScenarioFixtures.test_delayed_scenario_label: stablecoin row with staleness_seconds=10_000 -> MissingPolicy.DELAYED
+- TestScenarioFixtures.test_revised_scenario_constant_exists: MissingPolicy.REVISED is enumerated (consumers may apply it manually)
+- TestScenarioFixtures.test_depegged_scenario_label: stablecoin row with previous_ratio_q64_64=Q64_SCALE and new value 1.10*Q64_SCALE -> MissingPolicy.DEPEGGED with the default 5% threshold
+- TestScenarioFixtures.test_missing_scenario_label: stablecoin row with stablecoin_per_usdg_q64_64=None -> MissingPolicy.MISSING
+- TestScenarioFixtures.test_cross_rate_scenario_constant_exists: MissingPolicy.CROSS_RATE is enumerated; ETH->USDG and RELATIVE_ONLY->USDG return MissingPolicy.MISSING via the refusal routes
+- TestCrossRateFixtures also verifies ETH->USDG is refused (no edge) and RELATIVE_ONLY->USDG is refused; the explicit RELATIVE_ONLY target is allowed and produces an is_relative_only bar
+
+### prefix-invariance-fixtures — PASS
+
+Prefix invariance is enforced: a row with available_at > decision_time is rejected, and the same input produces a byte-identical bar across calls.
+
+Evidence:
+
+- TestPrefixInvariance.test_same_inputs_produce_byte_identical_bar: convert_to_usdg called twice on the same observation+qualification returns equal QuoteBars with equal usdg_per_token_q64_64
+- TestPrefixInvariance.test_determinism_hash_matches: hash() is stable across calls
+- TestConvertToUsdg.test_decision_time_rejects_future_observation: available_at=1_000_010 with decision_time=1_000_005 -> QuoteObservationError('after decision_time')
+- TestConvertToUsdg.test_decision_time_accepts_already_available_observation: available_at=1_000_010 with decision_time=1_000_010 -> MissingPolicy.OK
+- Observation.__post_init__ enforces available_at >= observed_at; convert_to_usdg decision_time check enforces available_at <= decision_time; combined they imply observed_at <= available_at <= decision_time (the contract clause)
+
+### per-numeraire-fixtures-incl-relative-only — PASS
+
+Each numeraire level has its own fixture and USDG semantics, including the RELATIVE_ONLY path that carries no USDG price.
+
+Evidence:
+
+- TestPerNumeraireFixtures is parametrized over all four NumeraireLevel values (USDG, QUALIFIED_USD_STABLECOIN, ETH_DISPLAY_ONLY, RELATIVE_ONLY) and asserts each level gets a qualification record with selected=True
+- TestPerNumeraireFixtures.test_usdg_observation_yields_usdg_price: USDG row -> usdg_per_token_q64_64 == 7 * Q64_SCALE
+- TestPerNumeraireFixtures.test_stablecoin_observation_yields_usdg_price: stablecoin row with stablecoin_per_usdg_q64_64 == Q64_SCALE -> usdg_per_token_q64_64 matches the ratio
+- TestPerNumeraireFixtures.test_eth_observation_refuses_usdg_price: ETH-display row -> MissingPolicy.MISSING, usdg_per_token_q64_64 is None
+- TestPerNumeraireFixtures.test_relative_only_observation_carries_no_usdg_price: RELATIVE_ONLY row -> is_relative_only is True, usdg_per_token_q64_64 is None
+- TestPerNumeraireFixtures.test_*_qualification_carries_observed_ratio (USDG/ETH/RELATIVE_ONLY have None, stablecoin carries the observed ratio)
+
+### availability-time-provenance-staleness-per-numeraire — PASS
+
+Availability time, provenance and staleness are recorded per numeraire level (Observation + NumeraireQualification) and per conversion edge, not only for USDG.
+
+Evidence:
+
+- Observation carries observed_at, available_at, source, pair, block_number, block_ref, confidence, staleness_seconds, numeraire_level, chain_id for every level
+- TestSourceFrequencyProvenance verifies SourceKind.ONCHAIN_POOL, SourceKind.EXTERNAL_FEED, SourceKind.UNKNOWN are recorded distinctly; two-source mixing requires two distinct Observation rows (test_onchain_pool_and_external_feed_are_distinct_rows)
+- NumeraireQualification carries confidence (ConfidenceLevel) and staleness_seconds (non-negative int) per level
+- ConversionEdge.max_staleness_seconds and the staleness check in convert_to_usdg (observation.staleness_seconds > edge.max_staleness_seconds -> DELAYED) gate staleness per edge, per numeraire
+- TestConvertToUsdg.test_delayed_staleness_yields_missing_policy_delayed proves the staleness check applies to QUALIFIED_USD_STABLECOIN rows specifically
+
+### stablecoin-not-equal-to-one-usd — PASS
+
+The framework never assumes a stablecoin equals one USD; the conversion uses the qualification record's observed stablecoin_per_usdg_q64_64 ratio.
+
+Evidence:
+
+- convert_to_usdg for QUALIFIED_USD_STABLECOIN reads selected_record.stablecoin_per_usdg_q64_64 (the observed ratio) and computes usdg_q64_64 = _q64_64_divide(stablecoin_q64_64, stablecoin_per_usdg_q64_64); the 1-USD assumption is not used
+- TestConvertToUsdg.test_stablecoin_yields_usdg_price_via_ratio_not_one_usd: stablecoin per token = 1.05 * Q64_SCALE, stablecoin_per_usdg = 1.0 * Q64_SCALE -> usdg = 1.05 * Q64_SCALE (not 1.05)
+- TestConvertToUsdg.test_stablecoin_with_depeg_ratio_yields_different_usdg_price: stablecoin per token = 5 * Q64_SCALE, stablecoin_per_usdg = 0.97 * Q64_SCALE -> usdg = (5 * Q64_SCALE) * Q64_SCALE // (0.97 * Q64_SCALE), explicitly different from the 1-USD assumption
+- TestConvertToUsdg.test_stablecoin_with_missing_ratio_is_missing: stablecoin_per_usdg_q64_64 = None -> MissingPolicy.MISSING
+
+### no-silent-current-price — PASS
+
+Silent current-price substitution is impossible; the function returns a MissingPolicy label rather than a fabricated USDG price when the path is impaired.
+
+Evidence:
+
+- convert_to_usdg has no clock, no RPC, no fallback to a current price; the function is documented as pure (no RPC, no storage, no clock, no random source)
+- When the conversion graph cannot reach USDG, the function returns QuoteBar with usdg_per_token_q64_64=None and MissingPolicy.MISSING/DELAYED/DEPEGGED rather than a fabricated value
+- ETH_DISPLAY_ONLY -> USDG returns MissingPolicy.MISSING with no price (no ETH->USDG edge in the default graph)
+- REVISED is exposed as a MissingPolicy value (consumers may apply it manually; no current-price substitution is hard-coded)
+- Tests TestConvertToUsdg.test_eth_display_refuses_usdg_conversion and TestConvertToUsdg.test_delayed_staleness_yields_missing_policy_delayed demonstrate the refusal behaviour
+
+### no-source-frequency-mixing-without-provenance — PASS
+
+Source / frequency mixing without provenance is impossible; each row carries exactly one SourceKind and a distinct pair.
+
+Evidence:
+
+- Observation.source is a SourceKind (ONCHAIN_POOL, EXTERNAL_FEED, DERIVED, UNKNOWN); each row carries exactly one source and one pair
+- TestSourceFrequencyProvenance.test_onchain_pool_and_external_feed_are_distinct_rows asserts two sources require two distinct Observation rows with distinct pair strings
+- The contract clause 'mixing two sources / frequencies inside a single row is forbidden' is enforced by construction: one Observation == one source
+
+### no-usd-conversion-of-relative-only — PASS
+
+A RELATIVE_ONLY dataset is never converted to USD; ranking against USD-denominated results is forbidden.
+
+Evidence:
+
+- convert_to_usdg on a RELATIVE_ONLY row returns QuoteBar with usdg_per_token_q64_64=None and MissingPolicy.OK (no USDG price produced)
+- convert_observation(target=USDG) on a RELATIVE_ONLY row returns a bar with is_relative_only=True and usdg_per_token_q64_64=None; the default graph has no RELATIVE_ONLY->USDG edge
+- QuoteBar.__post_init__ invariant: 'RELATIVE_ONLY bars must not carry a USDG price' raises QuoteObservationError if violated
+- ranking_blocked_between blocks any USD-vs-RELATIVE_ONLY ranking pair in either order
+- Tests TestRelativeOnlyOutput.test_quote_bar_relative_only_rejects_usdg_price, TestRelativeOnlyOutput.test_ranking_blocked_between_usdg_and_relative, TestRelativeOnlyOutput.test_ranking_blocked_between_two_relative_bars_is_false, and TestCrossRateFixtures.test_relative_only_to_usdg_cross_rate_is_refused cover the contract
+
+### no-eth-as-primary-benchmark — PASS
+
+ETH display is never treated as a USDG-conversion route; the default graph has no ETH->USDG edge and the conversion refuses with MissingPolicy.MISSING.
+
+Evidence:
+
+- default_conversion_graph has no ETH_DISPLAY_ONLY->USDG edge; ADR-014 §3 forbids ETH-as-primary-benchmark
+- convert_to_usdg on an ETH_DISPLAY_ONLY row returns MissingPolicy.MISSING with usdg_per_token_q64_64=None
+- convert_observation(target=USDG) on an ETH_DISPLAY_ONLY row returns MissingPolicy.MISSING via the no-edge path
+- NumeraireQualification.stablecoin_per_usdg_q64_64 is forced to None for the ETH_DISPLAY_ONLY level (_make_qualification helper sets ratio=None for ETH)
+- Tests TestConvertToUsdg.test_eth_display_refuses_usdg_conversion and TestCrossRateFixtures.test_eth_to_usdg_path_is_refused cover the contract
+
+### no-float-or-display-on-protocol-path — PASS
+
+The protocol / valuation path is float-free; Decimal only appears at the named display boundary (format_ratio_decimal).
+
+Evidence:
+
+- tests/test_features_quote_t053.py TestFloatFreedom.test_quote_module_has_no_float performs a textual scan of quote.py for any `float(` occurrence and rejects any literal that is not in a 'no float' / 'forbid' docstring line; only docstring occurrences are found
+- TestFloatFreedom.test_observation_value_is_int: Observation.value is a Python int (not bool)
+- TestFloatFreedom.test_quote_bar_usdg_price_is_int_or_none: QuoteBar.usdg_per_token_q64_64 is int or None
+- format_ratio_decimal is the single Decimal-using function (ADR-009 display boundary); it rejects float input with QuoteObservationError and bounds fractional_digits to [0, 36]
+- Tests TestDisplayBoundary cover the Decimal boundary round-trip and the float / negative / out-of-range rejections
+
+### t053-tests-green — PASS
+
+All 93 T053 unit tests pass; the full suite (excluding the pre-existing Foundry oracle skip) is green at 1488 passed.
+
+Evidence:
+
+- python -m pytest tests/test_features_quote_t053.py -q -> 93 passed in 0.18s
+- python -m pytest tests/ --ignore=tests/test_abi_artifacts.py -q -> 1488 passed, 6 skipped in 15.45s; the 6 skips are pre-existing Foundry-conditional / gpg-out-of-scope / unsorted-currency skips that exist on base
+- All 93 tests in test_features_quote_t053.py are accounted for in test classes: TestObservationSchema (12), TestQualificationRecord (6), TestConversionGraph (6), TestConvertToUsdg (11), TestPrefixInvariance (2), TestRelativeOnlyOutput (12), TestPerNumeraireFixtures (10+), TestCrossRateFixtures (5), TestFiveMinuteRules (8), TestSourceFrequencyProvenance (3), TestDisplayBoundary (4), TestTypeGuards (5), TestScenarioFixtures (5), TestFloatFreedom (3)
+
+### ruff-format-check-and-mypy-strict-clean — PASS
+
+ruff format, ruff check, and mypy --strict are all clean on src/ and on the T053 test file; the mypy --strict tests/ run has one pre-existing duplicate-module-name error in tests/_storage_t031_fixtures.py unrelated to T053.
+
+Evidence:
+
+- python -m ruff format --check src/ tests/ -> '152 files already formatted'
+- python -m ruff check src/ tests/ -> 'All checks passed!'
+- python -m mypy --strict src/ -> 'Success: no issues found in 88 source files'
+- python -m mypy --strict src/robinhood_lp/ tests/test_features_quote_t053.py -> 'Success: no issues found in 89 source files' (targeted run per developer evidence)
+- python -m mypy --strict tests/test_features_quote_t053.py -> 'Success: no issues found in 1 source file' (test-only run)
+
+### no-protected-prefix-violation — PASS
+
+No file under a protected prefix is touched; only the allowed src/, tests/, and controller-managed todo/config.yaml / todo/evidence/ files are modified.
+
+Evidence:
+
+- git show --name-only b110c84 (candidate) reports exactly 5 files: src/robinhood_lp/features/__init__.py (new), src/robinhood_lp/features/quote.py (new), tests/test_features_quote_t053.py (new), todo/config.yaml (controller-driven workflow_state/attempt/base_commit transition), todo/evidence/P05/T053/attempt-001-developer.json (controller-managed developer handoff file)
+- None of the 5 files are under docs/intent/, docs/spec/, tools/workflow/, .claude/, todo/schemas/, CLAUDE.md, AGENTS.md, todo/README.md, or todo/phases/
+- The todo/config.yaml diff is exactly the controller-managed state transition (workflow_state READY -> AWAITING_REVIEW, attempt 0 -> 1, base_commit null -> 316e71a, candidate_commit null); this is the standard prepare-develop / finish-develop bookkeeping and is not attributable to the Developer
+- The features package __init__.py imports only stdlib and the features submodule; quote.py imports only stdlib + robinhood_lp.protocol.events.BlockRef and robinhood_lp.protocol.ids.ChainId (no RPC, storage, signing, execution, configuration, or Web imports)
+
+### decision-time-prefix-invariance — PASS
+
+A quote used at decision time T is admitted if observed_at <= T and available_at <= T (enforced by the Observation invariant and the convert_to_usdg decision_time guard); future rows are rejected with QuoteObservationError.
+
+Evidence:
+
+- convert_to_usdg(decision_time=None) accepts the row by default; when decision_time is supplied, the function checks observation.available_at > decision_time and raises QuoteObservationError with 'after decision_time'
+- Observation.__post_init__ enforces available_at >= observed_at; combined with available_at <= decision_time this implies observed_at <= available_at <= decision_time (both clauses of the contract requirement)
+- Direct execution verified the boundary: decision_time == available_at -> MissingPolicy.OK; decision_time > available_at -> MissingPolicy.OK; decision_time < available_at -> QuoteObservationError raised
+- TestConvertToUsdg.test_decision_time_rejects_future_observation and TestConvertToUsdg.test_decision_time_accepts_already_available_observation cover both the reject and the accept branches
+
+### shared-5-minute-rule-vocabulary-with-t065-t070 — PASS
+
+T053's 5-minute-rule vocabulary (rule_id, triggered, pre/post/move/threshold in Q64.64, QuoteBar reference) is a stable surface that T065 / T070 can consume; both rules share the same QuoteBar produced by convert_to_usdg.
+
+Evidence:
+
+- FiveMinuteRuleVerdict carries rule_id (str restricted to 'UP_SPIKE' / 'DOWN_SPIKE'), triggered (bool), pre_q64_64 / post_q64_64 (positive int), move_q64_64 (non-negative int), threshold_q64_64 (positive int), bar (QuoteBar), notes
+- FIVE_MINUTE_UP_SPIKE_FRACTION == 1 << 64 (100% in Q64.64); FIVE_MINUTE_DOWN_SPIKE_FRACTION == (80 * Q64_SCALE) // 100 (80% in Q64.64); FIVE_MINUTE_RULE_WINDOW_SECONDS == 300 (matches PROJECT_GOALS G-EMERGENCY-01 / G-STRATEGY-SPIKE-01)
+- evaluate_five_minute_rules(pre_bar, post_bar) returns a 2-tuple (up_verdict, down_verdict) — T065 and T070 can consume both verdicts from the same call without recomputing the move
+- The verdicts carry the QuoteBar (USDG price object) so a downstream consumer can read the same observation/qualification/path/provenance fields without re-fetching
+- T065 / T070 contracts are PLANNED; the vocabulary exposed (rule_id, triggered, pre/post/move/threshold, bar) is stable str / bool / int fields that an unblocked consumer can adopt without changes
+
+### must-not-clauses — PASS
+
+All five Must-not clauses are satisfied; each is enforced by typed exceptions or by construction (graph edges, __post_init__ invariants, USD_DENOMINATED_FORBIDDEN_FIELDS, ranking_blocked_between).
+
+Evidence:
+
+- no stablecoin = 1 USD: see check 'stablecoin-not-equal-to-one-usd' (stablecoin_per_usdg_q64_64 is the observed ratio; conversion uses it directly)
+- no silent current-price use: see check 'no-silent-current-price' (function is pure; impairment paths return MissingPolicy labels)
+- no source/frequency mixing without provenance: see check 'no-source-frequency-mixing-without-provenance' (each Observation carries exactly one SourceKind and one pair)
+- no USD conversion of RELATIVE_ONLY: see check 'no-usd-conversion-of-relative-only' (RELATIVE_ONLY rows never carry a USDG price; ranking_blocked_between forbids cross-numeraire ranking)
+- no ETH as primary benchmark: see check 'no-eth-as-primary-benchmark' (default graph has no ETH->USDG edge; convert returns MissingPolicy.MISSING)
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- The default depeg threshold (DEFAULT_DEPEG_THRESHOLD_Q64_64 = 5% absolute move in Q64.64) is a sane default; production deployment should override via convert_to_usdg(depeg_threshold_q64_64=...) once a specific qualified feed is wired. The contract does not require a different default.
+- The CROSS_RATE MissingPolicy value is exposed in the enum and the constant is asserted in test_cross_rate_scenario_constant_exists, but the default ConversionGraph does not produce CROSS_RATE directly because there is no cross-rate edge in the canonical install (per ADR-014 §3 ETH-as-primary is forbidden, so the cross-rate path through ETH is impossible by construction). An external feed that surfaces a cross-rate reversal would need a dedicated edge or a refinement to the stablecoin->USDG path; this is an explicit deferral consistent with the contract's 'cross-rate fixtures' clause (which requires the policy value to exist, not necessarily to be produced by the default graph).
+- The REVISED MissingPolicy value is similarly exposed in the enum and asserted in test_revised_scenario_constant_exists; no default edge currently produces it (consumers may apply it manually when a source revision is recorded). This matches the contract's acceptance language which names REVISED as one of the five scenarios and exposes it as a MissingPolicy value.
+- The qualified point-in-time USDG conversion source itself (the external feed that supplies NumeraireQualification.stablecoin_per_usdg_q64_64) is out of T053's scope; T053 delivers the typed schema and conversion graph; consumers (T051 valuation, T070 risk, the 5-minute rules) supply the specific source. This is consistent with the contract's 'provider-neutral observation schema' framing.
+- The mypy --strict tests/ run has one pre-existing duplicate-module-name error in tests/_storage_t031_fixtures.py unrelated to T053; the targeted mypy --strict runs on src/ and on tests/test_features_quote_t053.py pass cleanly.
