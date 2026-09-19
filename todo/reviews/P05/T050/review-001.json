@@ -1,0 +1,160 @@
+{
+  "task_id": "T050",
+  "base_commit": "677611dfc24f0f3fbefb88ac867093a248767fd9",
+  "candidate_commit": "565a19e872503ac56e5bce9fe6214201cc252994",
+  "verdict": "PASS",
+  "checks": [
+    {
+      "id": "deliverables_eight_bars",
+      "status": "PASS",
+      "evidence": [
+        "src/robinhood_lp/features/bars.py:524 VolumeBar",
+        "src/robinhood_lp/features/bars.py:575 RealizedVolatilityBar",
+        "src/robinhood_lp/features/bars.py:654 PriceRangeBar",
+        "src/robinhood_lp/features/bars.py:723 ActiveLiquidityBar",
+        "src/robinhood_lp/features/bars.py:780 DepthProxyBar",
+        "src/robinhood_lp/features/bars.py:850 EffectiveFeeBar",
+        "src/robinhood_lp/features/bars.py:908 GasBar",
+        "src/robinhood_lp/features/bars.py:946 FreshnessBar"
+      ],
+      "finding": "All eight market feature bars exist and every bar inherits FeatureBar.unit, window, data_time, availability_time (lines 469-516), with data_time == window.end and availability_time == data_time + max_staleness enforced in FeatureBar.__post_init__."
+    },
+    {
+      "id": "watermark_contract",
+      "status": "PASS",
+      "evidence": [
+        "src/robinhood_lp/features/bars.py:286 WatermarkPolicy.compute_availability_time returns data_time + max_staleness"
+      ],
+      "finding": "WatermarkPolicy explicitly records data_time + max_staleness; every compute_*_bar / build_*_bar forwards window.end through compute_availability_time, matching the event-time / availability-time contract."
+    },
+    {
+      "id": "left_right_window_boundaries",
+      "status": "PASS",
+      "evidence": [
+        "src/robinhood_lp/features/bars.py:263 'self.start <= event_time < self.end'",
+        "tests/test_features_bars_t050.py::TestWindow::test_left_boundary_inclusive_time",
+        "tests/test_features_bars_t050.py::TestWindow::test_right_boundary_exclusive_time",
+        "tests/test_features_bars_t050.py::TestWindow::test_left_boundary_inclusive_block"
+      ],
+      "finding": "Window.contains returns True at start and False at end; left-inclusive / right-exclusive semantics pinned for both TIME and BLOCK windows and exercised in TestWindow and per-bar left/right boundary tests (TestVolumeBar, TestPriceRangeBar, TestEffectiveFeeBar, TestGasBar)."
+    },
+    {
+      "id": "late_event_handling",
+      "status": "PASS",
+      "evidence": [
+        "src/robinhood_lp/features/bars.py:120 LateEventPolicy enum with DROP and COUNT_AS_GAP",
+        "src/robinhood_lp/features/bars.py:1551 _split_by_window records arrival-order watermark so an in-window arrival after a past-right-edge event is counted as late without folding into the bar's values",
+        "src/robinhood_lp/features/bars.py:1548 _close_window records arrival_count at first closure so subsequent in-window arrivals cannot rewrite the closed bar",
+        "tests/test_features_bars_t050.py::TestLateEvents (4 tests)"
+      ],
+      "finding": "Late events are dropped from older bars by default and counted in late_events_count; the closed bar's volume / swap_count cannot be rewritten by a late arrival (test_late_event_not_folded_into_closed_window, test_streamer_closed_window_not_rewritten_by_late_event)."
+    },
+    {
+      "id": "empty_window_semantics",
+      "status": "PASS",
+      "evidence": [
+        "src/robinhood_lp/features/bars.py:569 VolumeBar empty invariants",
+        "src/robinhood_lp/features/bars.py:641 RealizedVolatilityBar empty invariants",
+        "src/robinhood_lp/features/bars.py:703 PriceRangeBar empty invariants",
+        "src/robinhood_lp/features/bars.py:940 GasBar empty invariants",
+        "tests/test_features_bars_t050.py::TestVolumeBar::test_empty_window, TestRealizedVolatilityBar::test_empty_window_yields_none, TestPriceRangeBar::test_empty_window_yields_none_high_low, TestEffectiveFeeBar::test_empty_window, TestGasBar::test_empty_window, TestFreshnessBar::test_no_observations"
+      ],
+      "finding": "Each bar carries an explicit is_empty flag and consistent empty invariants (zero counts, None for variance/high/low/fee); per-bar tests prove empty inputs produce empty bars."
+    },
+    {
+      "id": "irregular_block_handling",
+      "status": "PASS",
+      "evidence": [
+        "src/robinhood_lp/features/bars.py:1015 _filter_by_window filters by observed_at only (no contiguity assumption)",
+        "tests/test_features_bars_t050.py::TestIrregularBlocks (5 tests)"
+      ],
+      "finding": "Window.contains is purely based on observed_at and bounds; sparse / gapped / irregular block sequences and long silent periods are all exercised in TestIrregularBlocks."
+    },
+    {
+      "id": "acceptance_tests_cover_contract",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_features_bars_t050.py collects 110 tests (verified via --collect-only)",
+        "Boundaries: TestWindow (13) + per-bar left/right boundary tests",
+        "Late: TestLateEvents (4) + TestPrefixInvariance::test_streamer_closed_window_not_rewritten_by_late_event",
+        "Empty: per-bar test_empty_window_* (6)",
+        "Irregular: TestIrregularBlocks (5)",
+        "Prefix invariance: TestPrefixInvariance (9) including a future-event invariance proof for every bar type and a reordering-within-window invariance proof"
+      ],
+      "finding": "All five acceptance clauses (left/right boundaries, late event handling, empty windows, irregular blocks, prefix invariance) are covered by named tests in the new test module."
+    },
+    {
+      "id": "must_not_centered_global_normalization",
+      "status": "PASS",
+      "evidence": [
+        "src/robinhood_lp/features/bars.py:30-34 docstring documents the prohibition",
+        "tests/test_features_bars_t050.py::TestNoNormalization (4 tests)"
+      ],
+      "finding": "Bars carry raw integer sums / counts / min / max / arithmetic mean of fees / variance of sqrt-price returns; no z-score, no rolling mean, no global mean subtraction, no centered normalisation. TestNoNormalization pins volume=raw sum, gas=raw sum, average_fee=arithmetic mean, realized variance=raw population variance of returns."
+    },
+    {
+      "id": "must_not_label_proxy_as_observed_depth",
+      "status": "PASS",
+      "evidence": [
+        "src/robinhood_lp/features/bars.py:821-845 DepthProxyBar.__post_init__ forces is_proxy=True and raises BarsError if False",
+        "src/robinhood_lp/features/bars.py:1283 compute_depth_proxy_bar sets is_proxy=True unconditionally",
+        "tests/test_features_bars_t050.py::TestDepthProxyBar::test_proxy_label_set, test_is_proxy_must_be_true, test_unit_is_raw_token_integer_not_depth"
+      ],
+      "finding": "DepthProxyBar.is_proxy is enforced True by the constructor; the depth-proxy bar is explicitly tagged as a proxy and the field names are depth_token0_proxy / depth_token1_proxy, never labelled as observed depth."
+    },
+    {
+      "id": "ownership_boundary_no_labels",
+      "status": "PASS",
+      "evidence": [
+        "src/robinhood_lp/features/bars.py:27-34 docstring states T050 neither defines, computes nor publishes a label",
+        "grep -c 'horizon\\|forward\\|future_look\\|future_data' src/robinhood_lp/features/bars.py returned 0 hits",
+        "No label-related symbols added to features/__init__.py"
+      ],
+      "finding": "T050 owns bar / market-feature surface only; no label, horizon, forward-window, or future-derived quantity is computed or exposed. T101's label harness (PLANNED) is the only owner of those symbols; no overlap or duplication is introduced."
+    },
+    {
+      "id": "test_suite_110_tests",
+      "status": "PASS",
+      "evidence": [
+        "python -m pytest tests/test_features_bars_t050.py -q -> '110 passed in 0.21s'",
+        "python -m pytest -q --ignore=tests/test_abi_artifacts.py -> '1598 passed, 6 skipped in 14.35s' (6 skips are forge/gpg-related and pre-existing)"
+      ],
+      "finding": "All 110 T050 tests pass; the full non-abi-artifacts suite stays green."
+    },
+    {
+      "id": "ruff_format_check",
+      "status": "PASS",
+      "evidence": [
+        "python -m ruff check src/ tests/ -> 'All checks passed!'",
+        "python -m ruff format --check src/ tests/ -> '154 files already formatted'"
+      ],
+      "finding": "ruff check and ruff format --check are clean across the repository."
+    },
+    {
+      "id": "mypy_strict",
+      "status": "PASS",
+      "evidence": [
+        "python -m mypy --strict src/ -> 'Success: no issues found in 89 source files'",
+        "python -m mypy --strict src/robinhood_lp/features/bars.py tests/test_features_bars_t050.py -> 'Success: no issues found in 2 source files'"
+      ],
+      "finding": "mypy --strict passes for the full src/ tree and for the new module + test file."
+    },
+    {
+      "id": "protected_prefixes_untouched",
+      "status": "PASS",
+      "evidence": [
+        "git diff 677611df..565a19e8 --stat -- docs/spec/ docs/intent/ todo/phases/ todo/schemas/ tools/workflow/ .claude/ CLAUDE.md AGENTS.md todo/README.md todo/WORKFLOW.md -> empty",
+        "git diff 677611df..565a19e8 -- todo/config.yaml shows only workflow_controller state transitions: workflow_state READY -> AWAITING_REVIEW, T050 status READY -> AWAITING_REVIEW, attempt 0 -> 1, base_commit null -> 677611df..; candidate_commit and approved_commit remain null and latest_review remains null"
+      ],
+      "finding": "No protected file is touched by the candidate; the only edit to todo/config.yaml is the four-field controller-owned status transition."
+    }
+  ],
+  "must_not_violations": [],
+  "unknowns": [],
+  "required_changes": [],
+  "residual_risks": [
+    "Depth-proxy uses a first-order Taylor approximation (sqrt(1+x) ~ 1 + x/2); band_bps up to 100% are accepted but the approximation error grows with band_bps. The contract forbids labelling the result as observed depth; the bar is already forced is_proxy=True and field names end in _proxy.",
+    "compute_freshness_bar / MarketBarStreamer.build_freshness_bar rely on the caller pre-truncating observations to observed_at <= data_time. The streaming close-time semantics already prevent rewrite, but a caller that feeds a future observation without truncation will see the freshness shift; the docstring and prefix-invariance test document this.",
+    "The MarketBarStreamer requires window_end to be a positive multiple of window_size; non-aligned windows must use the stateless compute_*_bar functions directly. This is intentional and documented in residual_risks of the developer evidence file."
+  ]
+}
