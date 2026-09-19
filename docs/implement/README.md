@@ -3,7 +3,6 @@
 This directory records what currently exists and the evidence produced by the
 implementation. It does not define product intent.
 
-- [`STATUS.md`](STATUS.md) is a generated-or-reviewed factual snapshot.
 - [`TRACEABILITY.md`](TRACEABILITY.md) maps intent and spec identifiers to tasks.
 - [`ci/`](ci/) holds CI evidence and procedures.
 - [`evidence/`](evidence/) holds retained implementation evidence.

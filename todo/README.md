@@ -322,3 +322,16 @@ Do not guess these in an earlier task:
 - Preliminary paper may run before testnet for implementation validation. Formal live evidence
   remains ordered as backtest → testnet → post-testnet paper/shadow → security review
   → explicit human promotion.
+
+Several tasks can build their interfaces and failure paths against fixtures locally but
+cannot be accepted without evidence from outside this repository:
+
+- T053 needs a qualified, traceable, point-in-time USDG conversion source;
+- T082 and T093 need a paper/shadow run over a pre-declared observation window;
+- T092 needs Robinhood testnet Gas or faucet access and one real bounded lifecycle;
+- T093 needs an independent security review;
+- T094 and T095 need explicit Owner approval of the mainnet scope and its capital.
+
+Missing external evidence never permits `APPROVED`, and it never justifies a guessed
+default either: a chain, contract, Hook, price or ledger fact that cannot be verified
+must return `UNKNOWN`, pause, or block promotion rather than be filled in.
