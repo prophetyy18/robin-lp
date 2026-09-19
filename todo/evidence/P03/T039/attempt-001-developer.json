@@ -1,0 +1,44 @@
+{
+  "task_id": "T039",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the T039 per-pool extended-history research window artifacts: a per-pool window planner (per_pool_window.py) that supersedes T038's ten-million-block rule with a per-pool rule (coverage_from_block = pool_init_block, coverage_to_block = pinned finalized block), a finalized-pin agreement helper that rejects latest / non-finalized / wall-clock bounds, a sub-range splitter that respects the measured per-call log ceiling, an after-resume planner that emits pool_acquired_after_checkpoint_resume, a logical-call-count invariant that forbids per-block header fetches, a per-pool coverage report with per-pool data root, cost record, reconciliation verdict, and complete verdict (per_pool_coverage.py), and a per-pool operator runbook that names the historical-state endpoint able to serve the pinned depth (per_pool_window_runbook.py). 73 new tests cover: the per-pool rule itself (basic, two materially different pools over different-length windows, partial / full / no overlap, single-block window), the failed-resolution paths (pool_initialized_after_agreed_end, pool_initialize_resolution_failed), finalized-pin agreement (agreement, hash-casing normalise, number disagreement, hash disagreement, unavailability, non-finalized, malformed hash, no-latest-substitution), the plan validator (window-width mismatch, coverage-to-greater-than-pin, unknown outcome, unknown reason code, JSON-serialisability), checkpoint resume (boundary validation, suffix coverage, no-op at pin), idempotent re-runs (full prior coverage short-circuits, partial prior coverage does not), the logical-call-count invariant (valid / violation / resume), the per-pool coverage report (complete / incomplete / already_covered / failed_resolution, JSON / Markdown), data root / cost record / reconciliation validation, partition-owner reconciliation (clean + cross-pool attribution), the operator runbook (role routing, Markdown rendering, archive-state refusal, endpoints summary, JSON serialisation), failure-path reason-code coverage, pool-init-block-at-block-zero, and the budget ceiling (negative dimensions, explicit override). T038 modules / tests / dataset generations remain immutable historical evidence — no T038 file was edited. Full pytest run is 1340 passed / 6 pre-existing skipped; ruff format / ruff check / mypy --strict all pass on the new code and the wider tree.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_per_pool_window_t039.py -q",
+      "result": "73 passed in 0.63s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ --ignore=tests/test_abi_artifacts.py -q",
+      "result": "1340 passed, 6 skipped in 13.76s (pre-existing Foundry / gpg / sorted-currency skips, not introduced by T039)"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/ tests/",
+      "result": "147 files already formatted"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/ tests/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/",
+      "result": "Success: no issues found in 85 source files"
+    },
+    {
+      "command": "git diff --stat src/ tests/ docs/ todo/phases/",
+      "result": " src/robinhood_lp/qualification/__init__.py | 144 +++++++++++++++++++++++++++++ 1 file changed, 144 insertions(+) — only the qualification __init__ re-exports the T039 surfaces; T038 modules, T038 tests, the T039 contract, ADR-013, ADR-015, PROVIDER_FACTS.md, and the 2026-09-18 reference dataset / manifest are untouched."
+    },
+    {
+      "command": "git status",
+      "result": "modified: src/robinhood_lp/qualification/__init__.py (re-exports only); modified: todo/config.yaml (controller-managed workflow state, not edited by the developer); new: src/robinhood_lp/qualification/per_pool_window.py, src/robinhood_lp/qualification/per_pool_coverage.py, src/robinhood_lp/qualification/per_pool_window_runbook.py, tests/test_per_pool_window_t039.py. No Parquet file, no protected Phase 0-2 surface, no T038 surface, and no Intent / Spec / contract file was modified."
+    }
+  ],
+  "residual_risks": [
+    "The on-chain Initialize-scan resolver that produces the per-pool pool_init_block + pool_init_block_hash is an operator-side run-time action; the planner accepts operator-supplied Initialize evidence but does not perform the scan itself. The T039 contract requires the planner to consume resolved values and refuse to guess; the deterministic offline surface is fully covered by tests, but the live resolve-and-acquire loop still depends on T038's hook-scan resolver and the live endpoints.",
+    "The per-pool coverage report's already_covered outcome is the verbatim-reproduction case: a re-run over a window the durable checkpoint already qualified must produce no new chain reads. The planner records the range_already_covered_by_prior_run reason code and emits zero sub-ranges when the durable checkpoint fully covers the new pinned window; partial prior coverage does not short-circuit (the runner resumes from the suffix). This is exercised by tests but not yet wired into the runner.",
+    "The budget ceiling in the new module uses sensible defaults (1M logical calls, 1M HTTP requests, 8 GiB response bytes, 1M rows, 1B provider units, 24h elapsed time); the actual per-pool budget is operator-supplied in the live run. The contract requires that a declared budget halt the run rather than exceed silently; the cost record's exhausted_budget_dimension surfaces the dimension that hit the ceiling.",
+    "The historical_state_endpoint_alias in the runbook defaults to the secondary endpoint (alchemy_free) because that endpoint is measured to serve historical eth_call at the reference depth (ADR-010 / ADR-011). If the operator measures the primary endpoint to serve historical state for the configured pair, the runbook accepts an override; the builder refuses to construct a runbook when archive_state_capability_observed=False because that case is a documented failure path (endpoint_historical_state_unavailable).",
+    "No change to the existing T038 vocabulary. The T038 OUTCOME_POOL_INCLUDED and OUTCOME_POOL_INIT_OUTSIDE_WINDOW constants are unchanged; the T039 per-pool modules introduce a fresh outcome vocabulary (pool_acquired, pool_acquired_after_checkpoint_resume, pool_initialized_after_agreed_end, pool_initialize_resolution_failed) that does not cite the ten-million-block window. The T038 modules are untouched and remain the immutable historical evidence the contract requires.",
+    "PerPoolWindowPlan.__post_init__ allows coverage_from_block > coverage_to_block for failed-resolution outcomes (width == 0). PerPoolCoverageReport mirrors this so the audit trail can show the run halted before any chain read. The coverage_window_width property computes the inclusive span and returns 0 for failed cases.",
+    "The new modules' sha-pinned surface — PerPoolWindowInputs, PerPoolWindowPlan, PerPoolCoverageReport, PerPoolOperatorRunbook — does not perform any I/O, network, environment, or wall-clock read; every input is a pinned reference fact, an operator-supplied observation, or a planner output. The Markdown renderings and JSON serialisations are deterministic and the audit-trail records are reproducible."
+  ]
+}
