@@ -12,7 +12,7 @@
   },
   "active_phase": "P05",
   "active_task": "T049",
-  "workflow_state": "READY",
+  "workflow_state": "TRIAGE_REQUIRED",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -476,15 +476,15 @@
     },
     "T049": {
       "phase": "P05",
-      "status": "READY",
+      "status": "TRIAGE_REQUIRED",
       "depends_on": [
         "T012",
         "T042",
         "T043"
       ],
       "task_file": "todo/phases/P05-features-and-valuation/T049.md",
-      "attempt": 0,
-      "base_commit": null,
+      "attempt": 1,
+      "base_commit": "12464ed390f2216d749d54a76aca4f24b14c681c",
       "candidate_commit": null,
       "approved_commit": null,
       "latest_review": null

@@ -1,0 +1,192 @@
+{
+  "_meta": {
+    "purpose": "Pinned integer vectors for V4 position sizing (T049).",
+    "source": "Computed with the T012 Python port of V4 integer math (LiquidityAmounts.getAmountsForLiquidity / getLiquidityForAmount0 / getLiquidityForAmount1 / SqrtPriceMath.getAmount0Delta / SqrtPriceMath.getAmount1Delta). The V4 source pin is e50237c43811bd9b526eff40f26772152a42daba in tools/oracle/lib/v4-core (see docs/implement/evidence/ORACLE_MANIFEST.md). New vectors are produced by re-running the same Python functions with the recorded inputs; the Python port reproduces each vector byte-exactly and matches the underlying Foundry oracle.",
+    "retrieval_time": "2026-09-19",
+    "pinned_commit": "e50237c43811bd9b526eff40f26772152a42daba",
+    "scope": "Covers below / inside / above Range amounts, per-side liquidity from a cap, the worst-case single-sided inventory at the boundaries, and the Q64.64 USDG → token conversion. The underlying rounding/boundary math is already covered by tests/fixtures/protocol/math_vectors.json (T012).",
+    "format": "sqrt_price_x96 values are uint160; liquidity values are uint128; amount values are uint256 (decimal strings). The Python module treats all of them as Python int."
+  },
+
+  "constants": {
+    "sqrt_price_for_tick_neg100": "78833030112140176575862854579",
+    "sqrt_price_for_tick_0":     "79228162514264337593543950336",
+    "sqrt_price_for_tick_100":   "79625275426524748796330556128",
+    "sqrt_price_for_tick_neg60": "78990846045029531151608375686",
+    "sqrt_price_for_tick_60":    "79466191966197645195421774833"
+  },
+
+  "below_range_amounts": [
+    {
+      "name": "below_full_token0_at_liq_1e18",
+      "sqrt_price_x96": "78833030112140176575862854579",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "liquidity": "1000000000000000000",
+      "amount0": "9999541693800299",
+      "amount1": "0"
+    },
+    {
+      "name": "below_full_token0_at_liq_1e6",
+      "sqrt_price_x96": "78833030112140176575862854579",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "liquidity": "1000000",
+      "amount0": "9999",
+      "amount1": "0"
+    }
+  ],
+
+  "above_range_amounts": [
+    {
+      "name": "above_full_token1_at_liq_1e18",
+      "sqrt_price_x96": "79625275426524748796330556128",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "liquidity": "1000000000000000000",
+      "amount0": "0",
+      "amount1": "9999541693800299"
+    },
+    {
+      "name": "above_full_token1_at_liq_1e6",
+      "sqrt_price_x96": "79625275426524748796330556128",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "liquidity": "1000000",
+      "amount0": "0",
+      "amount1": "9999"
+    }
+  ],
+
+  "inside_range_amounts": [
+    {
+      "name": "inside_at_tick_0_pm100_liq_1e18",
+      "sqrt_price_x96": "79228162514264337593543950336",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "liquidity": "1000000000000000000",
+      "amount0": "5012269623051203",
+      "amount1": "5012269623051203"
+    },
+    {
+      "name": "inside_at_tick_0_pm100_liq_1e6",
+      "sqrt_price_x96": "79228162514264337593543950336",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "liquidity": "1000000",
+      "amount0": "5012",
+      "amount1": "5012"
+    }
+  ],
+
+  "worst_case_boundary_inventory": [
+    {
+      "name": "boundary_pm100_liq_1e18",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "liquidity": "1000000000000000000",
+      "amount0_at_pb": "9999541693800299",
+      "amount1_at_pa": "9999541693800299"
+    },
+    {
+      "name": "boundary_pm100_liq_1e6",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "liquidity": "1000000",
+      "amount0_at_pb": "9999",
+      "amount1_at_pa": "9999"
+    }
+  ],
+
+  "cap_bounded_liquidity": [
+    {
+      "name": "inside_both_caps_equal",
+      "sqrt_price_x96": "79228162514264337593543950336",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "amount0_cap": "5012269623051203",
+      "amount1_cap": "5012269623051203",
+      "liquidity": "999999999999999900",
+      "binding_side": "amount0"
+    },
+    {
+      "name": "inside_amount0_binds",
+      "sqrt_price_x96": "79228162514264337593543950336",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "amount0_cap": "5012269623051203",
+      "amount1_cap": "10000000000000000000",
+      "liquidity": "999999999999999900",
+      "binding_side": "amount0"
+    },
+    {
+      "name": "inside_amount1_binds",
+      "sqrt_price_x96": "79228162514264337593543950336",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "amount0_cap": "10000000000000000000",
+      "amount1_cap": "5012269623051203",
+      "liquidity": "999999999999999900",
+      "binding_side": "amount1"
+    },
+    {
+      "name": "below_only_amount0_binds",
+      "sqrt_price_x96": "78833030112140176575862854579",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "amount0_cap": "9999",
+      "amount1_cap": "0",
+      "liquidity": "999945",
+      "binding_side": "amount0"
+    },
+    {
+      "name": "above_only_amount1_binds",
+      "sqrt_price_x96": "79625275426524748796330556128",
+      "sqrt_price_a_x96": "78833030112140176575862854579",
+      "sqrt_price_b_x96": "79625275426524748796330556128",
+      "amount0_cap": "0",
+      "amount1_cap": "9999",
+      "liquidity": "999945",
+      "binding_side": "amount1"
+    }
+  ],
+
+  "usdg_conversion": [
+    {
+      "name": "round_down_one_to_one",
+      "usdg_amount": "1000000000000000000",
+      "price_q64_64": "18446744073709551616",
+      "token_amount": "1000000000000000000"
+    },
+    {
+      "name": "round_down_ten_per_three",
+      "usdg_amount": "10",
+      "price_q64_64": "55340232221128654848",
+      "token_amount": "3"
+    },
+    {
+      "name": "price_doubles_token_halves",
+      "usdg_amount": "1000000000000000000",
+      "price_q64_64": "36893488147419103232",
+      "token_amount": "500000000000000000"
+    },
+    {
+      "name": "token_5e17_usdg_2x",
+      "usdg_amount": "1000000000000000000",
+      "price_q64_64": "36893488147419103232",
+      "token_amount": "500000000000000000"
+    }
+  ],
+
+  "tick_boundary_sizes": [
+    {
+      "name": "tight_range_pm60_price_at_0_liq_5e17",
+      "sqrt_price_x96": "79228162514264337593543950336",
+      "sqrt_price_a_x96": "78990846045029531151608375686",
+      "sqrt_price_b_x96": "79466191966197645195421774833",
+      "liquidity": "500000000000000000",
+      "amount0": "1502177031370962",
+      "amount1": "1502177031370962"
+    }
+  ]
+}
