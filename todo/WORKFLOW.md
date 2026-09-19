@@ -97,14 +97,17 @@ python -m tools.workflow finish-amendment-review A0001
 ```
 
 `CONTRACT` permits only the named task contracts and their dependency fields.
-`SPEC` additionally permits `docs/spec/` and `spec_revision`; `INTENT` additionally
-permits `docs/intent/` and `intent_revision`. Every route preserves task status,
-implementation attempts, evidence, commit identities and approval metadata. A
-PASS fast-forwards the reviewed amendment into the clean invoking checkout while
-the target tasks remain `PLANNED`. FAIL retains the amendment worktree and uses
-`prepare-amendment-retry <id>` with a fresh Planner; resolved BLOCKED amendments
-use the same retry gate. One amendment may target at most eight tasks. Only one
-amendment may be active, and none may start while a product task is unfinished.
+`SPEC` additionally permits `docs/spec/` and `spec_revision`; `PROPHET` targets no
+task: it states Intent, restructures the plan and corrects collateral documents,
+may add tasks, and may change both revisions; `SUPERSEDE` targets `APPROVED` tasks
+and annotates each with the successor it names in `superseded_by`. Every route
+preserves task status, implementation attempts, evidence, commit identities and
+approval metadata. A PASS fast-forwards the reviewed amendment into the clean
+invoking checkout without changing any target's status. FAIL retains the amendment
+worktree and uses `prepare-amendment-retry <id>` on the same layer; resolved
+BLOCKED amendments use the same retry gate. One amendment may target at most eight
+tasks. Only one amendment may be active, and none may start while a product task
+is unfinished.
 
 #### Retiring approved work
 
