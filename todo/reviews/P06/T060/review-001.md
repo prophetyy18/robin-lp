@@ -1,0 +1,258 @@
+# T060 independent review
+
+- Base commit: `a6ed050a09fe85fb0fbbb0f4013fc555aff13672`
+- Candidate commit: `d590909faeac530faa3b26024f2b64769ba5e338`
+- Verdict: **PASS**
+
+## Checks
+
+### vocabulary_separation_component_vs_output — PASS
+
+Component names (RegimeModel, FeeOpportunityModel) and output names (RegimeAssessment, FeeOpportunityAssessment) are disjoint vocabularies; a component name never denotes an output and an output name never denotes a component, matching STRATEGY_ECONOMICS.md §7
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:830-889 declares RegimeModel and FeeOpportunityModel as @runtime_checkable Protocols (component interfaces)
+- src/robinhood_lp/strategy/base.py:893-1143 declares RegimeAssessment and FeeOpportunityAssessment as frozen dataclasses (output value types)
+- src/robinhood_lp/strategy/base.py:121 exports RegimeModel and FeeOpportunityModel as components; src/robinhood_lp/strategy/base.py:124-125 exports REGIME_ASSESSMENT_VERSION and FEE_OPPORTUNITY_ASSESSMENT_VERSION
+- src/robinhood_lp/strategy/__init__.py:60-83 re-exports both component names and both output names; the two vocabularies never overlap
+
+### components_are_sole_model_extension_point — PASS
+
+RegimeModel and FeeOpportunityModel are explicitly documented as the sole supported extension points for a trained model; a model-backed implementation must satisfy the same contract as a rule implementation
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:830-847 RegimeModel docstring: 'The interface is the *sole* supported extension point for a regime-classifier model (T102 / P10); a model-backed implementation must satisfy the same contract as a rule implementation — same inputs, same outputs, same validation and uncertainty duties'
+- src/robinhood_lp/strategy/base.py:861-879 FeeOpportunityModel docstring mirrors the same constraint
+- src/robinhood_lp/strategy/base.py:843-846 / 872-877: 'The implementation must not mutate its inputs, may not produce a default assessment when the evidence is insufficient, and may not alter the snapshots, the candidate action, the ledger, risk or audit semantics'
+- tests/test_strategy_t060.py:608-628 TestRegimeModelProtocol / TestFeeOpportunityModelProtocol verify the @runtime_checkable Protocol contract
+
+### component_interface_signals_uncertainty — PASS
+
+Both component interfaces can signal uncertainty via the outcome field and refuse to produce an assessment rather than fabricate one; the convenience uncertain() factory makes the no-evidence path ergonomic without allowing bypass
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:893-1013 RegimeAssessment carries outcome ∈ {REGIME_OUTCOME_ASSESSED, REGIME_OUTCOME_UNCERTAIN}; uncertain() factory constructor forces state=REGIME_STATE_UNCERTAIN and confidence_q64_64=0
+- src/robinhood_lp/strategy/base.py:1016-1143 FeeOpportunityAssessment mirrors the same uncertainty contract with FEE_OPPORTUNITY_OUTCOME_UNCERTAIN and zeroed expected_fee_edge_q64_64 + confidence_q64_64
+- src/robinhood_lp/strategy/base.py:933-968 / 1057-1096 post_init rejects fabricated ASSESSED outcomes when state is UNCERTAIN, and rejects UNCERTAIN outcomes carrying non-zero confidence / fee_edge
+- tests/test_strategy_t060.py:631-705 TestRegimeAssessmentUncertain / TestFeeOpportunityAssessmentUncertain verify both the uncertainty factory path and the rejection of forced assessments
+
+### immutable_versioned_snapshots — PASS
+
+Three immutable, versioned snapshots carry every input the strategy needs at decision time; dataclass identity drives equality and hashing so the same snapshot set hashes identically in any process
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:121-126 ADMISSION_SNAPSHOT_VERSION, MARKET_SNAPSHOT_VERSION, PORTFOLIO_SNAPSHOT_VERSION (all 't060.*.v1')
+- src/robinhood_lp/strategy/base.py:556-823 AdmissionSnapshot, MarketSnapshot, PortfolioSnapshot declared with @dataclass(frozen=True, slots=True)
+- src/robinhood_lp/strategy/base.py:582-823 each __post_init__ enforces field-level invariants (positive chain_id, uint256 width, RELATIVE_ONLY ↔ quote_q64_64 exclusivity, availability_time ≥ data_time)
+- tests/test_strategy_t060.py:367-506 TestSnapshotsAreFrozen / TestSnapshotsAreVersioned / TestSnapshotsAreHashable / TestSnapshotsValidation exercise freezing, version pinning, deterministic hashing, and invalid-input rejection
+
+### deterministic_clock_and_random_seed — PASS
+
+Strategy exposes DeterministicClock and SeededRandomSource Protocols with FrozenClock and FrozenSeededRandomSource reference implementations; the module has no time / datetime / random module imports (only math.isnan/isfinite on int / float fields), so wall-clock and unseeded randomness are unreachable
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:365-417 DeterministicClock and SeededRandomSource Protocols with .now()/.advance() and .seed()/.next_int(upper_bound) signatures
+- src/robinhood_lp/strategy/base.py:419-548 FrozenClock and FrozenSeededRandomSource reference implementations (frozen dataclasses; .advance() returns a new instance via dataclasses.replace)
+- src/robinhood_lp/strategy/base.py imports: stdlib only (dataclasses, math, collections.abc, dataclass, field, StrEnum, types.ModuleType, Final, Protocol, runtime_checkable); no time / datetime / random module imports
+- tests/test_strategy_t060.py:514-600 TestFrozenClock / TestFrozenSeededRandomSource cover monotonic sequence, immutability on advance, exhaustion error, deterministic same-call-sequence behaviour, and Protocol conformance
+
+### tick_capital_proposal_validation — PASS
+
+validate_proposal rejects invalid ticks (out-of-bounds, unaligned, degenerate), stale state on every snapshot, NaN / display values, and excessive capital before a CandidateAction is constructed; on success it returns None (silent)
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:1410-1549 validate_proposal runs four guards in order: (1) tick alignment / V4 int24 bounds, (2) snapshot availability_time ≤ decision_time stale guard for all three snapshots, (3) NaN / display-value guard on the market snapshot, (4) capital envelope ≤ admission.max_capital_q64_64 ≤ MAX_CAPITAL_Q64_64
+- src/robinhood_lp/strategy/base.py:1371-1374 _tick_in_bounds uses V4 int24 domain [-2**23, 2**23)
+- src/robinhood_lp/strategy/base.py:1377-1407 _market_snapshot_has_finite_payload walks every numeric field for NaN / inf
+- tests/test_strategy_t060.py:713-1003 TestValidateProposalInvalidTicks / TestValidateProposalStaleState / TestValidateProposalNaNDisplayValue / TestValidateProposalExcessiveCapital / TestValidateProposalSuccess cover every guard branch
+
+### reason_coded_no_trade — PASS
+
+ReasonCode is a closed enum whose values are stable strings; the validator and the component-driven NO_TRADE path both produce a reason code, and CandidateAction rejects a NO_TRADE without one
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:208-235 ReasonCode(StrEnum) is a closed vocabulary: RANGE_DEGENERATE, TICK_OUT_OF_BOUNDS, TICK_NOT_ALIGNED, STALE_SNAPSHOT, NAN_DISPLAY_VALUE, CAPITAL_EXCESSIVE, CAPITAL_NONPOSITIVE, REGIME_UNCERTAIN, FEE_OPPORTUNITY_UNCERTAIN, STRATEGY_HOLD
+- src/robinhood_lp/strategy/base.py:1312-1332 CandidateAction __post_init__ enforces that NO_TRADE carries a reason_code and uses sentinel ticks / liquidity / capital
+- src/robinhood_lp/strategy/base.py:1637-1674 evaluate_decision translates an UNCERTAIN regime / fee-opportunity outcome into a NO_TRADE CandidateAction carrying ReasonCode.REGIME_UNCERTAIN or ReasonCode.FEE_OPPORTUNITY_UNCERTAIN
+- tests/test_strategy_t060.py:1363-1385 TestReasonCodeVocabulary pins every validation reason and asserts the values are stable strings; TestEvaluateDecisionUncertainty pins the NO_TRADE + reason_code outcome (1108-1124)
+
+### dependency_purity_no_rpc_storage_signing_execution — PASS
+
+The strategy layer is a pure observation → candidate-action function; the denylist covers the RPC / storage / signing / execution / config / replay / ingestion / discovery / qualification / quality / presentation surfaces and the live dependency check confirms only stdlib is reachable
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:190-200 _FORBIDDEN_STRATEGY_ROBINHOOD_MODULES denylist covers config / discovery / ingestion / presentation / qualification / quality / replay / rpc / storage (signing and execution live outside the package and never appear as robinhood_lp.* submodules)
+- src/robinhood_lp/strategy/base.py:1774-1793 assert_strategy_layer_is_pure walks the live module graph and raises StrategyError on any forbidden import
+- Live runtime check: collect_strategy_module_imports() reports only robinhood_lp.strategy + robinhood_lp.strategy.base and only stdlib imports (dataclasses, math); assert_strategy_layer_is_pure() passes
+- tests/test_strategy_t060.py:1393-1469 TestStrategyLayerIsPure (test_strategy_layer_is_pure, test_collected_imports_include_only_protocol_and_strategy, test_strategy_layer_rejects_forbidden_import_via_injection, test_signing_imports_are_forbidden_by_no_signing_paths) lock the boundary
+
+### heterogeneous_eligible_poolkeys — PASS
+
+One (admission, market, portfolio, regime, fee) instance works unchanged on heterogeneous eligible PoolKeys; the test explicitly pins a single instance handling both PoolKeys
+
+Evidence:
+
+- tests/test_strategy_t060.py:155-173 defines two materially different eligible PoolKeys: _POOLKEY_NATIVE_NO_HOOK (native currency0, zero hook, fee=500, tick_spacing=60) and _POOLKEY_ERC20_DYNAMIC_HOOK (both currencies ERC-20, dynamic-fee sentinel 0x800000, non-zero hook, tick_spacing=10)
+- tests/test_strategy_t060.py:1041-1094 TestEvaluateDecisionHeterogeneousPoolKeys exercises both pools with the same _RangeRegimeModel + _PositiveFeeOpportunityModel pair and asserts PROPOSE on both; test_one_instance_handles_both_pools_unchanged explicitly asserts 'a single pair of components satisfies both pools without change'
+
+### invalid_ticks_fail_before_intent — PASS
+
+Invalid ticks fail before intent creation; validator runs before the components are queried
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:1476-1496 validate_proposal raises InvalidTickError for out-of-bounds ticks, degenerate ranges (tick_lower >= tick_upper), and ticks not aligned to tick_spacing
+- tests/test_strategy_t060.py:713-828 TestValidateProposalInvalidTicks exercises: tick_lower below V4 MIN_TICK, tick_upper above V4 MAX_TICK, degenerate Range (tick_lower == tick_upper), unaligned tick_lower / tick_upper, and tick_spacing outside [1, 32767]
+- tests/test_strategy_t060.py:1201-1234 TestEvaluateDecisionValidationWins asserts InvalidTickError is raised *before* the component is invoked (the _ExplodingModel would raise AssertionError if the validator did not run first)
+
+### stale_state_fails_before_intent — PASS
+
+Stale state fails before intent creation across every snapshot
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:1502-1519 validate_proposal raises StaleSnapshotError when admission / market / portfolio availability_time exceeds decision_time
+- tests/test_strategy_t060.py:831-895 TestValidateProposalStaleState exercises all three snapshots independently
+
+### nan_display_values_fail_before_intent — PASS
+
+NaN / display values fail before intent creation; the validator's defensive check is a future-proof hook for any embedded payload
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:683-707, 696-707 MarketSnapshot.__post_init__ rejects non-int / NaN / inf fields and rejects a RELATIVE_ONLY snapshot carrying a quote
+- src/robinhood_lp/strategy/base.py:1521-1525 validate_proposal has a defensive NaNDisplayValueError guard on the market snapshot
+- tests/test_strategy_t060.py:898-920 TestValidateProposalNaNDisplayValue asserts the constructor rejects a NaN float at sqrt_price_x96; ADR-004 forbids float on the protocol / valuation path so the constructor is the strongest guard
+
+### excessive_capital_fails_before_intent — PASS
+
+Excessive capital fails before intent creation on every branch
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:1527-1549 validate_proposal raises InvalidCapitalError for non-positive capital, capital > project ceiling MAX_CAPITAL_Q64_64, and capital > admission.max_capital_q64_64 (or the explicit override)
+- tests/test_strategy_t060.py:923-978 TestValidateProposalExcessiveCapital covers all three failure branches (non-positive, exceeding per-pool max, exceeding project ceiling)
+
+### component_without_evidence_returns_uncertainty — PASS
+
+A component without evidence returns an explicit UNCERTAIN outcome via the uncertain() factory; evaluate_decision translates it into a NO_TRADE candidate with the matching reason code rather than fabricating an assessment
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:1637-1655 evaluate_decision translates REGIME_OUTCOME_UNCERTAIN into a CANDIDATE_KIND_NO_TRADE candidate carrying ReasonCode.REGIME_UNCERTAIN and the snapshot / component versions, without inventing an assessment
+- src/robinhood_lp/strategy/base.py:1656-1674 same path for FEE_OPPORTUNITY_OUTCOME_UNCERTAIN and ReasonCode.FEE_OPPORTUNITY_UNCERTAIN
+- tests/test_strategy_t060.py:631-705 TestRegimeAssessmentUncertain / TestFeeOpportunityAssessmentUncertain verify the convenience uncertain() constructor and that the post_init refuses to combine UNCERTAIN outcome with ASSESSED state or non-zero confidence
+- tests/test_strategy_t060.py:1096-1124 TestEvaluateDecisionUncertainty exercises _UncertainRegimeModel and _UncertainFeeOpportunityModel and asserts the resulting CandidateAction carries kind=NO_TRADE + the matching reason code
+
+### must_not_strategy_approves_own_risk — PASS
+
+Strategy does not approve its own risk: ReasonCode is the strategy-owned vocabulary with no risk verdict; the central risk layer (T070) reviews the CandidateAction, not the strategy
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:208-235 ReasonCode is the strategy-owned vocabulary: RANGE_DEGENERATE, TICK_OUT_OF_BOUNDS, TICK_NOT_ALIGNED, STALE_SNAPSHOT, NAN_DISPLAY_VALUE, CAPITAL_EXCESSIVE, CAPITAL_NONPOSITIVE, REGIME_UNCERTAIN, FEE_OPPORTUNITY_UNCERTAIN, STRATEGY_HOLD. No risk-verdict reason codes appear here; risk verdicts live in T070 / T071
+- src/robinhood_lp/strategy/base.py:1285-1289 CandidateAction.__post_init__ rejects a reason_code that is not a ReasonCode (or None), so a downstream risk code could not leak in
+- tests/test_strategy_t060.py:1363-1385 TestReasonCodeVocabulary pins the closed set
+- src/robinhood_lp/strategy/base.py imports: stdlib + robinhood_lp.strategy.base; no risk layer import; architecture §2.1 places the central risk gateway as a downstream consumer of the CandidateAction
+
+### must_not_component_mutates_snapshots_or_ledger — PASS
+
+Strategy and components do not mutate snapshots, the candidate action, the ledger, or audit semantics: every value type is a frozen dataclass, components return new assessments, and evaluate_decision only constructs new CandidateActions
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:556-823 every snapshot is @dataclass(frozen=True, slots=True); tests/test_strategy_t060.py:367-384 TestSnapshotsAreFrozen pins the FrozenInstanceError on mutation
+- src/robinhood_lp/strategy/base.py:830-858, 861-890 RegimeModel / FeeOpportunityModel Protocol docstrings explicitly forbid mutating inputs
+- src/robinhood_lp/strategy/base.py:893-1143 RegimeAssessment / FeeOpportunityAssessment are @dataclass(frozen=True, slots=True); the only way to change state is to construct a new dataclass
+- src/robinhood_lp/strategy/base.py:1557-1716 evaluate_decision only constructs new CandidateAction values and never reaches into the snapshots / ledger / audit; the ledger / audit layers are not imported
+
+### must_not_component_forces_unsupported_assessment — PASS
+
+An assessment is never fabricated: post_init rejects every combination of outcome + state / confidence / fee_edge that the interface cannot support, and the uncertain() factory only emits the no-evidence variant
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:933-968 RegimeAssessment.__post_init__: if outcome is ASSESSED, state must be one of {RANGE, UP_TREND, DOWN_TREND, JUMP_RISK}; if outcome is UNCERTAIN, state must be UNCERTAIN and confidence must be 0
+- src/robinhood_lp/strategy/base.py:1057-1096 FeeOpportunityAssessment.__post_init__: same outcome gating, plus expected_fee_edge_q64_64 must be 0 when outcome is UNCERTAIN
+- src/robinhood_lp/strategy/base.py:990-1013, 1120-1143 uncertain() factory constructors only produce UNCERTAIN outputs with zero confidence / zero expected_fee_edge, so the convenience path cannot fabricate an ASSESSED result
+- tests/test_strategy_t060.py:631-705 cover all four reject branches: uncertain factory refuses ASSESSED state; ASSESSED outcome refuses UNCERTAIN state; ASSESSED outcome refuses an unknown state ('DRIFT'); ASSESSED outcome requires positive confidence_q64_64
+
+### tests_pass_80_total — PASS
+
+All 80 T060 tests pass
+
+Evidence:
+
+- PYTHONPATH=src python -m pytest tests/test_strategy_t060.py -q → 80 passed in 0.12s
+
+### full_suite_green — PASS
+
+Full suite is green aside from one pre-existing failure in tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output that requires the Foundry Solidity library at tools/oracle/lib/v4-core which is absent in this detached worktree; that test does not import or touch robinhood_lp.strategy and the failure is the documented detached-worktree host condition noted by the workflow docs and the planner-reported A0004 review
+
+Evidence:
+
+- PYTHONPATH=src python -m pytest tests/ --ignore=tests/test_abi_artifacts.py --ignore=tests/test_oracle_drift.py --ignore=tests/test_oracle_provenance.py --ignore=tests/test_oracle_review_provenance.py -q → 1833 passed, 1 skipped (an existing skipped test for unsorted currency vector)
+- tests/test_no_signing_paths.py -q → 6 passed (cross-cutting signing-surface test)
+- tests/test_strategy_t060.py -q → 80 passed
+
+### ruff_format_check_clean — PASS
+
+ruff format --check and ruff check both clean on the new files
+
+Evidence:
+
+- ruff format --check src/robinhood_lp/strategy tests/test_strategy_t060.py → '3 files already formatted'
+- ruff check src/robinhood_lp/strategy tests/test_strategy_t060.py → 'All checks passed!'
+
+### mypy_strict_clean — PASS
+
+mypy --strict is clean on the new module and its tests
+
+Evidence:
+
+- PYTHONPATH=src python -m mypy --strict src/robinhood_lp/strategy tests/test_strategy_t060.py → 'Success: no issues found in 3 source files'
+
+### protected_prefix_files_not_touched — PASS
+
+No protected-prefix file is touched by the diff; the todo/config.yaml change is the standard workflow state transition recorded by the controller, consistent with prior candidate commits (T051, T052)
+
+Evidence:
+
+- git diff --name-only a6ed050..d590909 lists: src/robinhood_lp/strategy/__init__.py, src/robinhood_lp/strategy/base.py, tests/test_strategy_t060.py, todo/config.yaml, todo/evidence/P06/T060/attempt-001-developer.json
+- No file under docs/spec/, docs/intent/, todo/phases/, todo/schemas/, tools/workflow/, .claude/, CLAUDE.md, AGENTS.md, todo/README.md is touched
+- todo/config.yaml diff is the documented workflow-controller state transition (workflow_state READY→AWAITING_REVIEW; T060 status READY→AWAITING_REVIEW; attempt 0→1; base_commit populated), identical in shape to T051's eaaf912..0e86454 and T052's 361c112..d74de85 which the prior independent reviews accepted as the standard controller-driven state change rather than a content edit
+- todo/evidence/P06/T060/attempt-001-developer.json is the developer handoff record written by the prepare-develop / finish-develop gate, not a contract or spec file
+
+### workflow_validate_and_status — PASS
+
+Workflow validate is OK; status confirms T060 attempt 1 at the correct base / candidate pair with the matching branch
+
+Evidence:
+
+- python -m tools.workflow validate → {"status": "OK"}
+- python -m tools.workflow status → active_task=T060, workflow_state=AWAITING_REVIEW, task_status=AWAITING_REVIEW, attempt={task_id:T060, attempt:1, base_commit:a6ed050, candidate_commit:d590909, branch:workflow/t060-attempt-001}
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails in this detached worktree because the Foundry Solidity library at tools/oracle/lib/v4-core is not installed; the failure is a pre-existing host condition unrelated to T060 and is the same condition the workflow docs and the A0004 plan review flagged as a known detached-worktree limitation. The T060 candidate does not touch any oracle / Foundry / ABI surface.
+- CandidateAction carries a canonical liquidity=1 PROPOSE signal ('place a sized LP'); the actual liquidity sizing is the responsibility of the downstream execution layer (T071) and not in scope for T060.
