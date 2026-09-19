@@ -99,15 +99,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
 
-from robinhood_lp.backtest.engine import (
-    StrategyDecision,
-    StrategyDecisionRequest,
-)
-from robinhood_lp.backtest.events import (
+from robinhood_lp.protocol.contracts import (
     KIND_OBSERVATION,
     KIND_SWAP,
     SOURCE_PRIORITY_DATA,
     BacktestEvent,
+    StrategyDecision,
+    StrategyDecisionRequest,
 )
 from robinhood_lp.protocol.math import (
     MAX_TICK,

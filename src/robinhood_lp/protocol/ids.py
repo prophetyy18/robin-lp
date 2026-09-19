@@ -33,6 +33,59 @@ DYNAMIC_FEE_FLAG: Final[int] = 0x800000
 MAX_TICK_SPACING: Final[int] = 32_767
 MIN_TICK_SPACING: Final[int] = 1
 
+# ---------------------------------------------------------------------------
+# Hook flag bits (V4 ``Hooks.sol`` table)
+# ---------------------------------------------------------------------------
+#
+# These are the canonical V4 hook-flag bit positions, in LSB-first
+# order (bit 0 = LSB). The set matches the order recorded in
+# ``v4-core/src/libraries/Hooks.sol`` at the pinned commit
+# ``e50237c43811bd9b526eff40f26772152a42daba`` so the bit name ↔ value
+# mapping is the source of truth the framework audits against.
+#
+# The constants are the shared immutable protocol values ADR-006
+# §"Decision" places in the protocol/domain layer; the storage /
+# config layers read them from here, and the qualification layer
+# (T043 hook packs) reads them from here. T007 moved the canonical
+# definitions here from ``robinhood_lp.config.models`` so the
+# qualification hook-pack module can import them without depending on
+# the config layer (the docstring contract of that module).
+
+#: Mask covering the V4 low-14 hook-flag bits. The mask is the
+#: ``(1 << 14) - 1`` (``0x3FFF``) sentinel that PoolManager's
+#: ``isValidHookAddress`` rule 3 uses.
+ALL_HOOK_MASK: Final[int] = (1 << 14) - 1
+
+#: Hook flag bits in LSB-first order (bit 0 = LSB). The order matches
+#: the upstream ``Hooks.sol`` table verbatim; renaming or reordering
+#: is a breaking change for the audit chain.
+HOOK_FLAG_BITS: Final[tuple[int, ...]] = (
+    1 << 0,  # AFTER_REMOVE_LIQUIDITY_RETURNS_DELTA_FLAG
+    1 << 1,  # AFTER_ADD_LIQUIDITY_RETURNS_DELTA_FLAG
+    1 << 2,  # AFTER_SWAP_RETURNS_DELTA_FLAG
+    1 << 3,  # BEFORE_SWAP_RETURNS_DELTA_FLAG
+    1 << 4,  # AFTER_DONATE_FLAG
+    1 << 5,  # BEFORE_DONATE_FLAG
+    1 << 6,  # AFTER_SWAP_FLAG
+    1 << 7,  # BEFORE_SWAP_FLAG
+    1 << 8,  # AFTER_REMOVE_LIQUIDITY_FLAG
+    1 << 9,  # BEFORE_REMOVE_LIQUIDITY_FLAG
+    1 << 10,  # AFTER_ADD_LIQUIDITY_FLAG
+    1 << 11,  # BEFORE_ADD_LIQUIDITY_FLAG
+    1 << 12,  # AFTER_INITIALIZE_FLAG
+    1 << 13,  # BEFORE_INITIALIZE_FLAG
+)
+
+#: ``delta_flag -> required action_flag`` (V4 ``isValidHookAddress``
+#: rule 1). A delta flag without its matching action flag is rejected
+#: by PoolManager.
+DELTA_TO_ACTION_FLAG: Final[dict[int, int]] = {
+    1 << 3: 1 << 7,  # BEFORE_SWAP_RETURNS_DELTA -> BEFORE_SWAP
+    1 << 2: 1 << 6,  # AFTER_SWAP_RETURNS_DELTA  -> AFTER_SWAP
+    1 << 1: 1 << 10,  # AFTER_ADD_LIQUIDITY_RETURNS_DELTA -> AFTER_ADD_LIQUIDITY
+    1 << 0: 1 << 8,  # AFTER_REMOVE_LIQUIDITY_RETURNS_DELTA -> AFTER_REMOVE_LIQUIDITY
+}
+
 ADDRESS_BYTES: Final[int] = 20
 POOL_ID_BYTES: Final[int] = 32
 
@@ -290,10 +343,13 @@ class PoolId:
 
 __all__ = [
     "ADDRESS_BYTES",
+    "ALL_HOOK_MASK",
     "Address",
     "ChainId",
     "Currency",
+    "DELTA_TO_ACTION_FLAG",
     "DYNAMIC_FEE_FLAG",
+    "HOOK_FLAG_BITS",
     "MAX_LP_FEE",
     "MAX_TICK_SPACING",
     "MIN_TICK_SPACING",

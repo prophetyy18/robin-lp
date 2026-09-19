@@ -116,6 +116,12 @@ from robinhood_lp.backtest.models import (
     ModelBundle,
 )
 
+# Re-export the strategy-callback contracts from the lower
+# contracts/domain module so existing callers can keep importing
+# ``StrategyDecision`` / ``StrategyDecisionRequest`` from
+# ``robinhood_lp.backtest.engine`` unchanged (T007 deliverable 1).
+from robinhood_lp.protocol.contracts import StrategyDecision, StrategyDecisionRequest
+
 #: Module version. Bumping it is a breaking change for downstream
 #: consumers.
 BACKTEST_ENGINE_VERSION: Final[str] = "t061.backtest_engine.v1"
@@ -164,89 +170,6 @@ class RiskDecision:
             raise BacktestEventError(
                 f"RiskDecision.reason_code: must be non-empty str, got {self.reason_code!r}"
             )
-
-
-# ---------------------------------------------------------------------------
-# Decision callback
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class StrategyDecisionRequest:
-    """The input the engine passes to the strategy callback.
-
-    The engine collects a list of visible data events up to
-    ``decision_time`` and packages them with the decision time. The
-    callback returns a :class:`StrategyDecision` describing the
-    strategy's intent; the engine turns that intent into the audit
-    chain.
-
-    The callback is the *only* place the engine consults the strategy
-    layer. The callback is supplied as a ``callable`` parameter, not
-    imported, so the engine module is decoupled from any specific
-    strategy implementation.
-    """
-
-    pool_key_id: str
-    chain_id: int
-    decision_time: int
-    visible_events: tuple[BacktestEvent, ...]
-    ledger: PositionState
-
-
-@dataclass(frozen=True, slots=True)
-class StrategyDecision:
-    """The strategy callback's response to a :class:`StrategyDecisionRequest`.
-
-    The callback returns one of three kinds:
-
-    - ``NO_TRADE`` — the strategy chose not to trade at this decision
-      time. The engine records a ``DECISION`` audit event with status
-      :attr:`STATUS_DECISION_RECORDED` and ``kind="NO_TRADE"``; no
-      further pipeline stages run.
-    - ``WAIT`` — the strategy wants to wait for a future event. The
-      engine records the decision and stops the pipeline for this
-      event.
-    - ``PROPOSE`` — the strategy wants to act. The engine continues to
-      the risk / latency / fill stages. ``tick_lower`` /
-      ``tick_upper`` / ``liquidity`` / ``capital_q64_64`` are required
-      and validated.
-    """
-
-    kind: str  # NO_TRADE / WAIT / PROPOSE
-    pool_key_id: str
-    chain_id: int
-    decision_time: int
-    tick_lower: int = 0
-    tick_upper: int = 0
-    liquidity: int = 0
-    capital_q64_64: int = 0
-    notes: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if self.kind not in ("NO_TRADE", "WAIT", "PROPOSE"):
-            raise BacktestEventError(
-                f"StrategyDecision.kind: must be one of NO_TRADE/WAIT/PROPOSE, got {self.kind!r}"
-            )
-        if not isinstance(self.pool_key_id, str) or not self.pool_key_id:
-            raise BacktestEventError(
-                f"StrategyDecision.pool_key_id: must be non-empty str, got {self.pool_key_id!r}"
-            )
-        if self.kind == "PROPOSE":
-            if self.tick_lower >= self.tick_upper:
-                raise BacktestEventError(
-                    f"StrategyDecision: PROPOSE requires tick_lower < "
-                    f"tick_upper, got {self.tick_lower} >= {self.tick_upper}"
-                )
-            if self.liquidity <= 0:
-                raise BacktestEventError(
-                    f"StrategyDecision: PROPOSE requires liquidity > 0, got {self.liquidity}"
-                )
-            if self.capital_q64_64 <= 0:
-                raise BacktestEventError(
-                    f"StrategyDecision: PROPOSE requires capital_q64_64 > 0, "
-                    f"got {self.capital_q64_64}"
-                )
 
 
 # ---------------------------------------------------------------------------

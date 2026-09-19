@@ -44,7 +44,16 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
-from robinhood_lp.protocol import Address, ChainId, EventKey, PoolId
+from robinhood_lp.protocol import Address, ChainId
+from robinhood_lp.protocol.records import DonateLogRecord as _ProtocolDonateLogRecord
+from robinhood_lp.protocol.records import InitializeLogRecord as _ProtocolInitializeLogRecord
+from robinhood_lp.protocol.records import (
+    ModifyLiquidityLogRecord as _ProtocolModifyLiquidityLogRecord,
+)
+from robinhood_lp.protocol.records import (
+    ProtocolFeeUpdatedLogRecord as _ProtocolProtocolFeeUpdatedLogRecord,
+)
+from robinhood_lp.protocol.records import SwapLogRecord as _ProtocolSwapLogRecord
 
 # ---------------------------------------------------------------------------
 # Schema / decode versions
@@ -391,37 +400,25 @@ class ReceiptContext:
 
 
 @dataclass(frozen=True, slots=True)
-class InitializeLogRecord:
+class InitializeLogRecord(_ProtocolInitializeLogRecord):
     """The Initialize event emitted by V4 PoolManager.
 
     The raw fields are the topic/data bytes the decoder consumed; the
     typed fields are the decoded PoolKey. A future schema that learns
     additional event fields can extend this without losing data.
+
+    This storage-side class extends the protocol-domain base class
+    :class:`robinhood_lp.protocol.records.InitializeLogRecord` (which
+    carries the fields the reconstruction layer consumes) with the
+    storage-side envelope fields below (raw, acquisition, decode
+    version, etc.). The storage-side class preserves its
+    ``schema_version = CURRENT_SCHEMA_VERSION`` ClassVar so the
+    migration machinery and the canonical byte form continue to work
+    unchanged.
     """
 
     schema_version: ClassVar[int] = CURRENT_SCHEMA_VERSION
 
-    chain_id: ChainId
-    pool_id: PoolId
-    block_number: int
-    block_hash: int
-    transaction_hash: int
-    transaction_index: int
-    log_index: int
-    address: Address  # PoolManager address
-
-    # ---- T035 / ADR-012: block header time + parent hash --------------
-    # Both fields default to ``0`` so legacy v1 / v2 records migrate
-    # forward without losing bytes; the runner enriches every freshly
-    # persisted record from the dedup'd ``block_headers`` manifest
-    # table before the partition writer commits.
-    block_timestamp: int = 0
-    parent_hash: int = 0
-
-    # Re-org / removed flag from ``eth_getLogs``; True for log entries
-    # the chain rolled back. Default False for fresh records.
-    removed: bool = False
-
     decode_version: int = CURRENT_DECODE_VERSION
     ingestion_time: str = field(default_factory=_now_iso)
     source_endpoint: str = ""
@@ -431,51 +428,16 @@ class InitializeLogRecord:
     raw: dict[str, Any] = field(default_factory=dict)
     unknown_fields: dict[str, Any] = field(default_factory=dict)
 
-    def event_key(self) -> EventKey:
-        """Return the T011 identity for this log entry."""
-        return EventKey(
-            chain_id=self.chain_id,
-            block_hash=self.block_hash,
-            tx_hash=self.transaction_hash,
-            log_index=self.log_index,
-        )
-
-    def sort_key(self) -> tuple[int, int, int]:
-        """Deterministic ordering: ``(block_number, transaction_index, log_index)``.
-
-        T030 acceptance: same chain events are deterministically
-        orderable; two forks at the same block number remain distinct
-        via ``block_hash`` (EventKey), not via the sort key.
-        """
-        return (self.block_number, self.transaction_index, self.log_index)
-
 
 @dataclass(frozen=True, slots=True)
-class ModifyLiquidityLogRecord:
-    """The ModifyLiquidity event emitted by V4 PoolManager."""
+class ModifyLiquidityLogRecord(_ProtocolModifyLiquidityLogRecord):
+    """The ModifyLiquidity event emitted by V4 PoolManager.
+
+    See :class:`InitializeLogRecord` for the protocol / storage split.
+    """
 
     schema_version: ClassVar[int] = CURRENT_SCHEMA_VERSION
 
-    chain_id: ChainId
-    pool_id: PoolId
-    block_number: int
-    block_hash: int
-    transaction_hash: int
-    transaction_index: int
-    log_index: int
-    address: Address
-    sender: Address
-    tick_lower: int
-    tick_upper: int
-    liquidity_delta: int
-    salt: int
-
-    # ---- T035 / ADR-012: block header time + parent hash --------------
-    block_timestamp: int = 0
-    parent_hash: int = 0
-
-    removed: bool = False
-
     decode_version: int = CURRENT_DECODE_VERSION
     ingestion_time: str = field(default_factory=_now_iso)
     source_endpoint: str = ""
@@ -485,20 +447,9 @@ class ModifyLiquidityLogRecord:
     raw: dict[str, Any] = field(default_factory=dict)
     unknown_fields: dict[str, Any] = field(default_factory=dict)
 
-    def event_key(self) -> EventKey:
-        return EventKey(
-            chain_id=self.chain_id,
-            block_hash=self.block_hash,
-            tx_hash=self.transaction_hash,
-            log_index=self.log_index,
-        )
-
-    def sort_key(self) -> tuple[int, int, int]:
-        return (self.block_number, self.transaction_index, self.log_index)
-
 
 @dataclass(frozen=True, slots=True)
-class SwapLogRecord:
+class SwapLogRecord(_ProtocolSwapLogRecord):
     """The Swap event emitted by V4 PoolManager.
 
     Note: ``fee`` is the fee recorded by the Swap event itself.
@@ -506,32 +457,12 @@ class SwapLogRecord:
     fee between swaps — that signal is carried separately by the
     inherited ``ProtocolFeeUpdatedLogRecord`` (ADR-010 §"Required
     data boundary") and reconstructed as evidence by T043.
+
+    See :class:`InitializeLogRecord` for the protocol / storage split.
     """
 
     schema_version: ClassVar[int] = CURRENT_SCHEMA_VERSION
 
-    chain_id: ChainId
-    pool_id: PoolId
-    block_number: int
-    block_hash: int
-    transaction_hash: int
-    transaction_index: int
-    log_index: int
-    address: Address
-    sender: Address
-    amount0: int  # signed delta of currency0 balance of the pool
-    amount1: int  # signed delta of currency1 balance of the pool
-    sqrt_price_x96: int
-    liquidity: int
-    tick: int
-    fee: int  # the on-chain recorded effective fee, in hundredths of a bip
-
-    # ---- T035 / ADR-012: block header time + parent hash --------------
-    block_timestamp: int = 0
-    parent_hash: int = 0
-
-    removed: bool = False
-
     decode_version: int = CURRENT_DECODE_VERSION
     ingestion_time: str = field(default_factory=_now_iso)
     source_endpoint: str = ""
@@ -541,42 +472,16 @@ class SwapLogRecord:
     raw: dict[str, Any] = field(default_factory=dict)
     unknown_fields: dict[str, Any] = field(default_factory=dict)
 
-    def event_key(self) -> EventKey:
-        return EventKey(
-            chain_id=self.chain_id,
-            block_hash=self.block_hash,
-            tx_hash=self.transaction_hash,
-            log_index=self.log_index,
-        )
-
-    def sort_key(self) -> tuple[int, int, int]:
-        return (self.block_number, self.transaction_index, self.log_index)
-
 
 @dataclass(frozen=True, slots=True)
-class DonateLogRecord:
-    """The Donate event emitted by V4 PoolManager."""
+class DonateLogRecord(_ProtocolDonateLogRecord):
+    """The Donate event emitted by V4 PoolManager.
+
+    See :class:`InitializeLogRecord` for the protocol / storage split.
+    """
 
     schema_version: ClassVar[int] = CURRENT_SCHEMA_VERSION
 
-    chain_id: ChainId
-    pool_id: PoolId
-    block_number: int
-    block_hash: int
-    transaction_hash: int
-    transaction_index: int
-    log_index: int
-    address: Address
-    sender: Address
-    amount0: int
-    amount1: int
-
-    # ---- T035 / ADR-012: block header time + parent hash --------------
-    block_timestamp: int = 0
-    parent_hash: int = 0
-
-    removed: bool = False
-
     decode_version: int = CURRENT_DECODE_VERSION
     ingestion_time: str = field(default_factory=_now_iso)
     source_endpoint: str = ""
@@ -586,20 +491,9 @@ class DonateLogRecord:
     raw: dict[str, Any] = field(default_factory=dict)
     unknown_fields: dict[str, Any] = field(default_factory=dict)
 
-    def event_key(self) -> EventKey:
-        return EventKey(
-            chain_id=self.chain_id,
-            block_hash=self.block_hash,
-            tx_hash=self.transaction_hash,
-            log_index=self.log_index,
-        )
-
-    def sort_key(self) -> tuple[int, int, int]:
-        return (self.block_number, self.transaction_index, self.log_index)
-
 
 @dataclass(frozen=True, slots=True)
-class ProtocolFeeUpdatedLogRecord:
+class ProtocolFeeUpdatedLogRecord(_ProtocolProtocolFeeUpdatedLogRecord):
     """The ``ProtocolFeeUpdated`` event inherited by V4 PoolManager.
 
     Declared in ``v4-core/src/interfaces/IProtocolFees.sol`` at the
@@ -615,25 +509,11 @@ class ProtocolFeeUpdatedLogRecord:
 
     ADR-010 requires this event because the fee in ``Swap`` is the
     *combined* swap fee, not automatically the LP-owned share.
+
+    See :class:`InitializeLogRecord` for the protocol / storage split.
     """
 
     schema_version: ClassVar[int] = CURRENT_SCHEMA_VERSION
-
-    chain_id: ChainId
-    pool_id: PoolId
-    block_number: int
-    block_hash: int
-    transaction_hash: int
-    transaction_index: int
-    log_index: int
-    address: Address
-    protocol_fee: int  # uint24 — packed [token0Fee:12 | token1Fee:12]
-
-    # ---- T035 / ADR-012: block header time + parent hash --------------
-    block_timestamp: int = 0
-    parent_hash: int = 0
-
-    removed: bool = False
 
     decode_version: int = CURRENT_DECODE_VERSION
     ingestion_time: str = field(default_factory=_now_iso)
@@ -646,17 +526,6 @@ class ProtocolFeeUpdatedLogRecord:
 
     def __post_init__(self) -> None:
         _require_uint(self.protocol_fee, bits=24, field="ProtocolFeeUpdatedLogRecord.protocol_fee")
-
-    def event_key(self) -> EventKey:
-        return EventKey(
-            chain_id=self.chain_id,
-            block_hash=self.block_hash,
-            tx_hash=self.transaction_hash,
-            log_index=self.log_index,
-        )
-
-    def sort_key(self) -> tuple[int, int, int]:
-        return (self.block_number, self.transaction_index, self.log_index)
 
 
 # ---------------------------------------------------------------------------

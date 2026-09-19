@@ -238,21 +238,23 @@ A0011 三条未决项的处置（记录在 `todo/amendments/A0011/prophet-001.js
 
 | # | 位置 | 事实 | ADR-006 的规定 | 处置 |
 | --- | --- | --- | --- | --- |
-| 1 | `src/robinhood_lp/strategy/baselines.py:102,106` | `strategy` 包 import `robinhood_lp.backtest.engine`（`StrategyDecision`、`StrategyDecisionRequest`）与 `robinhood_lp.backtest.events`（`KIND_OBSERVATION`、`KIND_SWAP`、`SOURCE_PRIORITY_DATA`、`BacktestEvent`） | :32 要求 strategy 只依赖不可变的 domain/feature 合同；:41-42 要求真正共享的类型下沉到更低的 contracts/domain 模块 | 共享合同下沉到更低的 contracts/domain 模块，两层都从那里 import，而不是放宽规则 |
-| 2 | `src/robinhood_lp/replay/replayer.py:83`、`src/robinhood_lp/replay/ticks.py:87` | reconstruction 的两个模块 import `robinhood_lp.storage.schema` 的记录类型（`InitializeLogRecord`、`ModifyLiquidityLogRecord`、`SwapLogRecord`、`DonateLogRecord`、`ProtocolFeeUpdatedLogRecord`） | :31 要求 reconstruction 与 features 消费注入的读端口，而不是具体的 storage/RPC 模块 | 记录合同移到不含 I/O、非 adapter 的模块，重建按注入的输入消费 |
-| 3 | `src/robinhood_lp/qualification/hook_pack.py`（docstring 自 :27 起；执行在正文 :68） | docstring 写 "It must not import RPC, storage, the config layer, signer code, or any network time"，正文却 import `robinhood_lp.config.models` 的 `ALL_HOOK_MASK`、`DELTA_TO_ACTION_FLAG`、`DYNAMIC_FEE_FLAG`、`HOOK_FLAG_BITS` | :28-29 把共享不可变值归给 protocol/domain；`robinhood_lp.config` 在十层枚举内没有归属（§5 第 2 条） | 判为导入错、docstring 真：flag 位常量改从 protocol 层取 |
+| 1 | `src/robinhood_lp/strategy/baselines.py`（基线版本 :102, :106） | `strategy` 包 import `robinhood_lp.backtest.engine`（`StrategyDecision`、`StrategyDecisionRequest`）与 `robinhood_lp.backtest.events`（`KIND_OBSERVATION`、`KIND_SWAP`、`SOURCE_PRIORITY_DATA`、`BacktestEvent`） | :32 要求 strategy 只依赖不可变的 domain/feature 合同；:41-42 要求真正共享的类型下沉到更低的 contracts/domain 模块 | **T007 已修复**：共享合同下沉到 `robinhood_lp.protocol.contracts`，两层都从那里 import，回归测试 `tests/test_layer_direction_t007.py` 守住这条边 |
+| 2 | `src/robinhood_lp/replay/replayer.py`（基线版本 :83）、`src/robinhood_lp/replay/ticks.py`（基线版本 :87） | reconstruction 的两个模块 import `robinhood_lp.storage.schema` 的记录类型（`InitializeLogRecord`、`ModifyLiquidityLogRecord`、`SwapLogRecord`、`DonateLogRecord`、`ProtocolFeeUpdatedLogRecord`） | :31 要求 reconstruction 与 features 消费注入的读端口，而不是具体的 storage/RPC 模块 | **T007 已修复**：记录合同下沉到 `robinhood_lp.protocol.records`（无 I/O、非 adapter），`storage.schema` 的存储侧类继承协议侧基类，回归测试 `tests/test_layer_direction_t007.py` 守住这条边 |
+| 3 | `src/robinhood_lp/qualification/hook_pack.py`（docstring 自 :27 起；执行在正文 :68） | docstring 写 "It must not import RPC, storage, the config layer, signer code, or any network time"，正文却 import `robinhood_lp.config.models` 的 `ALL_HOOK_MASK`、`DELTA_TO_ACTION_FLAG`、`DYNAMIC_FEE_FLAG`、`HOOK_FLAG_BITS` | :28-29 把共享不可变值归给 protocol/domain；`robinhood_lp.config` 在十层枚举内没有归属（§5 第 2 条） | **T007 已修复**：flag 位常量下沉到 `robinhood_lp.protocol.ids`（与 `MAX_LP_FEE`、`DYNAMIC_FEE_FLAG` 同处协议域），`hook_pack.py` 不再 import `robinhood_lp.config`；§5 第 2 条登记的 `robinhood_lp.config` 在十层枚举外的延期保留不动 |
 
 当前计数的复现命令（仓库根执行，只读）：
 
 ```bash
 git log --oneline -1    # 计数所依据的提交：43ef12a
-# 1) strategy -> backtest：2 条（102 / 106）
+# 1) strategy -> backtest：2 条（102 / 106）—— T007 修复后应为 0
 grep -rn "^from robinhood_lp.backtest\|^import robinhood_lp.backtest" src/robinhood_lp/strategy/
-# 2) replay -> storage/rpc：2 条（83 / 87）；features 的同类边：0 条
+# 2) replay -> storage/rpc：2 条（83 / 87）；features 的同类边：0 条 —— T007 修复后应为 0
 grep -rn "^from robinhood_lp.storage\|^from robinhood_lp.rpc" src/robinhood_lp/replay/
 grep -rn "^from robinhood_lp.storage\|^from robinhood_lp.rpc" src/robinhood_lp/features/
-# 3) 非 config 包 -> config：1 条（68）
+# 3) 非 config 包 -> config：1 条（68）—— T007 修复后应为 0
 grep -rn "^from robinhood_lp.config\|^import robinhood_lp.config" src/robinhood_lp/ | grep -v "^src/robinhood_lp/config/"
+# T007 引入的回归测试，在以上三组重新出现任一边时立刻失败：
+PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_layer_direction_t007.py
 ```
 
 ### 8.2 五个不在 ADR-006 十层枚举内的包（Manager 2026-09-19 扫描）

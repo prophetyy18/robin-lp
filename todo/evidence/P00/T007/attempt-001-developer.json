@@ -1,0 +1,54 @@
+{
+  "task_id": "T007",
+  "outcome": "CANDIDATE_READY",
+  "summary": "T007 repairs the three ADR-006 import edges instead of excepting them. The shared strategy-callback contracts (StrategyDecision, StrategyDecisionRequest) and the input-event primitives (BacktestEvent, kind/source-priority constants) move from robinhood_lp.backtest.{engine,events} to the new robinhood_lp.protocol.contracts module; strategy/baselines.py and the engine / events modules now import from there. The V4 log-record dataclasses (Initialize/ModifyLiquidity/Swap/Donate/ProtocolFeeUpdated LogRecord) move to the new robinhood_lp.protocol.records module; replay/replayer.py and replay/ticks.py now import from there, and storage/schema.py subclasses extend the protocol base classes so the storage adapter still produces the same records for the same raw input. The hook-flag bit constants (ALL_HOOK_MASK, DELTA_TO_ACTION_FLAG, DYNAMIC_FEE_FLAG, HOOK_FLAG_BITS) move to robinhood_lp.protocol.ids; hook_pack.py now imports them from the protocol layer instead of config.models. The hook_pack -> config.models suppression entry in docs/implement/ci/suppressions.toml is deleted; the other Owner-deferred entries for the unclassified packages are left untouched. The new regression test tests/test_layer_direction_t007.py parses every src/robinhood_lp/**/*.py file with stdlib ast and fails if any of the three edges is reintroduced; a probe run that temporarily reintroduced the strategy->backtest import produced the expected failure. The stale citation in docs/implement/DOCUMENTATION_INTEGRITY_AUDIT.md §8.1 is updated to mark the three sites repaired (T007) and the reproduction snippet is extended with the new regression test command. All five required test suites pass (tests/test_layer_direction_t007.py, tests/test_replay_t040.py, tests/test_tick_liquidity_t041.py, tests/test_hook_pack_t043.py, tests/test_strategy_t062.py — 206 / 206). pytest, ruff check, ruff format --check, and strict mypy on every changed src/test file all pass with no issues. The deterministic import-graph check (python -m tools.check_imports check) returns no findings. Recorded outputs of the engine, replay and hook pack are preserved: the storage-side record classes extend the protocol-side base classes so the field set is identical, the original backtest.{engine,events} modules re-export the canonical types so existing callers see the same frozen dataclass instances, and the hook flag-bit values re-exported from config.models match the protocol-side canonical definitions (verified equality at import time). No product behaviour, public interface semantics, numeric results, reason codes, error classes, modules, imports, or §2.2 rows were changed; no docs/spec/, task contract, tools/workflow/, .claude/, todo/schemas/, or todo/config.yaml (other than the mechanical IN_DEVELOPMENT status and attempt counter for T007 itself) was edited; no third-party dependency was added.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_layer_direction_t007.py tests/test_replay_t040.py tests/test_tick_liquidity_t041.py tests/test_hook_pack_t043.py tests/test_strategy_t062.py --tb=short",
+      "result": "collected 206 items\ntests/test_layer_direction_t007.py .............                         [  6%]\ntests/test_replay_t040.py .............................................  [ 28%]\ntests/test_tick_liquidity_t041.py ......................................  [ 46%]\n............                                                             [ 52%]\ntests/test_hook_pack_t043.py ...........................................  [ 73%]\n......................                                                   [ 83%]\ntests/test_strategy_t062.py .................................            [100%]\n============================= 206 passed in 0.59s =============================="
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_backtest_t061.py tests/test_storage_schema.py tests/test_storage_reader.py --tb=short",
+      "result": "collected 113 items\ntests/test_backtest_t061.py ............................................  [ 38%]\n.....                                                                    [ 43%]\ntests/test_storage_schema.py ...........................................  [ 81%]\n.........                                                                [ 89%]\ntests/test_storage_reader.py ............                                [100%]\n============================= 113 passed in 0.53s =============================="
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.check_imports check --repo-root /home/lpdev/lp-worktrees/dev-t007-attempt-001",
+      "result": "import-graph check passed: no findings"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check",
+      "result": "406 files already formatted"
+    },
+    {
+      "command": "MYPYPATH=/home/lpdev/lp-worktrees/dev-t007-attempt-001/src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src",
+      "result": "Success: no issues found in 100 source files"
+    },
+    {
+      "command": "MYPYPATH=/home/lpdev/lp-worktrees/dev-t007-attempt-001/src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/robinhood_lp/protocol/contracts.py src/robinhood_lp/protocol/records.py src/robinhood_lp/protocol/ids.py src/robinhood_lp/strategy/baselines.py src/robinhood_lp/qualification/hook_pack.py src/robinhood_lp/replay/replayer.py src/robinhood_lp/replay/ticks.py src/robinhood_lp/storage/schema.py src/robinhood_lp/backtest/engine.py src/robinhood_lp/backtest/events.py src/robinhood_lp/config/models.py tests/test_layer_direction_t007.py",
+      "result": "Success: no issues found in 12 source files"
+    },
+    {
+      "command": "grep -rn \"^from robinhood_lp.backtest\\|^import robinhood_lp.backtest\" src/robinhood_lp/strategy/",
+      "result": "(empty — T007 deliverable 1: strategy no longer imports backtest)"
+    },
+    {
+      "command": "grep -rn \"^from robinhood_lp.storage\\|^from robinhood_lp.rpc\" src/robinhood_lp/replay/",
+      "result": "(empty — T007 deliverable 2: replay no longer imports storage or rpc)"
+    },
+    {
+      "command": "grep -rn \"^from robinhood_lp.config\\|^import robinhood_lp.config\" src/robinhood_lp/ | grep -v \"^src/robinhood_lp/config/\"",
+      "result": "(empty — T007 deliverable 3: no non-config package imports config)"
+    },
+    {
+      "command": "PROBE: sed-replace robinhood_lp.protocol.contracts with robinhood_lp.backtest.engine in src/robinhood_lp/strategy/baselines.py, then PYTHONPATH=src pytest tests/test_layer_direction_t007.py -k strategy -x; restore",
+      "result": "FAILED tests/test_layer_direction_t007.py::test_strategy_module_does_not_import_backtest[robinhood_lp.strategy.baselines] — regression fails when an edge is reintroduced, then passes after restore"
+    }
+  ],
+  "residual_risks": [
+    "tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails in this worktree with 'forge test failed: tools/oracle/lib/v4-core/... No such file or directory'. tools/oracle/lib/ does not exist in the worktree and the failure is environmental (missing Foundry lib submodule), pre-existing, and unrelated to T007. The four acceptance suites and the three behaviour-equivalence suites for storage schema / backtest / reader all pass unchanged."
+  ]
+}

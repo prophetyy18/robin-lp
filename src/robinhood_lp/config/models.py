@@ -44,35 +44,20 @@ from robinhood_lp.config.secrets import contains_credential_url
 # ---------------------------------------------------------------------------
 # Protocol constants (pinned — see docs/spec/protocol/PROTOCOL_FACTS.md)
 # ---------------------------------------------------------------------------
-MAX_LP_FEE: Final[int] = 1_000_000
-DYNAMIC_FEE_FLAG: Final[int] = 0x800000
-ALL_HOOK_MASK: Final[int] = (1 << 14) - 1  # 0x3FFF
-
-# Hook flag bits (must match the order in Hooks.sol). Bit 0 = LSB.
-HOOK_FLAG_BITS: Final[tuple[int, ...]] = (
-    1 << 0,  # AFTER_REMOVE_LIQUIDITY_RETURNS_DELTA_FLAG
-    1 << 1,  # AFTER_ADD_LIQUIDITY_RETURNS_DELTA_FLAG
-    1 << 2,  # AFTER_SWAP_RETURNS_DELTA_FLAG
-    1 << 3,  # BEFORE_SWAP_RETURNS_DELTA_FLAG
-    1 << 4,  # AFTER_DONATE_FLAG
-    1 << 5,  # BEFORE_DONATE_FLAG
-    1 << 6,  # AFTER_SWAP_FLAG
-    1 << 7,  # BEFORE_SWAP_FLAG
-    1 << 8,  # AFTER_REMOVE_LIQUIDITY_FLAG
-    1 << 9,  # BEFORE_REMOVE_LIQUIDITY_FLAG
-    1 << 10,  # AFTER_ADD_LIQUIDITY_FLAG
-    1 << 11,  # BEFORE_ADD_LIQUIDITY_FLAG
-    1 << 12,  # AFTER_INITIALIZE_FLAG
-    1 << 13,  # BEFORE_INITIALIZE_FLAG
+# The hook-flag and fee constants are shared immutable protocol values
+# (ADR-006 §"Decision": "shared immutable identities, values, events
+# and intent/result contracts" live in the protocol/domain layer).
+# T007 moved the canonical definitions here from ``config.models`` so
+# the qualification hook-pack module can import them without depending
+# on the config layer. The config layer still re-exports them for
+# back-compat with callers that import them from this module.
+from robinhood_lp.protocol.ids import (
+    ALL_HOOK_MASK,
+    DELTA_TO_ACTION_FLAG,
+    DYNAMIC_FEE_FLAG,
+    HOOK_FLAG_BITS,
+    MAX_LP_FEE,
 )
-
-# delta-flag -> required action-flag (from isValidHookAddress rule 1).
-DELTA_TO_ACTION_FLAG: Final[dict[int, int]] = {
-    1 << 3: 1 << 7,  # BEFORE_SWAP_RETURNS_DELTA -> BEFORE_SWAP
-    1 << 2: 1 << 6,  # AFTER_SWAP_RETURNS_DELTA  -> AFTER_SWAP
-    1 << 1: 1 << 10,  # AFTER_ADD_LIQUIDITY_RETURNS_DELTA -> AFTER_ADD_LIQUIDITY
-    1 << 0: 1 << 8,  # AFTER_REMOVE_LIQUIDITY_RETURNS_DELTA -> AFTER_REMOVE_LIQUIDITY
-}
 
 #: EIP-55 / EIP-1191 not enforced here; addresses are validated as 20-byte
 #: lowercase-or-uppercase hex strings. The chain itself is the source of

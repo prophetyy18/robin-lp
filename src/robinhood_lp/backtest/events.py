@@ -42,11 +42,13 @@ Design constraints (binding):
   ``set`` iteration order, ``dict`` ordering and any wall-clock read are
   forbidden inside this module.
 
-- **Layer purity.** The module depends only on the standard library; it
-  imports no sibling ``robinhood_lp`` package (the engine module wires
-  strategy / risk / execution together, but the events themselves are
-  protocol-level value objects). The dependency tests walk the live
-  module graph and reject any sibling import.
+- **Layer purity.** The module depends only on the standard library and
+  on the protocol-domain contracts module
+  (:mod:`robinhood_lp.protocol.contracts`) which carries the input-event
+  shape both the engine and the strategy layer genuinely share. The
+  engine module wires strategy / risk / execution together, but the
+  events themselves are protocol-level value objects. The dependency
+  tests walk the live module graph and reject any sibling import.
 
 References:
 
@@ -63,41 +65,31 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Final
 
-# ---------------------------------------------------------------------------
-# Source priority constants
-# ---------------------------------------------------------------------------
-#
-# Lower value = processed first. The ordering reflects the natural flow of
-# information through the engine: market data arrives first, the strategy
-# reacts to it, the central risk layer approves or rejects, the execution
-# layer fills, and the system records its bookkeeping last.
-#
-# ``source_priority`` is the third component of the sort key
-# ``(timestamp, sequence, source_priority)``; the constants below are the
-# closed vocabulary a contributor may assign when constructing an input
-# event. New sources are additive; renaming or removing an existing
-# constant is a breaking change.
-
-SOURCE_PRIORITY_DATA: Final[int] = 1
-SOURCE_PRIORITY_STRATEGY: Final[int] = 2
-SOURCE_PRIORITY_RISK: Final[int] = 3
-SOURCE_PRIORITY_EXECUTION: Final[int] = 4
-SOURCE_PRIORITY_SYSTEM: Final[int] = 5
-
-#: Closed set of source-priority sentinels. An input event whose
-#: ``source_priority`` is outside this set is rejected at construction
-#: time.
-_VALID_SOURCE_PRIORITIES: Final[frozenset[int]] = frozenset(
-    {
-        SOURCE_PRIORITY_DATA,
-        SOURCE_PRIORITY_STRATEGY,
-        SOURCE_PRIORITY_RISK,
-        SOURCE_PRIORITY_EXECUTION,
-        SOURCE_PRIORITY_SYSTEM,
-    }
+# Re-export the input-event primitives and the closed vocabularies the
+# engine consumes from the lower contracts/domain module. The canonical
+# definitions live in :mod:`robinhood_lp.protocol.contracts` so the
+# strategy layer can import them without depending on this module
+# (ADR-006 §"Decision": sibling implementations do not import one
+# another; a genuinely shared type moves into a lower contracts/domain
+# module).
+from robinhood_lp.protocol.contracts import (
+    BACKTEST_EVENT_VERSION,
+    KIND_BURN,
+    KIND_MINT,
+    KIND_OBSERVATION,
+    KIND_SHUTDOWN,
+    KIND_SWAP,
+    KIND_TICK,
+    SOURCE_PRIORITY_DATA,
+    SOURCE_PRIORITY_EXECUTION,
+    SOURCE_PRIORITY_RISK,
+    SOURCE_PRIORITY_STRATEGY,
+    SOURCE_PRIORITY_SYSTEM,
+    BacktestEvent,
+    BacktestEventError,
 )
 
 # ---------------------------------------------------------------------------
@@ -136,9 +128,9 @@ STATUS_SYSTEM_SHUTDOWN: Final[str] = "SYSTEM_SHUTDOWN"
 STATUS_FUTURE_DATA_VIOLATION: Final[str] = "FUTURE_DATA_VIOLATION"
 
 #: Module denylist for the layer-purity check. The backtest events
-#: module depends only on the standard library; importing any other
-#: ``robinhood_lp`` subpackage here is a contract break that must be
-#: reviewed.
+#: module depends only on the standard library and on the protocol-domain
+#: contracts module; importing any other ``robinhood_lp`` subpackage
+#: here is a contract break that must be reviewed.
 _FORBIDDEN_BACKTEST_EVENTS_ROBINHOOD_MODULES: Final[tuple[str, ...]] = (
     "robinhood_lp.backtest.engine",
     "robinhood_lp.backtest.models",
@@ -162,10 +154,10 @@ _FORBIDDEN_BACKTEST_EVENTS_ROBINHOOD_MODULES: Final[tuple[str, ...]] = (
 # ---------------------------------------------------------------------------
 # Error hierarchy
 # ---------------------------------------------------------------------------
-
-
-class BacktestEventError(ValueError):
-    """Base class for backtest event-construction failures."""
+#
+# ``BacktestEventError`` is re-exported from the lower contracts/domain
+# module :mod:`robinhood_lp.protocol.contracts` above; the audit-event
+# / ledger specific subclasses are declared here.
 
 
 class InvalidSourcePriorityError(BacktestEventError):
@@ -263,33 +255,6 @@ def _normalise_payload(
 # ---------------------------------------------------------------------------
 
 
-def _canonical_event_content(
-    *,
-    version: str,
-    timestamp: int,
-    sequence: int,
-    source_priority: int,
-    kind: str,
-    pool_key_id: str,
-    chain_id: int,
-    observed_at: int,
-    available_at: int,
-    payload: tuple[tuple[str, int | str | bool], ...],
-) -> str:
-    """Return the canonical string the event-id hash binds to.
-
-    The format is a single ``|``-separated line of every field, with the
-    payload sorted by key. The format is part of the contract: changing
-    it invalidates every previously recorded event id. Bumping the
-    ``version`` is the supported way to evolve the format.
-    """
-    payload_str = ";".join(f"{k}={v}" for k, v in payload)
-    return (
-        f"{version}|{timestamp}|{sequence}|{source_priority}|{kind}|"
-        f"{pool_key_id}|{chain_id}|{observed_at}|{available_at}|{payload_str}"
-    )
-
-
 def _canonical_audit_content(
     *,
     version: str,
@@ -319,156 +284,6 @@ def _canonical_audit_content(
 def _hash_hex(content: str) -> str:
     """Return the canonical SHA-256 hex digest with the ``0x`` prefix."""
     return "0x" + hashlib.sha256(content.encode("utf-8")).hexdigest()
-
-
-# ---------------------------------------------------------------------------
-# BacktestEvent (input event the engine sorts and processes)
-# ---------------------------------------------------------------------------
-
-
-#: Version string carried by every input event. Bumping it is a breaking
-#: change for downstream consumers.
-BACKTEST_EVENT_VERSION: Final[str] = "t061.backtest_event.v1"
-
-#: Closed vocabulary of ``kind`` values. The set is small on purpose:
-#: the engine recognises the four canonical on-chain event kinds plus
-#: the ``TICK`` and ``SHUTDOWN`` sentinels. New kinds are additive;
-#: renaming or removing an existing kind is a breaking change.
-#:
-#: - ``SWAP`` / ``MINT`` / ``BURN`` are *reactive* events: the engine
-#:   hands them to the strategy callback to produce a decision.
-#: - ``OBSERVATION`` is a non-reactive data-source event: it carries
-#:   price information the fill stage may use, but it does not
-#:   trigger a strategy decision on its own.
-#: - ``TICK`` is a non-reactive event with no payload; it advances
-#:   the engine clock and is recorded as bookkeeping but carries no
-#:   price information.
-#: - ``SHUTDOWN`` is the cooperative shutdown sentinel.
-KIND_SWAP: Final[str] = "SWAP"
-KIND_MINT: Final[str] = "MINT"
-KIND_BURN: Final[str] = "BURN"
-KIND_TICK: Final[str] = "TICK"
-KIND_OBSERVATION: Final[str] = "OBSERVATION"
-KIND_SHUTDOWN: Final[str] = "SHUTDOWN"
-
-_VALID_KINDS: Final[frozenset[str]] = frozenset(
-    {KIND_SWAP, KIND_MINT, KIND_BURN, KIND_TICK, KIND_OBSERVATION, KIND_SHUTDOWN}
-)
-
-
-@dataclass(frozen=True, slots=True)
-class BacktestEvent:
-    """An immutable input event the engine processes in deterministic order.
-
-    The engine sorts a manifest of :class:`BacktestEvent` records by the
-    tuple ``(timestamp, sequence, source_priority)``. The ``sequence``
-    field is assigned by the engine at construction time from a fresh
-    per-source counter (the engine inspects ``source_priority`` to pick
-    the right counter) so two equivalent manifests always produce the
-    same ordering even when their input lists are in different orders.
-
-    The ``event_id`` is the SHA-256 hex digest of the canonical
-    serialisation of every field, prefixed by ``0x``. Same content
-    always produces the same event id in any process.
-
-    Two timing fields bind the information frontier:
-
-    - ``observed_at`` is the moment the *source* (e.g. an RPC node, an
-      indexer) first saw the event. The strategy can never see the
-      event earlier than ``observed_at``; an attempt to do so is a
-      contract break.
-    - ``available_at`` is the moment the event becomes *visible* to the
-      strategy / engine. ``available_at >= observed_at`` is enforced.
-
-    A :class:`BacktestEvent` with ``kind == KIND_SHUTDOWN`` is a
-    cooperative shutdown request: the engine stops processing events at
-    or after this event and emits a :class:`AuditEvent` with
-    :attr:`STATUS_SYSTEM_SHUTDOWN`. The engine never silently stops.
-    """
-
-    version: str
-    timestamp: int
-    sequence: int
-    source_priority: int
-    kind: str
-    pool_key_id: str
-    chain_id: int
-    observed_at: int
-    available_at: int
-    payload: tuple[tuple[str, int | str | bool], ...] = field(default_factory=tuple)
-    event_id: str = ""
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.version, str) or not self.version:
-            raise BacktestEventError(
-                f"BacktestEvent.version: must be non-empty str, got {self.version!r}"
-            )
-        _require_non_negative_int(self.timestamp, field="BacktestEvent.timestamp")
-        _require_non_negative_int(self.sequence, field="BacktestEvent.sequence")
-        if self.source_priority not in _VALID_SOURCE_PRIORITIES:
-            raise InvalidSourcePriorityError(
-                f"BacktestEvent.source_priority: must be one of "
-                f"{sorted(_VALID_SOURCE_PRIORITIES)}, got {self.source_priority}"
-            )
-        if self.kind not in _VALID_KINDS:
-            raise BacktestEventError(
-                f"BacktestEvent.kind: must be one of {sorted(_VALID_KINDS)}, got {self.kind!r}"
-            )
-        if not isinstance(self.pool_key_id, str) or not self.pool_key_id:
-            raise BacktestEventError(
-                f"BacktestEvent.pool_key_id: must be non-empty str, got {self.pool_key_id!r}"
-            )
-        _require_positive_int(self.chain_id, field="BacktestEvent.chain_id")
-        _require_non_negative_int(self.observed_at, field="BacktestEvent.observed_at")
-        _require_non_negative_int(self.available_at, field="BacktestEvent.available_at")
-        if self.available_at < self.observed_at:
-            raise BacktestEventError(
-                f"BacktestEvent.available_at={self.available_at} must be >= "
-                f"observed_at={self.observed_at}"
-            )
-        # Normalise the payload once at construction time so two equivalent
-        # payloads hash to the same id regardless of insertion order.
-        normalised = _normalise_payload(self.payload)
-        object.__setattr__(self, "payload", normalised)
-        if not isinstance(self.event_id, str) or not self.event_id:
-            object.__setattr__(
-                self,
-                "event_id",
-                _hash_hex(
-                    _canonical_event_content(
-                        version=self.version,
-                        timestamp=self.timestamp,
-                        sequence=self.sequence,
-                        source_priority=self.source_priority,
-                        kind=self.kind,
-                        pool_key_id=self.pool_key_id,
-                        chain_id=self.chain_id,
-                        observed_at=self.observed_at,
-                        available_at=self.available_at,
-                        payload=normalised,
-                    )
-                ),
-            )
-
-    def is_visible(self, decision_time: int) -> bool:
-        """Return ``True`` iff this event is visible at ``decision_time``.
-
-        An event is visible when both ``observed_at`` and ``available_at``
-        are at or before ``decision_time``. The engine uses this predicate
-        to enforce the information frontier; it never uses wall-clock time
-        and never reads an event whose ``available_at`` exceeds
-        ``decision_time``.
-        """
-        _require_non_negative_int(decision_time, field="decision_time")
-        return self.observed_at <= decision_time and self.available_at <= decision_time
-
-    def is_data_event(self) -> bool:
-        """``True`` iff this event is a market-data input (``source_priority == DATA``)."""
-        return self.source_priority == SOURCE_PRIORITY_DATA
-
-    def is_shutdown_marker(self) -> bool:
-        """``True`` iff this event is a cooperative shutdown request."""
-        return self.kind == KIND_SHUTDOWN
 
 
 # ---------------------------------------------------------------------------
@@ -802,8 +617,11 @@ class AuditEvent:
 
 
 def _is_backtest_events_module(name: str) -> bool:
-    return name == "robinhood_lp.backtest.events" or name.startswith(
-        "robinhood_lp.backtest.events."
+    return (
+        name == "robinhood_lp.backtest.events"
+        or name.startswith("robinhood_lp.backtest.events.")
+        or name == "robinhood_lp.protocol.contracts"
+        or name.startswith("robinhood_lp.protocol.contracts.")
     )
 
 
@@ -813,7 +631,8 @@ def assert_backtest_events_layer_is_pure() -> None:
     The denylist is the closed set recorded in
     :data:`_FORBIDDEN_BACKTEST_EVENTS_ROBINHOOD_MODULES`. The check is
     conservative on purpose; the backtest events module is supposed to
-    be a stdlib-only layer, so any ``robinhood_lp`` sibling import is a
+    be a stdlib + protocol-contracts-only layer, so any ``robinhood_lp``
+    sibling import other than the protocol-domain contracts module is a
     contract break that must be reviewed.
     """
     import importlib

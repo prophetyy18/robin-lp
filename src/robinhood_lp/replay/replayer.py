@@ -61,6 +61,13 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, TypeGuard
 
+from robinhood_lp.protocol.records import (
+    DonateLogRecord,
+    InitializeLogRecord,
+    ModifyLiquidityLogRecord,
+    ProtocolFeeUpdatedLogRecord,
+    SwapLogRecord,
+)
 from robinhood_lp.replay.checkpoint import (
     EVENT_TYPE_DONATE,
     EVENT_TYPE_INITIALIZE,
@@ -80,13 +87,6 @@ from robinhood_lp.replay.errors import (
 from robinhood_lp.replay.input import ReplayInput
 from robinhood_lp.replay.output import ReplayOutput
 from robinhood_lp.replay.protocol_fee import unpack_protocol_fee
-from robinhood_lp.storage.schema import (
-    DonateLogRecord,
-    InitializeLogRecord,
-    ModifyLiquidityLogRecord,
-    ProtocolFeeUpdatedLogRecord,
-    SwapLogRecord,
-)
 
 # ---------------------------------------------------------------------------
 # Internal state

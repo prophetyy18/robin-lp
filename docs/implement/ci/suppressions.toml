@@ -64,21 +64,3 @@ owner = "@T083-owner"
 expiry = "2027-06-30"
 location = "todo/phases/P08-operations-and-web/T084.md"
 token = "robinhood_lp.ops.dossier"
-
-# T006 introduces the deterministic import-graph checker. The
-# ``robinhood_lp.config`` package is today's declared case: ADR-006's
-# ten layers contain no platform layer, and its own migration trigger
-# reserves one for a future ADR. The checker treats every cross-
-# package edge whose target is ``robinhood_lp.config`` as a finding;
-# the documented exception below cites the migration trigger clause
-# and carries an expiry that forces the owner to revisit the case
-# before the platform layer is added. The entry matches the single
-# edge that ``src/robinhood_lp/qualification/hook_pack.py`` carries
-# today (T043 hook pack evidence).
-[[suppression]]
-rule = "layer-direction"
-reason = "ADR-006 §Migration trigger reserves a platform layer for a future ADR; the robinhood_lp.config package sits outside the ten-layer ordering until then."
-owner = "@T006-owner"
-expiry = "2027-06-30"
-location = "src/robinhood_lp/qualification/hook_pack.py"
-token = "robinhood_lp.qualification.hook_pack -> robinhood_lp.config.models"

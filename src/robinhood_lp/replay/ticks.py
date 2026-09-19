@@ -83,8 +83,12 @@ from robinhood_lp.protocol import (
 
 # The protocol layer exposes ``ChainId`` / ``PoolId`` value objects; we
 # accept the raw integers directly so the reconstruction is independent
-# of the dataclass imports the test fixtures happen to use.
-from robinhood_lp.storage.schema import (
+# of the dataclass imports the test fixtures happen to use. Per T007
+# the log-record contracts live in the protocol-domain layer (no I/O,
+# no storage / RPC implementation) so the reconstruction modules can
+# consume records through the input they are given rather than by
+# reaching into the storage adapter.
+from robinhood_lp.protocol.records import (
     DonateLogRecord,
     InitializeLogRecord,
     ModifyLiquidityLogRecord,

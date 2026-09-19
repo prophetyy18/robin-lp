@@ -65,17 +65,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Final
 
-from robinhood_lp.config.models import (
-    ALL_HOOK_MASK,
-    DELTA_TO_ACTION_FLAG,
-    DYNAMIC_FEE_FLAG,
-    HOOK_FLAG_BITS,
-)
 from robinhood_lp.discovery.eligibility import (
     EligibilityDecision,
     EligibilityReasonCode,
 )
 from robinhood_lp.protocol import Address, PoolKey, RunMode
+from robinhood_lp.protocol.ids import (
+    ALL_HOOK_MASK,
+    DELTA_TO_ACTION_FLAG,
+    DYNAMIC_FEE_FLAG,
+    HOOK_FLAG_BITS,
+)
 
 # ---------------------------------------------------------------------------
 # Spec revision pin (T043 contract)
