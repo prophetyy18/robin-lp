@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0008",
+  "task_ids": [],
+  "layer": "PROPHET",
+  "target_status": null,
+  "summary": "fix confirmed documentation errors and create the documentation-integrity check tasks",
+  "owner_direction": "Owner direction 2026-09-19 (stop-the-bleeding + build-the-mechanism). Scope: (1) fix the wrong module paths in docs/spec/architecture/ARCHITECTURE.md section 2.2 for already-implemented tasks (T013, T025, T031, T032, T034, T040, T042, T043, T062) and add the missing layer assignments (the qualification package and T014, T015, T035, T036, T037, T038, T049); (2) fix AGENTS.md section 2.1, which claims src/, tests/ and .github/ are outside every role and change only by bootstrap, so that it agrees with CLAUDE.md and with the actual workflow; (3) fix the SPEC_BLOCKED state cited in docs/spec/README.md that the controller does not recognise; (4) fix the ADR-008 document-precedence ladder, which omits the task-contract layer; (5) fix the live citation of the superseded T038 in README.md; (6) make the P00 and P01 phase README task lists agree with todo/config.yaml; (7) create the task contract(s) that deliver machine-verified documentation-to-code consistency checks (resolving module paths, symbols, requirement IDs and task IDs against the repository, plus a layer-dependency check), and record this audit's findings under docs/implement/. Do not modify any existing task contract, change no product behaviour, and delete nothing."
+}

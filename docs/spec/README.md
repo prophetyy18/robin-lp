@@ -12,5 +12,8 @@ Specifications translate V1 intent into testable behaviour and constraints.
 - [`architecture/`](architecture/) contains dependency direction and ADRs.
 
 Specifications do not track task progress. A specification defect discovered
-during development produces `SPEC_BLOCKED`; it is resolved by a fresh planner
-before development resumes.
+during development is returned as `TRIAGE_REQUIRED` and classified `SPEC_DEFECT`
+by an independent triager (`todo/schemas/triage-result.schema.json`). That
+classification routes the task to `PLANNING`, where a fresh Planner corrects the
+specification and an independent Plan Reviewer approves the correction before
+development resumes.

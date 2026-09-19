@@ -19,7 +19,9 @@ disagree:
 - **Product and behavioral specifications**: `docs/spec/product/ASSET_ADMISSION.md`,
   `docs/spec/product/WEB_CONSOLE.md`, and `docs/spec/**/*.md` define testable behavior and
   hard gates within their named scope.
-- **Delivery plan**: `todo/README.md` — describes phases and tasks.
+- **Delivery plan and task contract**: `todo/README.md` describes phases and tasks; the
+  contract `todo/phases/**/Txxx.md` binds one task to its outcome, deliverables,
+  acceptance checks and `Must not` clauses.
 - **Architectural decisions**: `docs/spec/architecture/adr/ADR-*.md` and the living
   `docs/spec/architecture/ARCHITECTURE.md` — describe technical choices and layering.
 - **Safety invariant**: `docs/spec/security/THREAT_MODEL.md` — describes the threat
@@ -43,9 +45,14 @@ authority first):
 3. **`todo/README.md`** — phase and task definitions, dependencies,
    acceptance criteria.
 4. **`docs/spec/security/THREAT_MODEL.md`** — threat surface and controls.
-5. **`docs/spec/architecture/ARCHITECTURE.md`** and **`docs/spec/architecture/adr/ADR-*.md`** — technical
+5. **The current task contract** — `todo/phases/**/Txxx.md`, recorded as the
+   `task_file` of that task in `todo/config.yaml`. It binds one task more tightly
+   than its plan or a specification, and it may not relax a `Must not` clause, an
+   acceptance criterion, or a safety, risk, promotion or precision rule that a
+   higher tier sets.
+6. **`docs/spec/architecture/ARCHITECTURE.md`** and **`docs/spec/architecture/adr/ADR-*.md`** — technical
    choices and layering.
-6. **Source code** — must conform to all of the above; source cannot
+7. **Source code** — must conform to all of the above; source cannot
    redefine product scope.
 
 Rules:
@@ -68,14 +75,19 @@ Rules:
 
 Explicit cross-references that this ADR enforces:
 
-- `threat-model.md` §1 *Scope* and T-12 bind to `PROJECT_GOALS.md`
-  G-LIVE-01 and G-SIGNER-01.
+- `docs/spec/security/THREAT_MODEL.md` §1 *Scope* and T-12 bind to
+  `PROJECT_GOALS.md` G-LIVE-01 and G-SIGNER-01.
 - `ADR-005` binds to `PROJECT_GOALS.md` §4 (single chain / single
   target token / single active pool) and to `ASSET_ADMISSION.md`
   §9 (PoolKey + hook rules).
 - `TargetTokenConfig` binds to `ASSET_ADMISSION.md` §4 (dual-track
   approval) and `PROJECT_GOALS.md` G-LIVE-GATE-01
   (`live_eligible`).
+- A task contract binds the task whose `task_file` names it. When that task is
+  retired (`superseded_by` non-null in `todo/config.yaml`) its contract is
+  history, and the task-contract obligation for that work lives in the
+  successor's contract, so a citation of the retired task is not a citation of
+  live work.
 
 ## Consequences
 

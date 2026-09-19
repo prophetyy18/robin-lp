@@ -18,3 +18,6 @@ defaults, no database/framework selected without an ADR, no trading code.
 - [T002 — Add safe typed configuration](T002.md)
 - [T003 — Establish CI and supply-chain gates](T003.md)
 - [T004 — Threat model and live-safety invariant](T004.md)
+- [T005 — Verify document citations against the repository](T005.md)
+- [T006 — Enforce the layer dependency direction in CI](T006.md)
+- [T015 — Make test_repository_workflow_configuration_is_valid scale with the task catalog](T015.md)

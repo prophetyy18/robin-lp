@@ -3,7 +3,7 @@
   "project": "robinhood-lp-v1",
   "product_baseline_commit": "6c3177883a676a06f8b571d0a598f524e319fa34",
   "intent_revision": "v1-2026-09-19-research-universe-numeraire",
-  "spec_revision": "v1-2026-09-19-research-threats-and-strategy-extension",
+  "spec_revision": "v1-2026-09-19-documentation-integrity",
   "agent_runtime": {
     "provider": "MiniMax Anthropic-compatible API",
     "model": "MiniMax-M3[1m]",
@@ -75,6 +75,32 @@
       "base_commit": null,
       "candidate_commit": null,
       "approved_commit": "6c3177883a676a06f8b571d0a598f524e319fa34",
+      "latest_review": null
+    },
+    "T005": {
+      "phase": "P00",
+      "status": "PLANNED",
+      "depends_on": [
+        "T003"
+      ],
+      "task_file": "todo/phases/P00-engineering-baseline/T005.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
+    },
+    "T006": {
+      "phase": "P00",
+      "status": "PLANNED",
+      "depends_on": [
+        "T003"
+      ],
+      "task_file": "todo/phases/P00-engineering-baseline/T006.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
       "latest_review": null
     },
     "T010": {

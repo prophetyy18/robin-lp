@@ -7,7 +7,7 @@ strategies for Robinhood Chain / Uniswap V4.
 
 The research universe may hold any number of V4 pools (ADR-014); execution runs
 one user-selected active `PoolKey` for one target token. The pinned reference
-pool is ZZZ/USDG plus a second Owner-pinned pool resolved on chain by T038.
+pool is ZZZ/USDG plus a second Owner-pinned pool resolved on chain by T039.
 
 The system will eventually support:
 
@@ -58,9 +58,16 @@ retired decision is never edited or deleted. Goals, plan structure and collatera
 documents — `docs/intent/`, `docs/implement/`, the root `README.md`, this file,
 `AGENTS.md` and `todo/README.md` — go through `--layer PROPHET`, which takes no
 `--task` because it may create tasks that do not exist yet, and which may create a
-new task contract but never modify an existing one. `tools/workflow/`, `.claude/`,
-`todo/schemas/` and the dependency manifests are in no route's scope and change
-only by an explicit bootstrap act.
+new task contract but never modify an existing one. `tools/workflow/`, `.claude/`
+and `todo/schemas/` are outside every role and every layer and change only by an
+explicit bootstrap act; the dependency manifests (`pyproject.toml`,
+`requirements.in`, `requirements.lock.txt`) are outside every amendment layer and
+the maintenance lane, and only a Developer whose task contract requires it changes
+them. `src/`, `tests/` and `.github/` are the working surface of an ordinary
+development task: a Developer edits them inside its task contract and the work
+counts only after an independent review, and the maintenance lane may edit only the
+explicit paths its record declares in advance and may not touch `.github/` or
+execution, risk or signer code.
 If a Developer returns `CONTINUATION_REQUIRED`, use the controller's continuation
 gate and invoke the returned fresh Developer in the retained worktree. If the
 visible Agent is stopped specifically by `maxTurns` before writing that handoff,

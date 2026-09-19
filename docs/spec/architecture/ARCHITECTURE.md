@@ -88,34 +88,34 @@ application / backtest orchestration
 
 ### 2.2 Module-to-layer mapping
 
-| Phase | Task | Module (planned) | Layer |
+| Phase | Task | Module / artifact | Layer |
 | --- | --- | --- | --- |
 | 1 | T010 | `robinhood_lp.protocol.ids` | protocol/domain |
 | 1 | T011 | `robinhood_lp.protocol.events` | protocol/domain |
 | 1 | T012 | `robinhood_lp.protocol.math` | protocol/domain |
-| 1 | T013 | `robinhood_lp.protocol.vectors` (oracle harness) | protocol/domain |
+| 1 | T013 | oracle regeneration harness: `tests/test_oracle_drift.py`, `tools/reviewers/allowed_signers` | protocol/domain |
 | 2 | T020 | `robinhood_lp.rpc.adapter` | rpc adapter |
 | 2 | T021 | `robinhood_lp.protocol.abi` (pinned artifacts) | protocol/domain |
-| 2 | T022 | `robinhood_lp.discovery.registry` | storage |
-| 2 | T023 | `robinhood_lp.discovery.eligibility` | storage |
+| 2 | T022 (retired; superseded by T026) | `robinhood_lp.discovery.registry` | storage |
+| 2 | T023 (retired; superseded by T027) | `robinhood_lp.discovery.eligibility` | storage |
 | 2 | T024 | `robinhood_lp.discovery.chain_capability` | rpc adapter |
-| 2 | T025 | `robinhood_lp.admission.lifecycle` | risk |
+| 2 | T025 | `robinhood_lp.discovery.asset_admission` | risk |
 | 3 | T030 | `robinhood_lp.storage.schema` | storage |
-| 3 | T031 | `robinhood_lp.storage.raw` | storage |
-| 3 | T032 | `robinhood_lp.application.ingest` | application / orchestration |
+| 3 | T031 | `robinhood_lp.storage.{partition,manifest,reader,writer,measurement}` | storage |
+| 3 | T032 | `robinhood_lp.ingestion` (runner, planner, router, probe, capability, checkpoint) | application / orchestration |
 | 3 | T033 | `robinhood_lp.storage.reorg` | storage |
-| 3 | T034 | `robinhood_lp.storage.quality` | storage |
-| 4 | T040 | `robinhood_lp.replay.engine` | reconstruction |
+| 3 | T034 | `robinhood_lp.quality` | storage |
+| 4 | T040 | `robinhood_lp.replay.replayer` (`input`, `output`, `checkpoint`, `protocol_fee`) | reconstruction |
 | 4 | T041 | `robinhood_lp.replay.ticks` | reconstruction |
-| 4 | T042 | `robinhood_lp.replay.validate` | reconstruction |
-| 4 | T043 | `robinhood_lp.replay.evidence` (hook semantics) | reconstruction |
+| 4 | T042 | `robinhood_lp.replay.state_comparison` | reconstruction |
+| 4 | T043 | `robinhood_lp.qualification.hook_pack` (hook semantics) | presentation / reports |
 | 5 | T050 | `robinhood_lp.features.bars` | features |
 | 5 | T051 | `robinhood_lp.features.position` | features |
 | 5 | T052 | `robinhood_lp.features.attribution` | features |
 | 5 | T053 | `robinhood_lp.features.quote` | features |
 | 6 | T060 | `robinhood_lp.strategy.base` | strategy |
 | 6 | T061 | `robinhood_lp.backtest.engine` | backtest |
-| 6 | T062 | `robinhood_lp.backtest.baselines` | strategy |
+| 6 | T062 | `robinhood_lp.strategy.baselines` | strategy |
 | 6 | T063 | `robinhood_lp.backtest.manifest` | backtest |
 | 6 | T064 | `robinhood_lp.backtest.robustness` | backtest |
 | 6 | T065 | `robinhood_lp.strategy.usdg_range` | strategy |
@@ -142,6 +142,20 @@ application / backtest orchestration
 | 10 | T102 | `robinhood_lp.research.models` (model-backed strategy components) | strategy |
 | 10 | T103 | `robinhood_lp.web` research pages | presentation / controls |
 | 10 | T104 | `robinhood_lp.replay.fee_surface` | reconstruction |
+| 1 | T014 | `tools/oracle/test/MathOracle.t.sol` (oracle vector harness) | protocol/domain |
+| 0 | T015 | `tests/test_workflow_contracts.py` (repository test; owns no product layer) | none (repository test) |
+| 3 | T035 | `robinhood_lp.ingestion.block_header_source`, `robinhood_lp.ingestion.endpoint_client` | application / orchestration |
+| 3 | T036 | `robinhood_lp.qualification` (baseline check, fidelity, failure paths, pool-id check, reference, report, runbook, state spot check) | presentation / reports |
+| 3 | T037 | `robinhood_lp.storage.reconciliation` | storage |
+| 3 | T038 (retired; superseded by T039) | `robinhood_lp.qualification.{second_pool,two_pool,two_pool_window,two_pool_failure_paths,two_pool_runbook}` | presentation / reports |
+| 5 | T049 | `robinhood_lp.protocol.sizing` | protocol/domain |
+
+A row whose task is `APPROVED` names the module, module set or artifact that task
+delivered, and every path it names exists in this repository. A row whose task is
+not `APPROVED` names the planned path, which may not exist yet. Rows for the
+`robinhood_lp.qualification` package name the qualification surface of the
+`presentation / reports` layer: it reads protocol, discovery, storage and quality
+surfaces and produces reviewable packs and reports without mutating them.
 
 ## 3. Cross-cutting policies
 
@@ -204,7 +218,7 @@ while formal live evidence requires post-testnet paper/shadow.
 - deployment/finality/archive/range behavior is capability-probed per endpoint and
   re-probed for each material ingestion configuration (T024, ADR-010, T032);
 - verified hook source and semantics for the user-selected PoolKey
-  (T023, T043);
+  (T027, T043);
 - storage engine and expected data volume/retention (refined in ADR-002 as
   evidence arrives);
 - qualified USDG quote source and availability-time semantics (T053);

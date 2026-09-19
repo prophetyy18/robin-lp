@@ -46,9 +46,13 @@
 - 目标、计划结构和附属文档由 `PROPHET` 层负责：`prophet` 起草，`prophet-reviewer`
   独立审查。该层可以新建任务合同，但**永不修改已存在的合同**；`todo/config.yaml`
   中已存在的任务必须逐字节不变。它不接受 `--task`，因为新建的任务此刻还不存在。
-- `tools/workflow/`、`.claude/`、`todo/schemas/`、`.github/`、`src/`、`tests/` 和依赖
-  清单不在任何角色或层的范围内，只能由显式 bootstrap 动作变更。一个能改写自己门禁
-  的角色等于没有门禁。
+- `tools/workflow/`、`.claude/`、`todo/schemas/` 不在任何角色或任何层的范围内，只能由
+  显式 bootstrap 动作变更；依赖清单（`pyproject.toml`、`requirements.in`、
+  `requirements.lock.txt`）不在任何修正层或维护通道的范围内，只有任务合同明确要求时才能
+  由该任务的 Developer 修改。`src/`、`tests/` 和 `.github/` 是普通开发任务的工作面：
+  Developer 在任务合同范围内修改，经独立 Reviewer 审查后才算完成；维护通道只能改它在
+  维护记录里预先声明的具体路径，且不得触碰 `.github/` 或 execution、risk、signer 代码。
+  一个能改写自己门禁的角色等于没有门禁。
 - Issue Triager 只读核对异常证据并区分实现缺陷、任务合同偏差、Spec 缺陷、Owner
   决策和外部阻塞；发现者提出的分类不是最终分类。
 - Developer 每次以全新上下文在独立 worktree 中只实现一个 `READY` 任务。不得修改
