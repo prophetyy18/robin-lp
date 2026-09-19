@@ -1,0 +1,284 @@
+{
+  "_meta": {
+    "purpose": "Pinned integer vectors for LP position valuation (T051).",
+    "source": "Computed from the T012 V4 integer math (TickMath, SqrtPriceMath, LiquidityAmounts) and the V4 fee-growth-inside conditional. The V4 source pin is e50237c43811bd9b526eff40f26772152a42daba in tools/oracle/lib/v4-core (see docs/implement/evidence/ORACLE_MANIFEST.md). The Python port reproduces each vector byte-exactly; the fee-growth-inside derivation mirrors V4 Pool.getFeeGrowthInside, the LP-fees-owed derivation mirrors V4 mulDiv (floor), and the protocol-fee split mirrors the Owner amendment of 2026-09-16 (LP fees exclude the protocol share).",
+    "retrieval_time": "2026-09-19",
+    "pinned_commit": "e50237c43811bd9b526eff40f26772152a42daba",
+    "scope": "Covers (a) the V4 fee-growth-inside conditional for below / inside / above Range, (b) the LP-fees-owed floor division (liquidity * delta >> 128), (c) the LP / protocol split floor rounding, and (d) the RangeState classification at the boundaries.",
+    "format": "All integer values are decimal strings; the Python module treats them as Python int (uint256 width or Q128 width as documented per row). The bytes are stable across Python versions."
+  },
+
+  "inside_derivation": [
+    {
+      "name": "below_subtracts_lower_only",
+      "current_tick": -10,
+      "tick_lower": 0,
+      "tick_upper": 100,
+      "fee_growth_global_x128": "1000",
+      "fee_growth_outside_lower_x128": "100",
+      "fee_growth_outside_upper_x128": "200",
+      "expected_inside_x128": "900"
+    },
+    {
+      "name": "above_subtracts_upper_only",
+      "current_tick": 200,
+      "tick_lower": 0,
+      "tick_upper": 100,
+      "fee_growth_global_x128": "1000",
+      "fee_growth_outside_lower_x128": "100",
+      "fee_growth_outside_upper_x128": "200",
+      "expected_inside_x128": "800"
+    },
+    {
+      "name": "inside_subtracts_both",
+      "current_tick": 50,
+      "tick_lower": 0,
+      "tick_upper": 100,
+      "fee_growth_global_x128": "1000",
+      "fee_growth_outside_lower_x128": "100",
+      "fee_growth_outside_upper_x128": "200",
+      "expected_inside_x128": "700"
+    },
+    {
+      "name": "at_lower_boundary_subtracts_both",
+      "current_tick": 0,
+      "tick_lower": 0,
+      "tick_upper": 100,
+      "fee_growth_global_x128": "500",
+      "fee_growth_outside_lower_x128": "50",
+      "fee_growth_outside_upper_x128": "75",
+      "expected_inside_x128": "375"
+    },
+    {
+      "name": "just_below_upper_boundary_subtracts_both",
+      "current_tick": 99,
+      "tick_lower": 0,
+      "tick_upper": 100,
+      "fee_growth_global_x128": "1000",
+      "fee_growth_outside_lower_x128": "100",
+      "fee_growth_outside_upper_x128": "200",
+      "expected_inside_x128": "700"
+    },
+    {
+      "name": "underflow_saturates_at_zero",
+      "current_tick": 50,
+      "tick_lower": 0,
+      "tick_upper": 100,
+      "fee_growth_global_x128": "100",
+      "fee_growth_outside_lower_x128": "200",
+      "fee_growth_outside_upper_x128": "300",
+      "expected_inside_x128": "0"
+    },
+    {
+      "name": "wide_range_inside_default",
+      "current_tick": 0,
+      "tick_lower": -887272,
+      "tick_upper": 887272,
+      "fee_growth_global_x128": "1000000",
+      "fee_growth_outside_lower_x128": "500000",
+      "fee_growth_outside_upper_x128": "500000",
+      "expected_inside_x128": "0"
+    },
+    {
+      "name": "negative_range_below",
+      "current_tick": -200,
+      "tick_lower": -100,
+      "tick_upper": -50,
+      "fee_growth_global_x128": "10000",
+      "fee_growth_outside_lower_x128": "2000",
+      "fee_growth_outside_upper_x128": "3000",
+      "expected_inside_x128": "8000"
+    }
+  ],
+
+  "lp_fees_owed": [
+    {
+      "name": "uint127_liquidity_delta_two",
+      "liquidity": "170141183460469231731687303715884105728",
+      "fee_growth_inside_now_x128": "2",
+      "fee_growth_inside_last_x128": "0",
+      "expected_owed": "1"
+    },
+    {
+      "name": "uint127_liquidity_delta_five",
+      "liquidity": "170141183460469231731687303715884105728",
+      "fee_growth_inside_now_x128": "10",
+      "fee_growth_inside_last_x128": "0",
+      "expected_owed": "5"
+    },
+    {
+      "name": "one_eth_liquidity_partial_q128",
+      "liquidity": "1000000000000000000",
+      "fee_growth_inside_now_x128": "1000000000000000000",
+      "fee_growth_inside_last_x128": "0",
+      "expected_owed": "0"
+    },
+    {
+      "name": "one_eth_liquidity_full_q128_delta",
+      "liquidity": "1000000000000000000",
+      "fee_growth_inside_now_x128": "340282366920938463463374607431768211456",
+      "fee_growth_inside_last_x128": "0",
+      "expected_owed": "1000000000000000000"
+    },
+    {
+      "name": "one_eth_liquidity_q128_plus_1",
+      "liquidity": "1000000000000000000",
+      "fee_growth_inside_now_x128": "340282366920938463463374607431768211457",
+      "fee_growth_inside_last_x128": "0",
+      "expected_owed": "1000000000000000000"
+    },
+    {
+      "name": "zero_delta_zero_owed",
+      "liquidity": "1000000000000000000",
+      "fee_growth_inside_now_x128": "1000",
+      "fee_growth_inside_last_x128": "1000",
+      "expected_owed": "0"
+    },
+    {
+      "name": "negative_delta_saturates_to_zero",
+      "liquidity": "1000000000000000000",
+      "fee_growth_inside_now_x128": "100",
+      "fee_growth_inside_last_x128": "1000",
+      "expected_owed": "0"
+    },
+    {
+      "name": "zero_liquidity_zero_owed",
+      "liquidity": "0",
+      "fee_growth_inside_now_x128": "1000000",
+      "fee_growth_inside_last_x128": "0",
+      "expected_owed": "0"
+    },
+    {
+      "name": "hex_pinned_vector_de0b_liquidity_123456789abcdef_delta",
+      "liquidity": "1000000000000000000",
+      "fee_growth_inside_now_x128": "81985529216486895",
+      "fee_growth_inside_last_x128": "0",
+      "expected_owed": "0"
+    },
+    {
+      "name": "floor_rounding_loses_one_unit",
+      "liquidity": "1000000000000000000",
+      "fee_growth_inside_now_x128": "340282366920938463463374607431768211455",
+      "fee_growth_inside_last_x128": "0",
+      "expected_owed": "999999999999999999"
+    }
+  ],
+
+  "protocol_fee_split": [
+    {
+      "name": "lp_share_two_thirds",
+      "combined_swap_fee": "3000",
+      "protocol_fee": "1000",
+      "earned_combined": "999",
+      "expected_lp": "666",
+      "expected_protocol": "333"
+    },
+    {
+      "name": "lp_share_three_quarters",
+      "combined_swap_fee": "4000",
+      "protocol_fee": "1000",
+      "earned_combined": "2000",
+      "expected_lp": "1500",
+      "expected_protocol": "500"
+    },
+    {
+      "name": "lp_share_zero_when_protocol_equals_combined",
+      "combined_swap_fee": "3000",
+      "protocol_fee": "3000",
+      "earned_combined": "1000",
+      "expected_lp": "0",
+      "expected_protocol": "1000"
+    },
+    {
+      "name": "lp_share_zero_when_zero_combined",
+      "combined_swap_fee": "3000",
+      "protocol_fee": "1000",
+      "earned_combined": "0",
+      "expected_lp": "0",
+      "expected_protocol": "0"
+    },
+    {
+      "name": "lp_share_full_when_zero_protocol",
+      "combined_swap_fee": "3000",
+      "protocol_fee": "0",
+      "earned_combined": "1000",
+      "expected_lp": "1000",
+      "expected_protocol": "0"
+    },
+    {
+      "name": "lp_share_max_uint256_divisibility",
+      "combined_swap_fee": "4095",
+      "protocol_fee": "1",
+      "earned_combined": "1000000000000",
+      "expected_lp": "999755799755",
+      "expected_protocol": "244200245"
+    },
+    {
+      "name": "lp_share_large_combined",
+      "combined_swap_fee": "10000",
+      "protocol_fee": "1000",
+      "earned_combined": "1000000000000",
+      "expected_lp": "900000000000",
+      "expected_protocol": "100000000000"
+    }
+  ],
+
+  "range_state": [
+    {
+      "name": "below_wide_range",
+      "current_tick": -200,
+      "tick_lower": -100,
+      "tick_upper": 100,
+      "expected_state": "below"
+    },
+    {
+      "name": "at_lower_boundary_is_inside",
+      "current_tick": -100,
+      "tick_lower": -100,
+      "tick_upper": 100,
+      "expected_state": "inside"
+    },
+    {
+      "name": "inside_wide_range",
+      "current_tick": 0,
+      "tick_lower": -100,
+      "tick_upper": 100,
+      "expected_state": "inside"
+    },
+    {
+      "name": "at_upper_boundary_is_above",
+      "current_tick": 100,
+      "tick_lower": -100,
+      "tick_upper": 100,
+      "expected_state": "above"
+    },
+    {
+      "name": "above_wide_range",
+      "current_tick": 200,
+      "tick_lower": -100,
+      "tick_upper": 100,
+      "expected_state": "above"
+    },
+    {
+      "name": "at_tick_zero_in_zero_range",
+      "current_tick": 0,
+      "tick_lower": 0,
+      "tick_upper": 60,
+      "expected_state": "inside"
+    },
+    {
+      "name": "max_usable_tick_is_above",
+      "current_tick": 887272,
+      "tick_lower": -887272,
+      "tick_upper": 887272,
+      "expected_state": "above"
+    },
+    {
+      "name": "min_usable_tick_is_below",
+      "current_tick": -887272,
+      "tick_lower": -887272,
+      "tick_upper": 887272,
+      "expected_state": "inside"
+    }
+  ]
+}
