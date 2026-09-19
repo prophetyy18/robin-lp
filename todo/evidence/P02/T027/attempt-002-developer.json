@@ -1,0 +1,44 @@
+{
+  "task_id": "T027",
+  "outcome": "CANDIDATE_READY",
+  "summary": "T027 attempt 2 implements the boundary case the prior review flagged: the stub `_check_flag_bits_against_code_hash` is now a real structural check (a non-zero hook address with no low-14 flag bits yet a recorded sha256 code_hash is internally inconsistent; the position claims 'hook here' but the recorded bytecode implements no callbacks), and `classify_research_member` additionally exposes a caller-supplied `flag_hash_mismatch: bool | None` signal so an external verifier (T043 hook pack / replay model) can surface the disagreement. Both paths emit `ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH` and cap the level at `ingestion`; the existing test `test_hook_flag_bits_disagree_with_code_hash_demotes` is updated to assert the reason is present, and 8 new tests cover the structural, external, false-suppression, and negative (no-mismatch) paths.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src python3.12 -m pytest tests/test_research_classification.py -q",
+      "result": "62 passed in 0.26s"
+    },
+    {
+      "command": "PYTHONPATH=src python3.12 -m pytest tests/test_research_classification.py tests/test_eligibility.py tests/test_research_universe.py tests/test_research_universe_config.py tests/test_pool_onboarding.py tests/test_initialize_scanner.py -q",
+      "result": "206 passed in 0.54s"
+    },
+    {
+      "command": "PYTHONPATH=src python3.12 -m pytest -q",
+      "result": "1 failed, 1300 passed, 6 skipped in 12.32s (only failing test is the pre-existing T012-era forge-std SelectorOracle blocker in tests/test_abi_artifacts.py, identical to the base commit 17dfe99 and unrelated to T027)"
+    },
+    {
+      "command": "PYTHONPATH=src python3.12 -m pytest -q --ignore=tests/test_abi_artifacts.py",
+      "result": "1266 passed, 6 skipped in 12.22s"
+    },
+    {
+      "command": "python3.12 -m ruff check src tests",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python3.12 -m ruff format --check src tests",
+      "result": "143 files already formatted"
+    },
+    {
+      "command": "PYTHONPATH=src python3.12 -m mypy src",
+      "result": "Success: no issues found in 82 source files"
+    },
+    {
+      "command": "PYTHONPATH=src python3.12 -m mypy src tests/test_research_classification.py",
+      "result": "Success: no issues found in 83 source files"
+    }
+  ],
+  "residual_risks": [
+    "OUT-OF-SCOPE: tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails because the worktree lacks tools/oracle/lib (forge-std submodule clone). This is the pre-existing T012-era blocker identical to the base commit 17dfe99 and unrelated to T027.",
+    "DESIGN: the internal `_check_flag_bits_against_code_hash` check only detects the *structurally inconsistent* shape (non-zero hook + has_any_flag=False + recorded sha256 code_hash). A deeper disagreement where has_any_flag=True but the bytecode's actual callback set does not match the flag bits requires the external `flag_hash_mismatch=True` signal from an upstream verifier (T043 hook pack / replay model). The classifier cannot inspect bytecode itself per T023."
+  ],
+  "blocking_question": null
+}

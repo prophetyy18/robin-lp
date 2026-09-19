@@ -465,25 +465,49 @@ def _check_flag_bits_against_code_hash(
 ) -> bool:
     """Return ``True`` iff the hook evidence is internally consistent.
 
-    The check is conservative: a hook whose flag bits are
-    inconsistent with the code hash the framework recorded is
-    surfaced as a :class:`HookFlagHashMismatchError` later in the
-    classifier. The function only inspects the low-level facts:
-    a non-zero hook address whose ``code_hash`` is recorded but
-    whose flag bits set do not agree with the code-hash
-    classification the framework recorded.
+    The check is conservative: a hook whose flag bits disagree
+    with the recorded ``code_hash`` is surfaced as a
+    :class:`HookFlagHashMismatchError` later in the classifier.
 
-    In practice the runtime cannot inspect the bytecode here
-    (T023 deliberately does not fetch bytecode from inside the
-    classifier). The mismatch check therefore treats the
-    caller-supplied ``code_hash`` as the *reference*: if the
-    caller reports a hook whose flag bits imply a callback set that
-    the code hash does not match, the classifier records the
-    disagreement as a reason. The check returns ``True`` when the
-    caller has not reported a hash; the hook's flag bits alone are
-    not a verdict (T023 must-not).
+    The T027 contract explicitly lists "a hook address whose flag
+    bits disagree with its code hash" as a boundary case the
+    classifier must cover. Without bytecode (T023 deliberately
+    does not fetch bytecode from inside the classifier), the
+    classifier cannot compare the bytecode's callback set against
+    the flag bits directly. It instead detects the *internally
+    inconsistent* shape the framework would otherwise miss: a
+    non-zero hook address whose low-14 flag bits are all clear
+    yet a sha256 ``code_hash`` has been recorded. Such a row
+    means the framework has pinned a runtime bytecode hash for an
+    address whose flag bits assert "no callbacks implemented"; the
+    position claims to be a hook while the recorded bytecode
+    implements none. The classifier surfaces the disagreement as
+    a reason rather than silently treating the pool as plain.
+
+    Concrete disagreement patterns:
+
+    - ``is_zero=False`` + ``has_any_flag=False`` + recorded sha256
+      ``code_hash``: the address claims a hook position but the
+      bytecode (per the recorded hash) implements no callbacks.
+    - ``is_zero=False`` + ``has_any_flag=True`` + recorded sha256
+      ``code_hash`` whose recorded *type* (the framework's own
+      hash classification, when present) classifies as a no-flag
+      hook: the bytecode says "no callbacks" while the address
+      flags say otherwise. The classification by hash is supplied
+      through the caller's ``flag_hash_mismatch`` signal because
+      the runtime cannot inspect the bytecode.
+
+    The function returns ``True`` (consistent) in every other
+    case: zero hook (trivially consistent), no recorded hash
+    (insufficient evidence to disagree), or ill-formed hash (the
+    classifier relies on the evidence-shape validator rather than
+    guessing). The hook's flag bits alone are not a verdict
+    (T023 must-not); the function only flags the disagreement
+    when the framework has recorded the bytecode hash.
     """
     if hook_evidence.is_zero:
+        # Zero hook is trivially consistent: there is no flag /
+        # hash relationship to disagree on.
         return True
     code_hash = _normalize_code_hash(hook_evidence.code_hash)
     if code_hash is None:
@@ -495,12 +519,21 @@ def _check_flag_bits_against_code_hash(
         # the mismatch check; the classifier relies on the
         # evidence-shape validator rather than guessing.
         return True
-    # Without bytecode, a flag-bits-vs-code-hash mismatch can only
-    # be reported by the caller (see ``previous_code_hash`` below).
-    # The T023 ``BYTECODE_HASH_CHANGE`` reason already covers a
-    # code-hash change; this check looks for the case where the
-    # *flag bits* have changed while the code hash has not.
-    return True
+    # Internal-consistency check: a non-zero hook address whose
+    # low-14 flag bits are all clear yet the framework has pinned
+    # a runtime bytecode hash. The position claims "hook here"
+    # while the recorded bytecode implements no callbacks. The
+    # classifier surfaces the disagreement as
+    # :class:`ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH`
+    # rather than silently treating the row as plain-pool
+    # (T027 boundary case + T023 must-not "do not fall back to
+    # plain-pool behaviour"). ``has_any_flag=True`` with a recorded
+    # hash is internally consistent at the structural level; a
+    # deeper disagreement (the bytecode's actual callback set does
+    # not match the flag bits) requires an external verifier and
+    # is signalled via the ``flag_hash_mismatch`` parameter on
+    # :func:`classify_research_member`.
+    return hook_evidence.has_any_flag
 
 
 def _is_sha256_hex(s: str) -> bool:
@@ -559,6 +592,7 @@ def classify_research_member(
     data_coverage_status: DataCoverageStatus = DataCoverageStatus.UNKNOWN,
     observed_dynamic_fee: int | None = None,
     hook_settlement_verified: bool | None = None,
+    flag_hash_mismatch: bool | None = None,
 ) -> ResearchClassificationDecision:
     """Classify one ``(chain_id, PoolKey)`` for research membership.
 
@@ -584,9 +618,16 @@ def classify_research_member(
        a dynamic-fee pool with no observed fee caps the level at
        ``ingestion``.
     3. :class:`ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH` —
-       caller-reported disagreement between the hook address flag
-       bits and the recorded code hash (or verified implementation)
-       caps the level at ``ingestion``.
+       a hook whose address flag bits disagree with the recorded
+       ``code_hash`` (internal structural check) **or** the caller
+       has signalled the disagreement via ``flag_hash_mismatch=True``
+       (external verifier). Either path caps the level at
+       ``ingestion``. The internal check fires when a non-zero
+       hook address has no flag bits yet a sha256 ``code_hash``
+       has been recorded; the caller signal fires when an external
+       verifier (T043 hook pack / replay model) has compared the
+       bytecode's actual callback set against the flag bits and
+       found them to disagree.
     4. :class:`ResearchClassificationReasonCode.DATA_COVERAGE_PARTIAL` —
        a member whose data coverage is ``PARTIAL`` stays at
        ``ingestion`` (T027 boundary case: a member whose data
@@ -607,6 +648,18 @@ def classify_research_member(
     zero-hook static-fee pool to be promoted to ``backtest`` by the
     T023 classifier; the T027 classifier does not fetch metadata
     itself, it only consumes the caller's evidence.
+
+    ``flag_hash_mismatch`` carries an external verifier's verdict
+    on the flag-bits-vs-code-hash agreement. ``None`` (the
+    default) means the caller has not supplied such a verdict; the
+    classifier then falls back on the internal structural check.
+    ``True`` forces :class:`ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH`
+    regardless of the internal check (and is recorded as
+    ``flag_hash_mismatch=true`` in the audit trail). ``False``
+    suppresses the external signal and forces the classifier to
+    rely solely on the internal structural check, which may still
+    emit the reason if the recorded evidence is structurally
+    inconsistent.
     """
     if not isinstance(chain_id, int) or isinstance(chain_id, bool):
         raise TypeError(
@@ -632,6 +685,11 @@ def classify_research_member(
         raise TypeError(
             f"classify_research_member: hook_settlement_verified must be "
             f"bool or None, got {type(hook_settlement_verified).__name__}"
+        )
+    if flag_hash_mismatch is not None and not isinstance(flag_hash_mismatch, bool):
+        raise TypeError(
+            f"classify_research_member: flag_hash_mismatch must be "
+            f"bool or None, got {type(flag_hash_mismatch).__name__}"
         )
 
     if hook_evidence is None:
@@ -724,16 +782,58 @@ def classify_research_member(
             level = RunMode.INGESTION
 
     # --- HOOK_FLAG_HASH_MISMATCH ---------------------------------------
-    if not _check_flag_bits_against_code_hash(hook_evidence):
+    # Two sources of mismatch:
+    #
+    # 1. Internal structural check (T027 boundary case): a non-zero
+    #    hook address whose low-14 flag bits are all clear yet a
+    #    sha256 ``code_hash`` has been recorded. The position claims
+    #    "hook here" while the recorded bytecode implements no
+    #    callbacks. The classifier surfaces the disagreement as a
+    #    reason rather than silently treating the row as plain-pool
+    #    (T023 must-not).
+    # 2. External verifier signal: an upstream verifier (T043 hook
+    #    pack / replay model) compared the bytecode's actual
+    #    callback set against the flag bits and found them to
+    #    disagree. The caller passes ``flag_hash_mismatch=True`` to
+    #    surface the disagreement.
+    #
+    # Both paths emit :class:`ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH`
+    # and cap the level at ``ingestion`` (rejected wins over
+    # ingestion per the precedence rule).
+    internal_mismatch = not _check_flag_bits_against_code_hash(hook_evidence)
+    external_mismatch = flag_hash_mismatch is True
+    if internal_mismatch or external_mismatch:
+        if internal_mismatch and external_mismatch:
+            detail = (
+                "hook flag bits disagree with the recorded code hash / "
+                "verified implementation; both the structural check "
+                "(non-zero hook with no flag bits plus a recorded "
+                "sha256 code hash) and an external verifier "
+                "reported the disagreement"
+            )
+        elif internal_mismatch:
+            detail = (
+                "hook flag bits disagree with the recorded code hash: "
+                "non-zero hook address with no flag bits and a "
+                "recorded sha256 code hash is structurally "
+                "inconsistent (flag bits say no callbacks; bytecode "
+                "is pinned)"
+            )
+        else:
+            detail = (
+                "an external verifier reported that the hook flag "
+                "bits disagree with the bytecode's verified "
+                "implementation"
+            )
         reasons.append(
             ResearchClassificationReason(
                 ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH,
-                detail=(
-                    "hook flag bits disagree with the recorded code hash / verified implementation"
-                ),
+                detail=detail,
             )
         )
-        evidence_pointers.append("hook_flag_hash_mismatch=true")
+        evidence_pointers.append(
+            f"hook_flag_hash_mismatch=true;source={'internal+external' if internal_mismatch and external_mismatch else ('internal' if internal_mismatch else 'external')}"
+        )
         if level != RunMode.REJECTED:
             level = RunMode.INGESTION
 

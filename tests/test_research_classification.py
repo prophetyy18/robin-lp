@@ -183,6 +183,15 @@ def test_classify_research_member_requires_hook_settlement_verified_bool() -> No
         )
 
 
+def test_classify_research_member_requires_flag_hash_mismatch_bool() -> None:
+    with pytest.raises(TypeError, match="flag_hash_mismatch"):
+        classify_research_member(
+            CHAIN_ID,
+            PK_STATIC_ZERO_HOOK,
+            flag_hash_mismatch="not-a-bool",  # type: ignore[arg-type]
+        )
+
+
 # ---------------------------------------------------------------------------
 # T023 evidence model preserved
 # ---------------------------------------------------------------------------
@@ -549,15 +558,11 @@ def test_hook_flag_bits_disagree_with_code_hash_demotes() -> None:
     silently treat the hook as plain-pool)."""
     # A code hash recorded for a hook address whose low 14 bits
     # are zero (i.e. a non-hook address pretending to be one) is a
-    # flag-bits-vs-code-hash disagreement. We synthesise a
-    # non-zero hook with a recorded code hash; the mismatch
-    # signal would normally come from a verifier that compares
-    # the bytecode's actual callback set against the flag bits.
-    # The classifier records the disagreement whenever a
-    # ``code_hash`` is supplied alongside a non-zero hook with no
-    # flag bits — which would be the case for a misconfigured
-    # hook. The framework's verifier is responsible for emitting
-    # this signal; the classifier surfaces it as a reason.
+    # flag-bits-vs-code-hash disagreement. The position claims
+    # "hook here" while the recorded bytecode (per its sha256
+    # hash) implements no callbacks. The classifier's internal
+    # structural check surfaces the disagreement and emits
+    # :class:`ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH`.
     pk_zero_bits = PoolKey(
         currency0=Currency.from_int(0x10),
         currency1=Currency.from_int(0x20),
@@ -576,14 +581,205 @@ def test_hook_flag_bits_disagree_with_code_hash_demotes() -> None:
         CHAIN_ID,
         pk_zero_bits,
         hook_evidence=evidence,
+        hook_settlement_verified=True,
+        data_coverage_status=DataCoverageStatus.COMPLETE,
+    )
+    # Level is capped at ingestion because the flag bits disagree
+    # with the recorded code hash. ``hook_settlement_verified=True``
+    # keeps :class:`ResearchClassificationReasonCode.HOOK_SETTLEMENT_UNVERIFIABLE`
+    # out of the reasons so the assertion is unambiguous.
+    assert d.level == RunMode.INGESTION
+    assert d.has(ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH)
+    assert not d.has(ResearchClassificationReasonCode.HOOK_SETTLEMENT_UNVERIFIABLE)
+    # The audit trail records the structural source of the mismatch.
+    assert any(
+        ptr.startswith("hook_flag_hash_mismatch=true;source=internal")
+        for ptr in d.evidence_pointers
+    )
+
+
+def test_hook_flag_hash_mismatch_emitted_when_settlement_unverifiable_too() -> None:
+    """When both signals fire (settlement unverified AND flag
+    bits disagree with code hash), both reasons are recorded
+    and the level is capped at ingestion."""
+    pk_zero_bits = PoolKey(
+        currency0=Currency.from_int(0x10),
+        currency1=Currency.from_int(0x20),
+        fee=3000,
+        tick_spacing=60,
+        hooks=Address(1 << 20),
+    )
+    evidence = HookEvidence(
+        address=Address(1 << 20),
+        is_zero=False,
+        has_any_flag=False,
+        has_delta_flag=False,
+        code_hash="d" * 64,
+    )
+    d = classify_research_member(
+        CHAIN_ID,
+        pk_zero_bits,
+        hook_evidence=evidence,
         hook_settlement_verified=False,
         data_coverage_status=DataCoverageStatus.COMPLETE,
     )
-    # No flag bits → no hook semantics to verify; the level is
-    # capped at ingestion because the hook's settlement effect is
-    # unverifiable.
     assert d.level == RunMode.INGESTION
+    assert d.has(ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH)
     assert d.has(ResearchClassificationReasonCode.HOOK_SETTLEMENT_UNVERIFIABLE)
+
+
+def test_flag_hash_mismatch_caller_signal_emits_reason_without_structural_check() -> None:
+    """T027 boundary case: an external verifier (T043 hook pack /
+    replay model) reports the disagreement. The caller passes
+    ``flag_hash_mismatch=True`` and the classifier emits
+    :class:`ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH`
+    even when the internal structural check would not have fired
+    (has_any_flag=True with a recorded hash)."""
+    # Non-zero hook address WITH flag bits set, plus a recorded
+    # code hash. The internal structural check is satisfied
+    # (has_any_flag=True), but the caller has flagged the
+    # bytecode's actual callback set as disagreeing with the
+    # flag bits.
+    evidence = _nonzero_hook_evidence(
+        hook_int=1 << 7,
+        bytecode=b"\x60\x80\x60\x40" + b"\x00" * 60,
+        code_hash="e" * 64,
+    )
+    d = classify_research_member(
+        CHAIN_ID,
+        PK_NONZERO_HOOK,
+        hook_evidence=evidence,
+        hook_settlement_verified=True,
+        data_coverage_status=DataCoverageStatus.COMPLETE,
+        flag_hash_mismatch=True,
+    )
+    assert d.level == RunMode.INGESTION
+    assert d.has(ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH)
+    # Audit trail records the external source of the mismatch.
+    assert any(
+        ptr.startswith("hook_flag_hash_mismatch=true;source=external")
+        for ptr in d.evidence_pointers
+    )
+
+
+def test_flag_hash_mismatch_false_suppresses_external_signal_but_keeps_internal() -> None:
+    """``flag_hash_mismatch=False`` suppresses the external signal
+    but the internal structural check still fires when the
+    recorded evidence is structurally inconsistent."""
+    pk_zero_bits = PoolKey(
+        currency0=Currency.from_int(0x10),
+        currency1=Currency.from_int(0x20),
+        fee=3000,
+        tick_spacing=60,
+        hooks=Address(1 << 20),
+    )
+    evidence = HookEvidence(
+        address=Address(1 << 20),
+        is_zero=False,
+        has_any_flag=False,
+        has_delta_flag=False,
+        code_hash="d" * 64,
+    )
+    d = classify_research_member(
+        CHAIN_ID,
+        pk_zero_bits,
+        hook_evidence=evidence,
+        hook_settlement_verified=True,
+        data_coverage_status=DataCoverageStatus.COMPLETE,
+        flag_hash_mismatch=False,
+    )
+    assert d.has(ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH)
+    # Source is internal-only because the caller explicitly said
+    # "no external verifier disagreement".
+    assert any(
+        ptr.startswith("hook_flag_hash_mismatch=true;source=internal")
+        for ptr in d.evidence_pointers
+    )
+
+
+def test_no_flag_hash_mismatch_without_code_hash() -> None:
+    """No ``code_hash`` recorded → the classifier cannot disagree
+    on it (flag bits alone are not a verdict). The
+    :class:`ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH`
+    reason is NOT emitted and the level can be promoted by the
+    T023 path (zero-hook static-fee pool with complete metadata
+    + COMPLETE coverage promotes to ``backtest``)."""
+    d = classify_research_member(
+        CHAIN_ID,
+        PK_NONZERO_HOOK,
+        hook_evidence=HookEvidence(
+            address=Address(1 << 7),
+            is_zero=False,
+            has_any_flag=True,
+            has_delta_flag=False,
+            code_hash=None,
+        ),
+        hook_settlement_verified=True,
+        data_coverage_status=DataCoverageStatus.COMPLETE,
+    )
+    assert not d.has(ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH)
+
+
+def test_no_flag_hash_mismatch_for_zero_hook() -> None:
+    """A zero hook address is trivially consistent; no mismatch
+    reason is emitted regardless of the recorded hash."""
+    d = classify_research_member(
+        CHAIN_ID,
+        PK_STATIC_ZERO_HOOK,
+        hook_evidence=HookEvidence(
+            address=Address.zero(),
+            is_zero=True,
+            has_any_flag=False,
+            has_delta_flag=False,
+            code_hash="d" * 64,
+        ),
+        metadata_complete=True,
+        data_coverage_status=DataCoverageStatus.COMPLETE,
+    )
+    assert not d.has(ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH)
+    # Zero hook + static fee + complete metadata + complete
+    # coverage promotes to backtest as expected.
+    assert d.level == RunMode.BACKTEST
+
+
+def test_no_flag_hash_mismatch_when_consistent_flag_bits_and_hash() -> None:
+    """A non-zero hook address WITH flag bits set AND a recorded
+    code hash is internally consistent at the structural level;
+    no mismatch reason is emitted unless the caller supplies an
+    external signal."""
+    evidence = _nonzero_hook_evidence(
+        hook_int=1 << 7,
+        bytecode=b"\x60\x80\x60\x40" + b"\x00" * 60,
+        code_hash="e" * 64,
+    )
+    d = classify_research_member(
+        CHAIN_ID,
+        PK_NONZERO_HOOK,
+        hook_evidence=evidence,
+        hook_settlement_verified=True,
+        data_coverage_status=DataCoverageStatus.COMPLETE,
+    )
+    assert not d.has(ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH)
+
+
+def test_no_flag_hash_mismatch_for_ill_formed_code_hash() -> None:
+    """An ill-formed (non-sha256-hex) ``code_hash`` is treated as
+    "no hash recorded" by the internal check; the mismatch reason
+    is NOT emitted."""
+    d = classify_research_member(
+        CHAIN_ID,
+        PK_NONZERO_HOOK,
+        hook_evidence=HookEvidence(
+            address=Address(1 << 7),
+            is_zero=False,
+            has_any_flag=True,
+            has_delta_flag=False,
+            code_hash="not-a-sha256-hash",
+        ),
+        hook_settlement_verified=True,
+        data_coverage_status=DataCoverageStatus.COMPLETE,
+    )
+    assert not d.has(ResearchClassificationReasonCode.HOOK_FLAG_HASH_MISMATCH)
 
 
 # ---------------------------------------------------------------------------
