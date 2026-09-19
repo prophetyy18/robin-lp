@@ -793,6 +793,61 @@ def test_fail_verdict_with_unknowns_requests_changes(tmp_path: Path) -> None:
     assert state == "CHANGES_REQUESTED"
 
 
+def test_a_task_retry_prompt_carries_the_review_it_repairs(tmp_path: Path) -> None:
+    """The review record is the only durable statement of what the previous
+    candidate got wrong. A retry prompt that omits it asks the Developer to
+    guess at defects the Reviewer already named -- which the amendment and
+    maintenance retry routes do not do."""
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    first = manager.prepare_develop("T001")
+    development = Path(str(first["development_worktree"]))
+    assert "review" not in first["prompt"]
+    (development / "src" / "value.txt").write_text("good\n", encoding="utf-8")
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "CANDIDATE_READY",
+            "summary": "done",
+            "commands": [],
+            "residual_risks": [],
+        },
+    )
+    attempt = manager.finish_develop("T001")
+    review = manager.prepare_review("T001")
+    _write_json(
+        Path(str(review["review_worktree"])) / ".workflow" / "review-result.json",
+        {
+            "task_id": "T001",
+            "base_commit": attempt.base_commit,
+            "candidate_commit": attempt.candidate_commit,
+            "verdict": "FAIL",
+            "checks": [
+                {
+                    "id": "A",
+                    "status": "FAIL",
+                    "evidence": ["acceptance failed"],
+                    "finding": "repair required",
+                }
+            ],
+            "must_not_violations": [],
+            "unknowns": [],
+            "required_changes": ["repair acceptance A"],
+        },
+    )
+    state, _ = manager.finish_review("T001")
+    assert state == "CHANGES_REQUESTED"
+
+    retry = manager.prepare_develop("T001", retry=True)
+
+    assert retry["attempt"] == 2
+    review_path = development / "todo" / "reviews" / "P00" / "T001" / "review-001.json"
+    assert review_path.is_file()
+    assert str(review_path) in retry["prompt"]
+    assert "required_change" in retry["prompt"]
+
+
 def test_config_validation_rejects_dependency_cycle(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
     manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")

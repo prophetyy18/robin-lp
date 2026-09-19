@@ -1113,6 +1113,17 @@ class WorkflowManager:
             f"Work only in {worktree}. Do not commit. Before finishing, write the required "
             f"structured developer result to {worktree / '.workflow' / 'developer-result.json'}."
         )
+        # A retry has to carry the verdict that caused it. The review record is
+        # committed in the retained worktree, so it is the only durable statement
+        # of what the previous candidate got wrong; a retry prompt that omits it
+        # asks the Developer to guess at defects the Reviewer already named.
+        latest_review = task.get("latest_review")
+        review_path = worktree / latest_review if isinstance(latest_review, str) else None
+        if retry and review_path is not None and review_path.is_file():
+            prompt += (
+                f" This attempt repairs the independent review at {review_path}: address every "
+                f"required_change, and do not regress a check that review already passed."
+            )
         return {**attempt.to_dict(), "agent": "stage-developer", "prompt": prompt}
 
     def finish_develop(self, task_id: str) -> AttemptRecord:
