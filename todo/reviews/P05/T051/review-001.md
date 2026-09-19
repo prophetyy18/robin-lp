@@ -1,0 +1,192 @@
+# T051 independent review
+
+- Base commit: `8537501a1d4d8a055d7d7dd3b028d5b57dc6e408`
+- Candidate commit: `0e86454ae9a82f5e5575a538fd4b45a2afc35eed`
+- Verdict: **PASS**
+
+## Checks
+
+### outcome_principal_and_fees_separate — PASS
+
+Outcome is satisfied: principal and earned fees are separately correct at any point; principal is a balance ledger and earned/protocol fees are computed independently from the per-position fee_growth_inside_last snapshot.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t051-attempt-001/src/robinhood_lp/features/position.py lines 433-535: PrincipalState carries principal_amount_*, donation_amount_*, hook_credit_* as integer-only ledgers; earned_fees_0/1, protocol_fees_0/1 sit on PositionValuation as separate fields; compute_position_valuation never folds principal into a return/pnl field.
+- test_principal_is_never_pnl asserts no PositionValuation attribute is named pnl/realized_pnl/unrealized_pnl/return/yield.
+- test_zero_owed_when_out_of_range shows out-of-range positions do not earn fees and principal is preserved across price walks.
+
+### deliverable_raw_token_inventory — PASS
+
+token0/token1 raw inventory is delivered as integer amounts via the same V4 get_amounts_for_liquidity source T049 approved.
+
+Evidence:
+
+- compute_raw_inventory at src/robinhood_lp/features/position.py lines 1050-1075 delegates to get_amounts_for_liquidity (T049 sizer) which uses V4 floor rounding and the sqrt-price conditional.
+- test_below_range_is_all_token0, test_above_range_is_all_token1, test_reversal_below_then_inside pin the integer inventory shape across below/inside/above Range.
+
+### deliverable_range_state — PASS
+
+Range state is delivered via a typed enum and the V4 half-open tick bracket conditional.
+
+Evidence:
+
+- RangeState enum (BELOW/INSIDE/ABOVE) at lines 144-160; classify_range_state at lines 920-952 applies the V4 [tick_lower, tick_upper) bracket (left-inclusive, right-exclusive).
+- test_below/test_at_lower_boundary_is_inside/test_inside/test_at_upper_boundary_is_above/test_above cover all five bracket positions.
+- pinned vectors range_state_at_lower_boundary_is_inside and at_upper_boundary_is_above confirm the classifier matches the pinned V4 conditional.
+
+### deliverable_principal_ledger — PASS
+
+Principal ledger is a balance, not a PnL field; deposits and withdrawals change the ledger.
+
+Evidence:
+
+- PrincipalState dataclass at lines 490-535; apply_mint/apply_burn/apply_donation/apply_hook_credit are the four mutating operations and never expose a PnL field.
+- test_add_remove_lifecycle exercises the full mint/collect/burn cycle and verifies principal grows by deposit amounts only.
+
+### deliverable_fee_growth_accounting — PASS
+
+Per-position fee_growth_inside_last snapshot vs current pool values yields tokens_owed through the V4 floor mulDiv; the V4 conditional and underflow-saturate-at-zero rule are honoured.
+
+Evidence:
+
+- FeeGrowthSnapshot stores fee_growth_inside_last_*_x128 plus tokens_owed_* at lines 380-475.
+- compute_fee_growth_inside applies the V4 Pool.getFeeGrowthInside conditional at lines 970-1035 (below: global-lower; above: global-upper; inside: global-lower-upper; underflow saturates at zero).
+- compute_lp_fees_owed is the floor mulDiv (liquidity * delta) >> 128 at lines 1140-1170.
+- snapshot_at_mint, snapshot_after_modify, apply_collect, apply_burn, apply_mint implement the V4 pool.modify settlement lifecycle.
+
+### deliverable_protocol_fee_separation — PASS
+
+Protocol-fee separation per the Owner amendment is structurally enforced and the canonical PositionValuation output separates LP and protocol shares.
+
+Evidence:
+
+- split_protocol_fees at lines 1180-1280 implements (lp_fee - protocol_fee) / lp_fee with floor rounding; protocol_fees_* = earned_combined - earned_lp_* so the two sides sum byte-exactly.
+- Owner amendment of 2026-09-16 in T051 contract is honoured: PoolFeeState.protocol_fee_token0/1 is the directional 12-bit half T040 replays; combined-fee path scales by (combined - protocol) / combined.
+- LP-only path is identity (protocol_fees_* = 0); is_lp_fee_growth default is True matching the V4 feeGrowthGlobal LP-only design.
+
+### deliverable_collections — PASS
+
+mint/collect/burn accounting is implemented as a typed snapshot lifecycle; add and remove are routed through the same primitives.
+
+Evidence:
+
+- apply_mint, apply_burn, apply_collect, snapshot_at_mint, snapshot_after_modify implement the mint/collect/burn lifecycle at lines 1280-1520.
+- apply_collect returns the owed-fees balance and zeros tokens_owed_* while preserving principal.
+- apply_burn returns principal and owed fees in one step and zeroes both ledgers.
+- test_add_remove_lifecycle walks the full lifecycle and asserts the deposit totals match.
+
+### deliverable_donations_and_hook_gating — PASS
+
+Donations and hook credits are gated by the caller-supplied HookEvidenceState; unverified hook deltas are never silently folded into a balance.
+
+Evidence:
+
+- HookEvidenceState (VERIFIED/UNVERIFIED/NO_HOOK) at lines 168-200; apply_donation at lines 1500-1570 folds donations into principal only when VERIFIED or NO_HOOK and records them separately otherwise.
+- apply_hook_credit at lines 1575-1625 rejects unverified credits outright per T043 must-not.
+- test_no_hook_donation_folds_into_principal, test_verified_hook_donation_folds_into_principal, test_unverified_hook_donation_kept_separate, test_hook_credit_requires_verified_evidence pin all three states.
+
+### acceptance_bounds_below_at_inside_at_above — PASS
+
+Both on-boundary tests pass and the boundary RangeState classifications agree with the pinned vectors; the canonical valuation reflects the V4 half-open tick bracket convention.
+
+Evidence:
+
+- Both boundaries are tested independently: test_at_lower_boundary_is_all_token1 (tick==tick_lower) and test_at_upper_boundary_is_all_token0 (tick==tick_upper) plus the canonical TestComputePositionValuation::test_below_range_inventory, test_inside_range_inventory, test_above_range_inventory.
+- Pinned vectors range_state_at_lower_boundary_is_inside and at_upper_boundary_is_above confirm RangeState classification at the boundaries.
+- Reversal test_reversal_below_then_inside verifies the inventory flips from all-token0 to a mixed pair without any PnL recomputation.
+
+### acceptance_reversals — PASS
+
+Reversal (tick crossing the Range) is exercised and does not introduce PnL.
+
+Evidence:
+
+- test_reversal_below_then_inside walks the current tick from -1 (below) to 50 (inside) and asserts the inventory flips without touching principal.
+
+### acceptance_add_remove_collect — PASS
+
+add/remove/collect are covered by a single end-to-end lifecycle test.
+
+Evidence:
+
+- test_add_remove_lifecycle runs mint -> modify -> collect -> add -> burn and asserts principal growth equals deposit totals, collect returns the earned fee balance, and burn settles principal plus any pending fees.
+
+### acceptance_native_currency_and_decimal_asymmetry — PASS
+
+Native currency and decimal asymmetry are passed through at the integer layer; the value module boundary is documented.
+
+Evidence:
+
+- test_native_currency_passthrough exercises a wide Range and asserts both sides are non-zero raw integers; the module is raw-integer agnostic to native vs ERC20 currency.
+- test_decimal_asymmetry_does_not_break_module asserts the raw integer ratio between sides is non-zero; the position layer performs no decimal conversion (T053 owns that boundary).
+
+### acceptance_combined_and_protocol_fee_rounding — PASS
+
+Combined-fee/protocol-fee rounding agrees with the pinned integer vectors and the test_split_conserves_total invariant holds across the boundary inputs.
+
+Evidence:
+
+- tests/fixtures/features/position_vectors.json contains 8 inside_derivation vectors, 10 lp_fees_owed vectors, 7 protocol_fee_split vectors, and 8 range_state vectors; all are loaded by TestPinnedVectors::test_fee_growth_inside_matches_pin, test_lp_fees_owed_matches_pin, test_split_protocol_fees_matches_pin, test_range_state_matches_pin.
+- test_combined_fee_splits_protocol_share asserts the canonical PositionValuation splits earned into LP + protocol per the amendment.
+- split_protocol_fees conserves the combined total byte-exactly across all 7 cases in test_split_conserves_total.
+
+### must_not_pnl_from_deposits — PASS
+
+Deposits and withdrawals are balance operations, never PnL; the structural test pins the absence of any return field.
+
+Evidence:
+
+- test_principal_is_never_pnl asserts no PositionValuation field is named pnl/realized_pnl/unrealized_pnl/return/yield.
+- apply_mint adds to principal_amount_* without computing a return; apply_burn returns principal_amount_* without computing PnL; reversals and price walks do not modify principal.
+
+### must_not_wallet_inference_from_sender — PASS
+
+Wallet ownership is not inferred from PoolManager sender; the position identity is the on-chain event triple.
+
+Evidence:
+
+- PositionKey carries only (tick_lower, tick_upper, salt, token_id) at lines 310-370; token_id is optional metadata and is not used to derive an owner wallet.
+- test_no_sender_attribute asserts the PositionKey exposes no sender/owner/from_address/msg_sender attribute.
+- compute_position_valuation never reads a sender/owner argument and PoolManager sender is not consumed by any function in the module.
+
+### tests_116_pass_and_full_suite — PASS
+
+All 116 new tests pass; the full P00-P05 suite is green at 1644 passed / 6 environmental skips; ruff and mypy --strict are clean.
+
+Evidence:
+
+- pytest tests/test_features_position_t051.py -q -> 116 passed in 0.20s
+- pytest tests/test_features_position_t051.py tests/test_features_bars_t050.py tests/test_features_quote_t053.py tests/test_position_sizing_t049.py tests/test_protocol_math.py -q -> 423 passed in 0.57s
+- pytest tests/ -q (excluding the four pre-existing environmental skips) -> 1644 passed, 6 skipped in 11.27s; the 6 skips are environmental (Foundry/oracle tooling and tools.workflow import path) and are pre-existing.
+- ruff format --check src/ tests/ -> 156 files already formatted.
+- ruff check src/ tests/ -> All checks passed.
+- mypy --strict src/ -> Success: no issues found in 90 source files.
+
+### no_protected_file_edit — PASS
+
+No file under docs/spec/, docs/intent/, todo/phases/, todo/schemas/, tools/workflow/, .claude/, CLAUDE.md, AGENTS.md, or todo/README.md is touched; the config.yaml delta is the controller's expected workflow state transition.
+
+Evidence:
+
+- git diff --name-only 8537501..0e86454 lists: src/robinhood_lp/features/position.py, tests/fixtures/features/position_vectors.json, tests/test_features_position_t051.py, todo/config.yaml, todo/evidence/P05/T051/attempt-001-developer.json.
+- The only protected-prefix file touched is todo/config.yaml and the change is limited to the workflow state transition (READY -> AWAITING_REVIEW) and the T051 attempt metadata (attempt=1, base_commit set); no contract text, dependency field, intent/spec, schema, workflow controller, or task contract is edited.
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- The helper functions compute_raw_inventory_at_lower and compute_raw_inventory_at_upper expose a public API whose docstrings claim 'V4 bracket is [pa, pb)' and 'closed at pa, open at pb' but return values that do not match the canonical V4 get_amounts_for_liquidity behaviour at the corresponding boundaries: compute_raw_inventory_at_lower returns (0, get_amount1_delta(pa, pb, L)) and compute_raw_inventory_at_upper returns (get_amount0_delta(pa, pb, L), 0), whereas the sizer's get_amounts_for_liquidity returns all-token0 at the lower boundary and all-token1 at the upper boundary. The canonical compute_position_valuation uses the sizer (not the helpers) so the canonical output is correct; the helpers are unused outside their own tests. Future callers that pick the helpers will see values that disagree with the canonical valuation. This is a documentation/API-design risk, not a contract failure, and the contract acceptance clauses are still met by the canonical path.
+- The inline comment inside compute_position_valuation ('at the upper boundary V4's get_amounts_for_liquidity returns the all-token0 figure') is incorrect: the sizer returns all-token1 at the upper boundary (ABOVE case). The actual code path is correct (it uses the sizer's ABOVE branch); the comment misdescribes the boundary semantics. A future reader could be misled when auditing the function.
+- apply_donation with HookEvidenceState.NO_HOOK folds the donation into principal_amount_* AND records it in donation_amount_*. The dual recording is intentional (it preserves the audit trail of how much of the principal came from donations) but a consumer reading only donation_amount_* would undercount the credit; downstream consumers should read principal_amount_* (the balance) and use donation_amount_* only for the breakdown.
+- PositionValuation.version is fixed to 't051.position.v1' (POSITION_VALUATION_VERSION). Any downstream consumer (T052 / T070 / T101) that branches on this version must handle the v1 schema; the field is exposed explicitly so the branch is explicit, not implicit.
