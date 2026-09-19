@@ -64,3 +64,52 @@ owner = "@T083-owner"
 expiry = "2027-06-30"
 location = "todo/phases/P08-operations-and-web/T084.md"
 token = "robinhood_lp.ops.dossier"
+
+# T009 introduces the deterministic acceptance-criteria checker. The
+# four entries below document pre-existing findings against contracts
+# this task is not permitted to edit. Each carries the four required
+# fields (rule, reason, owner, expiry) and a location/token that pins
+# the suppression to its finding; the expiry dates force the owner to
+# revisit them before the bound contracts move out of the protected
+# layer. Three of the entries are real pre-existing structural
+# descriptions that will be revisited by their contract owners; one is
+# T009 itself quoting the two historical examples the rule exists to
+# catch, which is a deliberate self-reference and the same pattern
+# T005 / T006 use for their own descriptive quotations.
+
+[[suppression]]
+rule = "acceptance-present"
+reason = "T000's Acceptance section describes the ADR / architecture structural shape; it does not yet name a verification surface or pass/fail statement. The contract is bound to docs/intent/PROJECT_GOALS.md and is awaiting the next contract amendment to add an explicit verification surface."
+owner = "@T000-owner"
+expiry = "2026-12-31"
+location = "todo/phases/P00-engineering-baseline/T000.md"
+
+[[suppression]]
+rule = "acceptance-present"
+reason = "T023's Acceptance section names structural defaults (level plus evidence, deterministic and audited) but no verification surface or pass/fail statement. T023's contract is awaiting the next contract amendment to add an explicit verification surface."
+owner = "@T023-owner"
+expiry = "2026-12-31"
+location = "todo/phases/P02-chain-access-and-discovery/T023.md"
+
+[[suppression]]
+rule = "acceptance-present"
+reason = "T092's Acceptance section describes reconciliation and fault-injection requirements but does not name a verification surface or pass/fail statement. T092's contract is awaiting the next contract amendment to add an explicit verification surface."
+owner = "@T092-owner"
+expiry = "2026-12-31"
+location = "todo/phases/P09-signer-testnet-and-live/T092.md"
+
+[[suppression]]
+rule = "acceptance-quantitative"
+reason = "T009's own Deliverables quotes the two historical economic rules the check is supposed to catch — the complete 5-minute target-token USDG return <= -80 percent and the complete 5-minute return above 100 percent — so the check fires on its own contract. The finding is a deliberate self-reference; the contract already states both phrases inside its seeded regression description."
+owner = "@T009-owner"
+expiry = "2026-12-31"
+location = "todo/phases/P00-engineering-baseline/T009.md"
+token = "<= -80%"
+
+[[suppression]]
+rule = "acceptance-quantitative"
+reason = "T009's own Deliverables quotes the two historical economic rules the check is supposed to catch — the complete 5-minute target-token USDG return <= -80 percent and the complete 5-minute return above 100 percent — so the check fires on its own contract. The finding is a deliberate self-reference; the contract already states both phrases inside its seeded regression description."
+owner = "@T009-owner"
+expiry = "2026-12-31"
+location = "todo/phases/P00-engineering-baseline/T009.md"
+token = "above 100%"

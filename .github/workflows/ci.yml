@@ -77,6 +77,24 @@ jobs:
               --config todo/config.yaml \
               --architecture docs/spec/architecture/ARCHITECTURE.md
 
+      # T009: deterministic offline acceptance-criteria checker.
+      # Parses every ``todo/phases/**/T[0-9]{3}.md`` contract with
+      # the standard library and fails on a missing or empty
+      # ``## Acceptance`` section, on a placeholder marker
+      # (``TBD``, ``TODO``, ``to be determined``, ``as appropriate``,
+      # ``if possible``) inside Acceptance, and on a quantitative
+      # rule stated in ``## Deliverables`` that ``## Acceptance``
+      # never requires as a condition on the same quantity with the
+      # same direction. The step is strictly additive: it never
+      # skips, never xfails, and does not weaken any existing check.
+      - name: Acceptance-criteria check (T009)
+        shell: bash -l {0}
+        run: |
+          conda run -n "$CONDA_ENV_NAME" \
+            python -m tools.check_acceptance check \
+              --suppressions docs/implement/ci/suppressions.toml \
+              --config todo/config.yaml
+
       - name: Ruff check
         shell: bash -l {0}
         run: conda run -n "$CONDA_ENV_NAME" ruff check .
