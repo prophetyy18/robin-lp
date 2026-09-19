@@ -1,0 +1,42 @@
+{
+  "task_id": "T050",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the T050 bars / market-features module in src/robinhood_lp/features/bars.py: Window (left-inclusive / right-exclusive) + WatermarkPolicy + LateEventPolicy + four MarketObservation dataclasses + eight FeatureBar subclasses (Volume, RealizedVolatility, PriceRange, ActiveLiquidity, DepthProxy, EffectiveFee, Gas, Freshness) each carrying unit/window/data_time/availability_time/version, plus a MarketBarStreamer that closes each window and counts late arrivals. The 110-test suite in tests/test_features_bars_t050.py proves left/right boundaries, late event handling, empty windows, irregular blocks, prefix invariance, no normalisation, depth-proxy labelling, and the bar metadata contract; ruff check + ruff format --check and mypy --strict pass clean, and the wider 1598-test suite still passes.",
+  "commands": [
+    {
+      "command": "python -m pytest tests/test_features_bars_t050.py -q",
+      "result": "110 passed in 0.13s"
+    },
+    {
+      "command": "python -m pytest -q --ignore=tests/test_abi_artifacts.py",
+      "result": "1598 passed, 6 skipped in ~13s (the 6 skips are pre-existing forge/gpg-related, not from this task; the only failing test is test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output which requires the Foundry toolchain not on this server's PATH and is unrelated to T050)"
+    },
+    {
+      "command": "python -m ruff check src/ tests/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python -m ruff format --check src/ tests/",
+      "result": "154 files already formatted"
+    },
+    {
+      "command": "python -m mypy --strict src/",
+      "result": "Success: no issues found in 89 source files"
+    },
+    {
+      "command": "python -m mypy --strict src/robinhood_lp/features/bars.py tests/test_features_bars_t050.py",
+      "result": "Success: no issues found in 2 source files"
+    },
+    {
+      "command": "git diff 677611dfc24f0f3fbefb88ac867093a248767fd9 --stat",
+      "result": "Only todo/config.yaml (workflow controller transitions to IN_DEVELOPMENT and attempt=1) + the two new untracked files src/robinhood_lp/features/bars.py and tests/test_features_bars_t050.py. No file under docs/spec/, docs/intent/, todo/phases/, todo/schemas/, tools/workflow/, .claude/, CLAUDE.md, AGENTS.md, todo/README.md, or todo/config.yaml (apart from the controller's status transitions) was modified."
+    }
+  ],
+  "residual_risks": [
+    "The depth proxy uses a first-order Taylor approximation (sqrt(1+x) ~= 1 + x/2); bands up to 100% are accepted but the approximation error grows with band_bps. Downstream consumers may wish to bound band_bps to <= 500 bps for economically meaningful proxies; the contract forbids labelling the result as observed depth, so callers must treat it as a proxy.",
+    "Realised variance uses integer-arithmetic variance of sqrt-price ratios in Q64.64; a downstream consumer that wants realised volatility (sqrt of variance) must do so inside its own named float boundary (ADR-014 §5).",
+    "SwapObservation, ModifyLiquidityObservation, GasObservation and BlockHeaderObservation are minimal layer-local dataclasses; they deliberately do not import from robinhood_lp.storage so the features layer stays layer-pure. A future task may want a small adapter from the storage / replay schema to these observation types; that adapter does not belong to T050.",
+    "The MarketBarStreamer rejects window_end values that are not exact positive multiples of window_size. Streamers that want to build non-aligned windows (e.g. for irregular block spacing) must use the stateless compute_*_bar functions directly.",
+    "The freshness bar's semantics depend on the consumer truncating observations to those whose observed_at <= data_time. The test suite exercises this contract (test_freshness_bar_unchanged_by_future_event truncates before recomputing); a downstream consumer that passes future observations to compute_freshness_bar without truncating will see a freshness that depends on the future, breaking prefix invariance for that caller. This is documented in the compute_freshness_bar docstring."
+  ]
+}
