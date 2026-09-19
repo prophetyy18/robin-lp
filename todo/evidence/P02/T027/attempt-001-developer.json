@@ -1,0 +1,45 @@
+{
+  "task_id": "T027",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented T027: extended the T023 reason-coded classifier with a research-universe surface that classifies pools keyed on (chain_id, PoolKey) alone. The new module src/robinhood_lp/discovery/research_classification.py introduces ResearchClassificationDecision (carrying level + reasons + evidence_pointers + the underlying T023 EligibilityDecision + a machine-readable ResearchNonApprovalStatement), ResearchClassificationReasonCode (HOOK_SETTLEMENT_UNVERIFIABLE, DYNAMIC_FEE_NOT_OBSERVED, HOOK_FLAG_HASH_MISMATCH, DATA_COVERAGE_PARTIAL, RESEARCH_SCOPE), DataCoverageStatus (UNKNOWN/PARTIAL/COMPLETE), the ResearchSupportGateError exception, and three gate entry points (assert_research_member_backtest_eligible, is_research_member_backtest_eligible, classify_research_member). The backtest gate refuses below-backtest research members for replay/backtest/model_research with a named reason; the non-approval statement explicitly records that the classification is not a token approval, not a pool approval, and grants no execution authority. Code-hash change demotion is preserved from T023; hook-settlement unverifiability is a new demotion path. The decision is deterministic and JSON-serialisable. All 54 new tests pass; full suite is 1292 passed / 6 skipped / 1 pre-existing T012 forge blocker failed (unrelated to T027, identical to base commit 17dfe99). Ruff check + format clean; mypy strict clean on src + the new test file.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_research_classification.py -q",
+      "result": "54 passed in 0.23s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_research_classification.py tests/test_eligibility.py tests/test_research_universe.py tests/test_research_universe_config.py tests/test_pool_onboarding.py tests/test_initialize_scanner.py -q",
+      "result": "198 passed in 0.46s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q",
+      "result": "1 failed, 1292 passed, 6 skipped in 14.20s (the single failure is the pre-existing tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output T012 forge blocker; identical to base commit 17dfe99; unrelated to T027)"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src tests",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src tests",
+      "result": "83 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src",
+      "result": "Success: no issues found in 82 source files"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src tests/test_research_classification.py",
+      "result": "Success: no issues found in 83 source files"
+    },
+    {
+      "command": "git diff --stat HEAD",
+      "result": "src/robinhood_lp/discovery/__init__.py | 28 ++++++++++++++++++++++++++++ todo/config.yaml | 6 ++++--- 2 files changed, 31 insertions(+), 3 deletions(-) (plus two untracked files: src/robinhood_lp/discovery/research_classification.py and tests/test_research_classification.py). The todo/config.yaml diff is the controller-applied READY->IN_DEVELOPMENT transition plus attempt=1; not edited by the Developer."
+    }
+  ],
+  "residual_risks": [
+    "OUT-OF-SCOPE: tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails in this worktree because the T012-era forge-std SelectorOracle compile blocker is unaddressed; T027 does not touch this surface (the failure count and message are byte-identical to the base commit 17dfe99).",
+    "DESIGN: T027 introduces a metadata_complete boolean parameter on classify_research_member so the T023 classifier can promote zero-hook static-fee research members to backtest when the framework already has complete token metadata. The classifier does not fetch metadata itself; the caller's evidence is the authoritative source. A future task that needs to record the actual metadata values can extend the API without re-running the T023 classifier.",
+    "DESIGN: T027 only adds T027-specific reason codes when the caller supplies the corresponding evidence (hook_settlement_verified / observed_dynamic_fee / data_coverage_status / code_hash). When the caller does not supply the evidence, the classifier does not invent the signal; this preserves the audit trail's 'absence of evidence is not evidence of absence' invariant from T023. A research consumer that wants to demote a research member on a missing signal should default hook_settlement_verified to False rather than passing None.",
+    "DESIGN: The HOOK_FLAG_HASH_MISMATCH reason code is defined but the runtime mismatch-detection logic in _check_flag_bits_against_code_hash is conservative — it does not compare bytecode flag bits to a verified implementation; that comparison is the responsibility of the verifier (T043 / future hook pack tooling). T027 surfaces the reason code so an upstream verifier can emit the signal, and the demotion cap (level -> ingestion) is enforced."
+  ]
+}
