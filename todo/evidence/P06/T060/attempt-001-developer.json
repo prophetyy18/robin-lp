@@ -1,0 +1,39 @@
+{
+  "task_id": "T060",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented T060 — the V1 strategy layer contracts at src/robinhood_lp/strategy/base.py and the package surface at src/robinhood_lp/strategy/__init__.py, with comprehensive tests in tests/test_strategy_t060.py. The module exposes (1) three immutable, versioned snapshots: AdmissionSnapshot, MarketSnapshot, PortfolioSnapshot (all frozen dataclasses carrying their SNAPSHOT_VERSION constant, unit, data_time, availability_time); (2) two substitutable component interfaces RegimeModel and FeeOpportunityModel (Protocols) with their respective outputs RegimeAssessment and FeeOpportunityAssessment, both carrying an explicit ASSESSED/UNCERTAIN outcome and a state field; the uncertainty path is exercised by RegimeAssessment.uncertain() and FeeOpportunityAssessment.uncertain() convenience constructors; (3) DeterministicClock and SeededRandomSource interfaces plus FrozenClock and FrozenSeededRandomSource reference implementations that are wall-clock-free and unseeded-random-free per ADR-006; (4) validate_proposal which rejects invalid ticks (out of bounds, unaligned, degenerate), stale snapshots (availability_time > decision_time), NaN/display values, and excessive capital — all failures raise a structured exception family (InvalidTickError, StaleSnapshotError, NaNDisplayValueError, InvalidCapitalError, InvalidProposalError) before any CandidateAction is constructed; (5) a ReasonCode StrEnum covering the closed NO_TRADE vocabulary; (6) a CandidateAction frozen dataclass with three closed kinds (NO_TRADE / WAIT / PROPOSE) — PROPOSE carries the Range and capital envelope, WAIT/NO_TRADE carry sentinels; and (7) evaluate_decision which orchestrates validation + component queries into a single CandidateAction. Dependency purity is enforced by assert_strategy_layer_is_pure() which walks the live module graph and rejects any robinhood_lp import outside the strategy + protocol allowlist; a sibling test injects a sentinel robinhood_lp.rpc ModuleType and confirms the helper raises. The two heterogeneous PoolKey fixtures (one native currency with no hook, one ERC-20 with dynamic fee and a hook) exercise the cross-PoolKey acceptance clause. All 80 strategy tests pass; the full project suite (excluding the Foundry-only ABI oracle test that requires v4-core submodules to be installed) reports 1844 passed, 6 skipped; ruff format/check clean; mypy --strict clean on src and tests.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_strategy_t060.py --no-header",
+      "result": "80 passed in 0.12s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest --ignore=tests/test_abi_artifacts.py --no-header",
+      "result": "1844 passed, 6 skipped in 14.44s (the single excluded test requires Foundry + the v4-core submodule and fails for environment reasons unrelated to T060; main checkout reports it as passing)"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/strategy/ tests/test_strategy_t060.py",
+      "result": "3 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/strategy/ tests/test_strategy_t060.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/robinhood_lp/strategy/ tests/test_strategy_t060.py",
+      "result": "Success: no issues found in 3 source files"
+    },
+    {
+      "command": "git status --porcelain",
+      "result": "M todo/config.yaml (workflow-controller state change only — T060 moved to IN_DEVELOPMENT, attempt=1); ?? src/robinhood_lp/strategy/ (new); ?? tests/test_strategy_t060.py (new). No file under docs/intent, docs/spec, docs/implement, todo/phases, todo/schemas, todo/README.md, tools/workflow, .claude, CLAUDE.md, AGENTS.md, or todo/config.yaml (other than the controller's mechanical state change) was touched."
+    }
+  ],
+  "residual_risks": [
+    "Foundry oracle test test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails in the worktree because tools/oracle/lib (a git-ignored Foundry submodule directory) is not present. The same test passes in /home/lpdev/lp. This is an environmental gap, not a T060 defect, and the reviewer's detached worktree will resolve it when it runs there.",
+    "Strategy components currently return ASSESSED outcomes on every code path the tests exercise; a production rule implementation (T062 / T065) and a future model-backed implementation (T102) are out of scope for T060 — T060 only defines the contracts.",
+    "evaluate_decision implements a single, conservative default policy (RANGE + positive fee edge -> PROPOSE; ASSESSED-but-not-RANGE or zero fee -> WAIT; UNCERTAIN -> NO_TRADE). The candidate policy and the binding economic gate live in T065 / T066 and are explicitly out of scope for T060.",
+    "FrozenClock and FrozenSeededRandomSource are reference implementations; production wires the orchestration layer's deterministic clock and seeded random source into the strategy contract via Protocol injection. The interface is the contract; the reference implementations exist to make the contract testable.",
+    "The strategy layer adds a new robinhood_lp subpackage; nothing else in the repo currently imports from it (verified by collect_strategy_module_imports). Downstream T061 / T062 / T063 / T064 / T065 / T070 / T071 / T102 will read from it; the dependency direction (ADR-006) requires they import only from robinhood_lp.strategy, not the reverse.",
+    "The protocol denylist _FORBIDDEN_STRATEGY_ROBINHOOD_MODULES names the currently shipping sibling packages (config, discovery, ingestion, presentation, qualification, quality, replay, rpc, storage). A future sibling added without updating the denylist would silently slip past assert_strategy_layer_is_pure; the dependency walk must be re-validated whenever a new sibling is added."
+  ]
+}
