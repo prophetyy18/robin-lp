@@ -11,8 +11,8 @@
     "allow_model_fallback": false
   },
   "active_phase": "P00",
-  "active_task": "T006",
-  "workflow_state": "APPROVED",
+  "active_task": "T008",
+  "workflow_state": "READY",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -118,7 +118,7 @@
     },
     "T008": {
       "phase": "P00",
-      "status": "PLANNED",
+      "status": "READY",
       "depends_on": [],
       "task_file": "todo/phases/P00-engineering-baseline/T008.md",
       "attempt": 0,
