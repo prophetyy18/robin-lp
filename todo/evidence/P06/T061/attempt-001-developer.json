@@ -1,0 +1,38 @@
+{
+  "task_id": "T061",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the event-driven backtest engine (T061) per the frozen contract. Added the new `robinhood_lp.backtest` package with three modules: `events.py` (BacktestEvent, AuditEvent, PositionState, FutureDataViolation, source-priority / stage / kind / status sentinels, content-addressed SHA-256 event ids, layer-purity check); `models.py` (Liquidity / Fee / Gas / Slippage / Failure models and ModelBundle, each parameterised, deterministic, versioned and unit-carrying with closed `FillOutcome` enum and layer-purity check); `engine.py` (BacktestEngine orchestrator that sorts by (timestamp, sequence, source_priority), enforces the information frontier via `available_at <= decision_time`, runs the decision -> risk -> latency -> fill pipeline producing exactly one immutable AuditEvent per stage, refuses to fill when no fill data is visible at the declared fill time, and emits init / shutdown SYSTEM events). All 49 new T061 unit tests pass, ruff format/check pass, mypy --strict passes for both the new package and the test file, and the existing 1893-test suite still passes (the only failure is a pre-existing forge oracle test that requires the v4-core submodule, unrelated to T061).",
+  "commands": [
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_backtest_t061.py",
+      "result": "49 passed in 0.08s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest --ignore=tests/test_abi_artifacts.py",
+      "result": "1893 passed, 6 skipped in 14.01s (the 6 skips are pre-existing forge/gpg-related skips; the only failing test is the pre-existing forge oracle test in tests/test_abi_artifacts.py that requires the v4-core git submodule, which is not initialised in this worktree)"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format src/robinhood_lp/backtest/ tests/test_backtest_t061.py",
+      "result": "All files already formatted (or reformatted successfully)"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/backtest/ tests/test_backtest_t061.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/robinhood_lp/backtest/ tests/test_backtest_t061.py",
+      "result": "Success: no issues found in 5 source files"
+    },
+    {
+      "command": "git status --short",
+      "result": "Only modified path is todo/config.yaml (workflow controller state transitions performed by `prepare-develop T061`); the new package src/robinhood_lp/backtest/ and tests/test_backtest_t061.py are untracked. No protected path (docs/intent, docs/spec, docs/implement, todo/phases, todo/README.md, tools/workflow, .claude, todo/schemas) was touched."
+    }
+  ],
+  "residual_risks": [
+    "The new backtest package introduces the engine as a frozen dataclass with two injected callbacks (strategy / risk) plus a ModelBundle. The strategy layer's T060 CandidateAction contract is not yet consumed by the engine; T062 / T065 will wire the concrete strategy components into the same callback shape.",
+    "Future-data enforcement is implemented as: (a) the `is_visible(decision_time)` predicate on BacktestEvent, (b) the engine's `_find_fill_data` lookup, and (c) the explicit `FutureDataViolation` raised when no fill data is available at the declared fill time. The engine does not consult any other time source and never reads wall-clock time, but the orchestrator that builds the event manifest must still apply its own embargo / purge before handing the manifest to the engine (T063 / T064).",
+    "The engine's `react_to_kinds` / `fill_data_kinds` defaults are closed sets the contributor can override. SWAP / MINT / BURN are reactive by default; OBSERVATION is the non-reactive fill-data source; TICK is bookkeeping only. A later task that needs additional kinds must extend the closed sets additively.",
+    "The forge oracle test in tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails because the v4-core git submodule is not initialised in this worktree (pre-existing environment issue, not caused by T061). The independent Reviewer should re-run that test in a workspace where the submodule is initialised to confirm it still passes."
+  ],
+  "blocking_question": null
+}
