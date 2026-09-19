@@ -1,0 +1,314 @@
+{
+  "task_id": "T039",
+  "base_commit": "363823e6ba54a6a82b01c12e93172d6fc20281c9",
+  "candidate_commit": "90ecfcb037554007e97768d0600cba4c8b2712f1",
+  "verdict": "PASS",
+  "checks": [
+    {
+      "id": "deliverables.window_planner",
+      "status": "PASS",
+      "evidence": [
+        "src/robinhood_lp/qualification/per_pool_window.py defines PerPoolWindowPlan, plan_per_pool_window, plan_per_pool_window_after_resume, _split_sub_ranges, PlannedSubRange, BudgetCeiling; coverage_from_block = pool_init_block and coverage_to_block = window_pin_block_number (per_pool_window.py:523-669)",
+        "Test test_plan_per_pool_window_basic and test_two_pools_different_length_windows verify the rule; test_two_pools_overlap_partially / overlap_fully / do_not_overlap cover the requested boundary cases (tests/test_per_pool_window_t039.py:309, 408, 426, 443, 457)"
+      ],
+      "finding": "Per-pool window planner emits inclusive coverage from pool_init_block to the agreed finalized pin with the evidence that produced it."
+    },
+    {
+      "id": "deliverables.finalized_pin_agreement",
+      "status": "PASS",
+      "evidence": [
+        "parse_finalized_pin_payloads rejects None / disagreement / malformed hash and returns (None, reason) instead of substituting anything (per_pool_window.py:802-859)",
+        "Tests test_parse_finalized_pin_payloads_returns_inputs_on_agreement / rejects_unavailable / rejects_number_disagreement / rejects_hash_disagreement / normalises_hash_casing / rejects_malformed_hash / rejects_non_finalized_block / does_not_substitute_latest (tests/test_per_pool_window_t039.py:516-651)"
+      ],
+      "finding": "Finalized-pin agreement helper enforces number + hash agreement and never falls back to latest, a non-finalized block, or a wall-clock-derived bound."
+    },
+    {
+      "id": "deliverables.per_pool_data_root_and_coverage_report",
+      "status": "PASS",
+      "evidence": [
+        "PerPoolDataRoot, PerPoolCoverageReport, PerPoolCostRecord, PerPoolReconciliation defined in per_pool_coverage.py; build_per_pool_coverage_report assembles them per pool key and decides the complete verdict (per_pool_coverage.py:49-554)",
+        "Tests test_build_per_pool_coverage_report_complete_when_clean / incomplete_when_reconciliation_disagrees / incomplete_when_budget_exhausted / already_covered_when_prior_coverage_matches / failed_resolution_records_outcome verify the verdicts (tests/test_per_pool_window_t039.py:983-1080)"
+      ],
+      "finding": "Each pool gets its own data root, coverage report, cost record and reconciliation; the complete verdict refuses to fire when any disagree."
+    },
+    {
+      "id": "deliverables.log_splitting_and_dedup",
+      "status": "PASS",
+      "evidence": [
+        "_split_sub_ranges divides the inclusive window into sub-ranges whose widths are bounded by primary_max_blocks_per_call (per_pool_window.py:772-799)",
+        "PerPoolWindowPlan.deduplicated_header_block_count + expected_logical_call_count record the dedup invariant; assert_logical_call_count_equals_sub_ranges_plus_headers is the runner-side check (per_pool_window.py:645-646, 862-896)",
+        "Tests test_plan_per_pool_window_emits_sub_ranges_under_capability / logical_call_count_invariant_holds / logical_call_count_invariant_violation_raises / logical_call_count_invariant_resume_uses_suffix (tests/test_per_pool_window_t039.py:325, 376, 912, 926, 937)"
+      ],
+      "finding": "Log-query splitting respects the per-call capability; header deduplication is bounded and asserted; the invariant forbids per-block eth_getLogs and per-block header fetches."
+    },
+    {
+      "id": "deliverables.cost_record_with_budget",
+      "status": "PASS",
+      "evidence": [
+        "PerPoolCostRecord separates logical_calls / http_requests / response_bytes / rows / provider_units / elapsed_ms / parquet_bytes with exhausted_budget_dimension (per_pool_coverage.py:106-188)",
+        "build_per_pool_coverage_report refuses complete=True when cost_record.exhausted_budget is true (per_pool_coverage.py:533-538)",
+        "Tests test_build_per_pool_coverage_report_incomplete_when_budget_exhausted and test_budget_ceiling_default_is_positive / rejects_negative_dimensions / with_explicit_budget_ceiling_uses_it (tests/test_per_pool_window_t039.py:1017, 1464, 1480, 1492)"
+      ],
+      "finding": "Per-pool cost record carries every dimension and the declared budget ceiling; the runner halts via exhausted_budget_dimension rather than exceeding silently."
+    },
+    {
+      "id": "deliverables.operator_runbook_with_historical_state_endpoint",
+      "status": "PASS",
+      "evidence": [
+        "PerPoolOperatorRunbook + build_per_pool_operator_runbook record the historical_state_endpoint_alias, three roles (wide_pool_filtered_scan, sampled_cross_validation, block_pinned_state_read), per-pool data roots and coverage plans (per_pool_window_runbook.py:189-535)",
+        "build_per_pool_operator_runbook refuses to build when archive_state_capability_observed=False (per_pool_window_runbook.py:364-369)",
+        "Tests test_build_per_pool_operator_runbook_routes_three_roles / records_pinned_facts / rejects_unobserved_archive_state / per_pool_endpoints_summary / endpoint_routing_entry_rejects_unknown_role (tests/test_per_pool_window_t039.py:1278-1366)"
+      ],
+      "finding": "Operator runbook names the endpoint able to serve historical state at the agreed depth and refuses to be produced when the archive capability is unobserved."
+    },
+    {
+      "id": "acceptance.two_materially_different_pools",
+      "status": "PASS",
+      "evidence": [
+        "test_two_pools_different_length_windows exercises two pools with different pool_init_block + pool_key_id over the same pinned end and asserts independent data roots (tests/test_per_pool_window_t039.py:408-423)"
+      ],
+      "finding": "Two materially different pools acquire over different-length windows with independent coverage plans."
+    },
+    {
+      "id": "acceptance.failed_resolution_stops_and_reports",
+      "status": "PASS",
+      "evidence": [
+        "Plan validator emits OUTCOME_POOL_INITIALIZED_AFTER_END when pool_init_block > pin_block with width=0 (per_pool_window.py:566-595)",
+        "OUTCOME_POOL_RESOLUTION_FAILED and REASON_POOL_INITIALIZE_NOT_LOCATED are exported vocabulary items the plan validator accepts; build_per_pool_coverage_report translates them into coverage_outcome=failed_resolution (per_pool_window.py:60, 73, 199-208; per_pool_coverage.py:500-507)",
+        "Tests test_pool_initialized_after_agreed_end_halts_with_named_outcome / pool_initialize_not_located_is_a_failed_resolution / build_per_pool_coverage_report_failed_resolution_records_outcome (tests/test_per_pool_window_t039.py:475, 490, 1064)"
+      ],
+      "finding": "A pool whose Initialize lies after the agreed end halts with a named outcome; a pool whose Initialize cannot be located surfaces the dedicated outcome via the reason-code channel rather than being silently included or excluded."
+    },
+    {
+      "id": "acceptance.latest_non_finalized_wall_clock_rejected",
+      "status": "PASS",
+      "evidence": [
+        "parse_finalized_pin_payloads returns REASON_NON_FINALIZED_BLOCK_REJECTED for negative block numbers, REASON_FINALIZED_UNAVAILABLE for None, REASON_PROVIDER_RETURNED_NON_FINALIZED for malformed hashes, and never returns a substitute (per_pool_window.py:802-859)",
+        "Tests test_parse_finalized_pin_payloads_rejects_non_finalized_block / does_not_substitute_latest (tests/test_per_pool_window_t039.py:599, 626)"
+      ],
+      "finding": "The helper rejects latest (no fallback when finalized tag unavailable), non-finalized (negative block or malformed hash), and wall-clock-derived bounds (helper accepts only block numbers and hashes, never timestamps)."
+    },
+    {
+      "id": "acceptance.finalized_disagreement_halts",
+      "status": "PASS",
+      "evidence": [
+        "parse_finalized_pin_payloads returns REASON_FINALIZED_DISAGREEMENT when block numbers or hashes differ (per_pool_window.py:846-849)",
+        "Tests test_parse_finalized_pin_payloads_rejects_number_disagreement / rejects_hash_disagreement (tests/test_per_pool_window_t039.py:559, 572)"
+      ],
+      "finding": "A finalized disagreement between the two qualified endpoints halts the run with the named reason code."
+    },
+    {
+      "id": "acceptance.interrupt_resume_indistinguishable",
+      "status": "PASS",
+      "evidence": [
+        "plan_per_pool_window_after_resume re-plans sub-ranges from resume_from_block and emits OUTCOME_POOL_ACQUIRED_AFTER_RESUME (per_pool_window.py:672-764)",
+        "Test test_resume_emits_pool_acquired_after_checkpoint_resume_outcome verifies the suffix-only sub-ranges; test_resume_at_pin_emits_no_op_plan verifies the resume-at-pin collapse (tests/test_per_pool_window_t039.py:782, 806)"
+      ],
+      "finding": "Interrupting and resuming re-emits the suffix sub-ranges; the resulting audit-trail row records the resume boundary."
+    },
+    {
+      "id": "acceptance.idempotent_re_runs",
+      "status": "PASS",
+      "evidence": [
+        "PriorCoverage + REASON_RANGE_ALREADY_COVERED short-circuit: sub_ranges=(), deduplicated_header_block_count=0, expected_logical_call_count=0 when prior coverage fully spans the pinned window (per_pool_window.py:597-630)",
+        "Tests test_prior_coverage_records_already_covered_outcome / prior_coverage_partial_does_not_skip_chain_reads (tests/test_per_pool_window_t039.py:828, 855)"
+      ],
+      "finding": "A re-run over an already-covered range issues no new chain reads; partial prior coverage still walks the suffix."
+    },
+    {
+      "id": "acceptance.coverage_reconciles_against_partitions",
+      "status": "PASS",
+      "evidence": [
+        "reconcile_per_pool_reports_against_partitions matches partition_ids declared by each per-pool report against the partition_owners map and flags cross-pool attribution (per_pool_coverage.py:557-610)",
+        "Tests test_reconcile_per_pool_reports_against_partitions_clean / detects_cross_pool_attribution (tests/test_per_pool_window_t039.py:1207, 1239)"
+      ],
+      "finding": "Per-pool reports reconcile against the acquired partitions; cross-pool attribution is detected as a discrepancy."
+    },
+    {
+      "id": "acceptance.superseded_generations_untouched",
+      "status": "PASS",
+      "evidence": [
+        "git diff 363823e 90ecfcb --name-status shows only qualification/__init__.py modified, three new qualification modules + tests added, todo/config.yaml + todo/evidence updated. No T038 module (two_pool.py, two_pool_window.py, two_pool_failure_paths.py, two_pool_runbook.py) or T038 test file is modified (git diff --name-status output above)"
+      ],
+      "finding": "T038 modules, tests and dataset generations remain immutable historical evidence; the candidate does not read, edit, re-qualify, overwrite or merge them."
+    },
+    {
+      "id": "boundary.earliest_block_pool",
+      "status": "PASS",
+      "evidence": [
+        "test_pool_init_block_at_block_zero_handled exercises pool_init_block=0 (tests/test_per_pool_window_t039.py:1430)"
+      ],
+      "finding": "A pool initialized at the earliest block the chain can serve is handled."
+    },
+    {
+      "id": "boundary.pool_initialized_after_end",
+      "status": "PASS",
+      "evidence": [
+        "test_pool_initialized_after_agreed_end_halts_with_named_outcome (tests/test_per_pool_window_t039.py:475)"
+      ],
+      "finding": "A pool whose Initialize lies after the agreed finalized end halts with the named outcome."
+    },
+    {
+      "id": "boundary.overlap_partial_full_none",
+      "status": "PASS",
+      "evidence": [
+        "Tests test_two_pools_overlap_partially / overlap_fully / do_not_overlap (tests/test_per_pool_window_t039.py:426, 443, 457)"
+      ],
+      "finding": "Two pools with partially overlapping, fully overlapping, and non-overlapping windows are covered."
+    },
+    {
+      "id": "boundary.endpoint_historical_state_unavailable",
+      "status": "PASS",
+      "evidence": [
+        "build_per_pool_operator_runbook refuses to construct a runbook when archive_state_capability_observed=False (per_pool_window_runbook.py:364-369)",
+        "Test test_build_per_pool_operator_runbook_rejects_unobserved_archive_state (tests/test_per_pool_window_t039.py:1336)"
+      ],
+      "finding": "An endpoint that cannot serve historical state at the required depth is refused with REASON_ENDPOINT_HISTORICAL_STATE_UNAVAILABLE."
+    },
+    {
+      "id": "boundary.budget_exhaustion",
+      "status": "PASS",
+      "evidence": [
+        "PerPoolCostRecord.exhausted_budget_dimension; build_per_pool_coverage_report refuses complete=True when exhausted (per_pool_coverage.py:172-175, 533-538)",
+        "Test test_build_per_pool_coverage_report_incomplete_when_budget_exhausted (tests/test_per_pool_window_t039.py:1017)"
+      ],
+      "finding": "Budget exhaustion mid-window halts the run; the cost record surfaces the dimension that hit the ceiling."
+    },
+    {
+      "id": "boundary.provider_non_finalized_for_finalized_tag",
+      "status": "PASS",
+      "evidence": [
+        "parse_finalized_pin_payloads returns REASON_PROVIDER_RETURNED_NON_FINALIZED for malformed hashes, REASON_NON_FINALIZED_BLOCK_REJECTED for negative block numbers (per_pool_window.py:840-845)",
+        "Test test_parse_finalized_pin_payloads_rejects_non_finalized_block (tests/test_per_pool_window_t039.py:599)"
+      ],
+      "finding": "A provider returning a non-finalized block for the finalized tag is refused with the named reason code."
+    },
+    {
+      "id": "must_not.one_pool_filtered_getlogs_per_block",
+      "status": "PASS",
+      "evidence": [
+        "PerPoolWindowPlan.sub_ranges is the ordered list of bounded sub-ranges the runner walks; assert_logical_call_count_equals_sub_ranges_plus_headers refuses a runner that issues one eth_getLogs per block (per_pool_window.py:772-799, 862-896)",
+        "Tests test_logical_call_count_invariant_holds / logical_call_count_invariant_violation_raises (tests/test_per_pool_window_t039.py:912, 926)"
+      ],
+      "finding": "The acquisition shape issues one eth_getLogs per planned sub-range, never per block."
+    },
+    {
+      "id": "must_not.one_header_fetch_per_scanned_block",
+      "status": "PASS",
+      "evidence": [
+        "PerPoolWindowPlan.deduplicated_header_block_count is bounded to the distinct event block count and the runner-side invariant forbids excess (per_pool_window.py:155-157, 862-896)"
+      ],
+      "finding": "Headers are deduplicated per distinct event block; per-scanned-block header fetches are forbidden."
+    },
+    {
+      "id": "must_not.no_eth_call_during_acquisition",
+      "status": "PASS",
+      "evidence": [
+        "grep for eth_call across per_pool_window.py / per_pool_coverage.py yields no eth_call invocation; the only mentions are in the runbook text (per_pool_window_runbook.py acquisition_paths entry 11) enumerating the explicitly excluded block-pinned verification reads",
+        "No acquisition code path performs an eth_call"
+      ],
+      "finding": "No eth_call is issued during acquisition; the only eth_call-shaped reads are the block-pinned StateView.getSlot0 / getLiquidity golden reads the runbook enumerates explicitly."
+    },
+    {
+      "id": "must_not.fall_back_to_latest_or_wall_clock",
+      "status": "PASS",
+      "evidence": [
+        "parse_finalized_pin_payloads accepts only block numbers and hashes; it never substitutes a value when the tag is unavailable (per_pool_window.py:802-859)",
+        "Test test_parse_finalized_pin_payloads_does_not_substitute_latest (tests/test_per_pool_window_t039.py:626)"
+      ],
+      "finding": "There is no fallback path to latest or a wall-clock-derived bound."
+    },
+    {
+      "id": "must_not.interpolate_or_synthesize_gaps",
+      "status": "PASS",
+      "evidence": [
+        "The planner emits the documented outcome vocabulary; the coverage report refuses complete=True on any disagreement or exhausted budget (per_pool_window.py:199-208, per_pool_coverage.py:533-538). No gap-filling path exists in the deterministic surface."
+      ],
+      "finding": "The deterministic surface never interpolates, forward-fills or synthesizes a gap; it either covers the range or halts with a named reason."
+    },
+    {
+      "id": "must_not.widen_one_pool_window",
+      "status": "PASS",
+      "evidence": [
+        "plan_per_pool_window sets coverage_to_block = window_pin_block_number; never widens to chase a missing Initialize (per_pool_window.py:563-595)"
+      ],
+      "finding": "The planner never widens a pool's window to chase another pool's Initialize; a pool that initializes after the pinned end halts with the named outcome."
+    },
+    {
+      "id": "must_not.one_pool_per_run",
+      "status": "PASS",
+      "evidence": [
+        "PerPoolWindowInputs.pool_key_id is a single opaque pool identifier; every plan / report / runbook entry keys on a single pool_key_id (per_pool_window.py:404-462, per_pool_coverage.py:64-99, per_pool_window_runbook.py:101-121)"
+      ],
+      "finding": "One acquisition run covers exactly one PoolKey; two pools are never merged into one plan or report."
+    },
+    {
+      "id": "must_not.do_not_redefine_acquisition_shape",
+      "status": "PASS",
+      "evidence": [
+        "The new module imports T038's WindowPin, EndpointFinalizedObservation, finalize_window_pin machinery (per_pool_window.py:26-30 docstring; per_pool_coverage.py:35-42 imports from per_pool_window which itself wraps the T038 helper signatures)",
+        "One pool-filtered range query per planned sub-range; events persist with (block_number, transaction_index, log_index) per ADR-012; no eth_call; state rebuilt locally downstream — the documented acquisition shape is unchanged"
+      ],
+      "finding": "The acquisition shape is reused, not redefined; the per-pool rule is additive on top of T035/T036/T038's existing shape."
+    },
+    {
+      "id": "must_not.no_pool_init_outside_window_vocabulary",
+      "status": "PASS",
+      "evidence": [
+        "grep -n pool_init_outside_window across per_pool_window.py / per_pool_coverage.py / per_pool_window_runbook.py finds references only in docstrings and the runbook's acquisition_paths text that explain the retirement of the T038 vocabulary (not in any outcome / reason-code / branch)",
+        "The new module's outcome vocabulary is OUTCOME_POOL_ACQUIRED, OUTCOME_POOL_ACQUIRED_AFTER_RESUME, OUTCOME_POOL_INITIALIZED_AFTER_END, OUTCOME_POOL_RESOLUTION_FAILED (per_pool_window.py:58-61); pool_init_outside_window is not emitted"
+      ],
+      "finding": "pool_init_outside_window does not appear as an outcome, reason code, or branch in the new modules; the mentions are explanatory references to the retired T038 vocabulary."
+    },
+    {
+      "id": "must_not.no_lower_cost_equals_complete",
+      "status": "PASS",
+      "evidence": [
+        "Complete verdict is driven by reconciliation.agreement + !exhausted_budget + !blockers; cost_record values are not used as evidence of coverage (per_pool_coverage.py:533-538)"
+      ],
+      "finding": "Lower observed cost does not promote an incomplete window to complete; only the per-pool reconciliation and exhaustion flags decide."
+    },
+    {
+      "id": "quality.tests",
+      "status": "PASS",
+      "evidence": [
+        "PYTHONPATH=src python -m pytest tests/test_per_pool_window_t039.py -q reports 73 passed",
+        "PYTHONPATH=src python -m pytest tests/ --ignore=tests/test_abi_artifacts.py -q reports 1340 passed, 6 skipped (pre-existing Foundry / gpg / sorted-currency skips)"
+      ],
+      "finding": "73 new tests pass and the full suite remains green."
+    },
+    {
+      "id": "quality.ruff_format",
+      "status": "PASS",
+      "evidence": [
+        "PYTHONPATH=src python -m ruff format --check src/ tests/ reports '147 files already formatted'"
+      ],
+      "finding": "Ruff format passes with no changes required."
+    },
+    {
+      "id": "quality.ruff_check",
+      "status": "PASS",
+      "evidence": [
+        "PYTHONPATH=src python -m ruff check src/ tests/ reports 'All checks passed!'"
+      ],
+      "finding": "Ruff check passes."
+    },
+    {
+      "id": "quality.mypy_strict",
+      "status": "PASS",
+      "evidence": [
+        "PYTHONPATH=src python -m mypy --strict src/ reports 'Success: no issues found in 85 source files'"
+      ],
+      "finding": "Strict mypy passes on the entire src/ tree, including the new qualification modules."
+    }
+  ],
+  "must_not_violations": [],
+  "unknowns": [],
+  "required_changes": [],
+  "residual_risks": [
+    "The on-chain Initialize-scan resolver that produces pool_init_block + pool_init_block_hash is an operator-side run-time action: the deterministic planner accepts operator-supplied Initialize evidence and refuses to guess, but the live resolve-and-acquire loop still depends on T038's hook-scan resolver and the live endpoints (logged in Attempt-001-developer.json residual_risks).",
+    "The already_covered outcome (no new chain reads for a fully-covered re-run) is fully exercised by tests and emitted by plan_per_pool_window + plan_per_pool_window_after_resume; the runner-side wiring that consults PriorCoverage at run time is out of scope for T039 and lives with T100 / T104 (developer residual_risks).",
+    "Plan's expected_logical_call_count is an upper bound computed from coverage_to_block - coverage_from_block + 1 distinct event blocks; the actual distinct event block count is unknown at planning time. The invariant is asserted by assert_logical_call_count_equals_sub_ranges_plus_headers downstream using the runner's observed count.",
+    "REASON_LATEST_REJECTED and REASON_WALL_CLOCK_REJECTED are exported vocabulary items used by build_per_pool_coverage_report's blocker list, but parse_finalized_pin_payloads surfaces REASON_FINALIZED_UNAVAILABLE / REASON_FINALIZED_DISAGREEMENT / REASON_PROVIDER_RETURNED_NON_FINALIZED / REASON_NON_FINALIZED_BLOCK_REJECTED instead. The helper rejects latest / non-finalized / wall-clock bounds by refusing to substitute anything when the finalized tag is unavailable; the more specific reason codes are reserved for callers that surface them separately."
+  ]
+}
