@@ -12,7 +12,7 @@
   },
   "active_phase": "P05",
   "active_task": "T052",
-  "workflow_state": "READY",
+  "workflow_state": "AWAITING_REVIEW",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -518,14 +518,14 @@
     },
     "T052": {
       "phase": "P05",
-      "status": "READY",
+      "status": "AWAITING_REVIEW",
       "depends_on": [
         "T051",
         "T053"
       ],
       "task_file": "todo/phases/P05-features-and-valuation/T052.md",
-      "attempt": 0,
-      "base_commit": null,
+      "attempt": 1,
+      "base_commit": "361c1120b52f72d6721030c87b7a87f9b54498a8",
       "candidate_commit": null,
       "approved_commit": null,
       "latest_review": null
