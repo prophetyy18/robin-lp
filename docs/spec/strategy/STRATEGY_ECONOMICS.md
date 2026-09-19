@@ -99,7 +99,17 @@ USDG 本位对下跌风险采用非对称处理：`DOWN_TREND`、向下跳跃、
 
 V1 的策略默认规则中，目标 token 的完整 5 分钟 USDG K 线涨幅超过 100% 时，
 策略不得产生增加风险的候选动作，并重新评估已有仓位；这属于策略决策，不改变
-系统运行状态，也不是中央风险网关的全局限制。
+系统运行状态，也不是中央风险网关的全局限制。该规则与 `CTRL-MARKET-001` 的
+5 分钟应急条件使用同一套度量：在周期结束时计算
+`return_5m = close_usdg / open_usdg - 1`，只有完整周期可以触发，未完成周期不得
+触发，`return_5m > 100%`（严格大于）即触发。
+
+两条已确认的 5 分钟规则因此共用一条公式、一个 bar 约定和同一份 T053 合格、按
+时间点可复现的 USDG 5 分钟 K 线及其 300 秒窗口，也共用同一套边界对齐与时钟约定
+（即 T050 的 bar 层已经要求的口径：窗口边界按其自身时钟对齐到窗口长度的整数倍，
+bar 自带数据时间与可用时间，规则判定不使用墙钟）。两条规则都不自行定义第二套
+bar，差异只在阈值方向与其响应归属：本条是策略决策，`CTRL-MARKET-001` 是策略
+模型之外的 `AUTO_EXIT` 应急条件。
 
 ### `ECO-EDGE-001` — 净经济价值决定是否承担 LP 风险
 
@@ -152,22 +162,32 @@ post-testnet paper/shadow 中用未接触时间样本和 walk-forward 证据评�
 
 ## 7. 可维护性边界
 
-策略框架至少分离以下可替换组件：
+策略框架至少把输入、可替换组件和输出三类名字分开，组件名不得表示输出，输出名
+也不得表示组件（`T060`）：
 
 ```text
-AdmissionEligibilitySnapshot
-MarketFeatureSnapshot
-RegimeModel
-FeeOpportunityModel
-CandidatePolicy
-EconomicEvaluator
-StrategyDecision
+AdmissionSnapshot          输入，不可变、版本化
+MarketSnapshot             输入，不可变、版本化
+PortfolioSnapshot          输入，不可变、版本化
+RegimeModel                组件，可替换
+FeeOpportunityModel        组件，可替换
+RegimeAssessment           输出
+FeeOpportunityAssessment   输出
+CandidateAction            输出
 ```
 
-组件通过版本化、不可变、带单位和时间语义的结构通信。规则模型、统计模型或未来
-ML 模型可以替换 `RegimeModel`/`FeeOpportunityModel`，但不得改变 USDG 账本、
-候选动作语义、集中风险检查、交易执行或审计事件格式。引擎不得包含按 token
-symbol、具体地址或某个模型名称分支的策略逻辑。
+上述三类名字都是已实现或已由任务承担的名字。输入、组件与输出通过版本化、不可变、
+带单位和时间语义的结构通信。规则模型、统计模型或未来 ML 模型可以替换
+`RegimeModel`/`FeeOpportunityModel`，但不得改变 USDG 账本、候选动作语义、集中风险
+检查、交易执行或审计事件格式。引擎不得包含按 token symbol、具体地址或某个模型名称
+分支的策略逻辑。
+
+回测今天实际跨越的边界是事件驱动引擎的策略回调：引擎把当时的可见事件与账本交给
+回调（`StrategyDecisionRequest`），回调返回 `StrategyDecision`（`T061`）。上面那组
+输入、组件和输出是策略层自己的边界，引擎不直接调用它。两个边界之间的适配器由
+T065 拥有：它把每次决策的可见事件与账本投影成上述输入，调用策略层并取得
+`CandidateAction`，再把它转成回调要求的 `StrategyDecision` 交回引擎。规则策略与
+模型因此都只经由同一条适配路径被回测，模型不得获得适配器之外的任何引擎级权力。
 
 训练模型受同一约束，并额外适用 ADR-014 第 5 条：模型只估计决策所需的未来市场量
 （离开区间概率、未来已实现波动、成交量、费率密度、再平衡损失代理），不预测收益，
