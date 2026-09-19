@@ -3,7 +3,7 @@
 状态：审计发现与处置记录，由 Owner direction A0008 驱动，并已并入 Owner 2026-09-19
 对 A0008 所提 9 条问题的逐条裁定（见第 2 节与第 5 节）。
 本文件不是验收证据：任何任务的完成仍由独立 Reviewer 对 exact candidate commit 判定。
-本文件不定义产品意图，也不新增任务义务；未修的项与已排期的后续事项见第 4、5 节。
+本文件不定义产品意图，也不新增任务义务；未修的项与已排期的后续事项见第 4、5 节与第 8.3 小节。
 
 本文件已随 `todo/amendments/A0008/review-001.json`（判 FAIL）之后的修复轮更新：该轮按
 Owner 2026-09-19 追加裁定「同类缺陷一并修正」修正了第 1 节表中三行（T021 / T027 / T039）、
@@ -181,6 +181,9 @@ Owner 对 A0008 的 9 条问题逐条裁定，其中两项按「先记账、后�
 （`spec_revision` 提升为 v1-2026-09-19-documentation-integrity、`intent_revision` 未改）
 按现状接受，无后续动作。
 
+第 1、2 条涉及的 qualification 与 `robinhood_lp.config`，与另外三个包同属「不在 ADR-006 十层
+枚举内」的一组；该组的完整名单、来源、复算命令与计数见第 8.2 小节。本节不为这些包设立层。
+
 ## 6. 复核用命令（只读）
 
 ```bash
@@ -215,3 +218,94 @@ grep -n "bootstrap" AGENTS.md CLAUDE.md todo/WORKFLOW.md
 
 证据边界：本文件只记录这次 bootstrap 改了什么与为什么；`.claude/` 的改动本身没有独立审查，
 它的可核对性来自这三处文本与 `tools/workflow/core.py:80-108`、`:498-520` 的实际拒绝行为一致。
+
+## 8. A0011 补记：三处依赖方向违规与五个未分类包的扫描结果
+
+A0011 第 (1) 项把三处代码级违规记为「recorded in docs/implement/DOCUMENTATION_INTEGRITY_AUDIT.md」，
+并要求按 ADR-006 修掉它们。在本节之前，本审计只在 §1 记录了三行在 `ARCHITECTURE.md` §2.2 的
+路径与层归属、在 §3 记录了 ADR-006 承诺的层检查不存在、在 §5 第 1、2 条记录了两项层问题的
+延期，没有把三处导入本身落盘；A0011 的三条未决项之一正是这一点。经 Manager 2026-09-19 对
+A0011 三条未决项的处置（记录在 `todo/amendments/A0011/prophet-001.json` 的 rationale），
+本节补记这三处与 §8.2 的扫描结果，使 A0011 第 (1) 项的前提成立。本节不改变任何既有裁定，
+不设立任何层，不新增任务义务（依据的任务是 A0011 新建的 T007），也不是验收证据。
+
+发现方式：用标准库 `ast` 只读解析 `src/robinhood_lp/**.py` 的导入边（不导入、不执行任何模块），
+把每个模块按 ADR-006 声明的方向映射后，列出「下层 import 上层」的边、指向未分类层的边，以及
+这些包涉及的跨包导入边。§8.1 的三处与 §8.2 的计数都来自这一方法；模块位置与行号在下表中按
+仓库实测写出。
+
+### 8.1 三处与 ADR-006 冲突的导入边（T007 的范围）
+
+| # | 位置 | 事实 | ADR-006 的规定 | 处置 |
+| --- | --- | --- | --- | --- |
+| 1 | `src/robinhood_lp/strategy/baselines.py:102,106` | `strategy` 包 import `robinhood_lp.backtest.engine`（`StrategyDecision`、`StrategyDecisionRequest`）与 `robinhood_lp.backtest.events`（`KIND_OBSERVATION`、`KIND_SWAP`、`SOURCE_PRIORITY_DATA`、`BacktestEvent`） | :32 要求 strategy 只依赖不可变的 domain/feature 合同；:41-42 要求真正共享的类型下沉到更低的 contracts/domain 模块 | 共享合同下沉到更低的 contracts/domain 模块，两层都从那里 import，而不是放宽规则 |
+| 2 | `src/robinhood_lp/replay/replayer.py:83`、`src/robinhood_lp/replay/ticks.py:87` | reconstruction 的两个模块 import `robinhood_lp.storage.schema` 的记录类型（`InitializeLogRecord`、`ModifyLiquidityLogRecord`、`SwapLogRecord`、`DonateLogRecord`、`ProtocolFeeUpdatedLogRecord`） | :31 要求 reconstruction 与 features 消费注入的读端口，而不是具体的 storage/RPC 模块 | 记录合同移到不含 I/O、非 adapter 的模块，重建按注入的输入消费 |
+| 3 | `src/robinhood_lp/qualification/hook_pack.py`（docstring 自 :27 起；执行在正文 :68） | docstring 写 "It must not import RPC, storage, the config layer, signer code, or any network time"，正文却 import `robinhood_lp.config.models` 的 `ALL_HOOK_MASK`、`DELTA_TO_ACTION_FLAG`、`DYNAMIC_FEE_FLAG`、`HOOK_FLAG_BITS` | :28-29 把共享不可变值归给 protocol/domain；`robinhood_lp.config` 在十层枚举内没有归属（§5 第 2 条） | 判为导入错、docstring 真：flag 位常量改从 protocol 层取 |
+
+当前计数的复现命令（仓库根执行，只读）：
+
+```bash
+git log --oneline -1    # 计数所依据的提交：43ef12a
+# 1) strategy -> backtest：2 条（102 / 106）
+grep -rn "^from robinhood_lp.backtest\|^import robinhood_lp.backtest" src/robinhood_lp/strategy/
+# 2) replay -> storage/rpc：2 条（83 / 87）；features 的同类边：0 条
+grep -rn "^from robinhood_lp.storage\|^from robinhood_lp.rpc" src/robinhood_lp/replay/
+grep -rn "^from robinhood_lp.storage\|^from robinhood_lp.rpc" src/robinhood_lp/features/
+# 3) 非 config 包 -> config：1 条（68）
+grep -rn "^from robinhood_lp.config\|^import robinhood_lp.config" src/robinhood_lp/ | grep -v "^src/robinhood_lp/config/"
+```
+
+### 8.2 五个不在 ADR-006 十层枚举内的包（Manager 2026-09-19 扫描）
+
+- 名单：`robinhood_lp.config`、`robinhood_lp.ingestion`、`robinhood_lp.discovery`、
+  `robinhood_lp.qualification`、`robinhood_lp.quality`。
+- 计数：62 条跨包导入语句（任一端点属于这五个包之一，且两端不属于同一个包）。
+
+来源是 Manager 2026-09-19 对 A0011 的扫描；本审计此前没有这份名单。下面的命令按同一 AST 方法
+复算，输出 62：
+
+```bash
+/home/lpdev/miniconda3/envs/robinhood-lp/bin/python - <<'PY'
+import ast
+import pathlib
+
+PKGS = {"config", "ingestion", "discovery", "qualification", "quality"}
+
+
+def pkg(module):
+    parts = module.split(".")
+    return parts[1] if len(parts) > 1 else None
+
+
+count = 0
+for path in pathlib.Path("src/robinhood_lp").rglob("*.py"):
+    source = ".".join(path.relative_to("src").with_suffix("").parts)
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            targets = [node.module] if node.module.startswith("robinhood_lp") else []
+        elif isinstance(node, ast.Import):
+            targets = [alias.name for alias in node.names if alias.name.startswith("robinhood_lp")]
+        else:
+            targets = []
+        for target in targets:
+            if (pkg(source) in PKGS or pkg(target) in PKGS) and pkg(source) != pkg(target):
+                count += 1
+print(count)
+PY
+```
+
+本节只落盘名单与计数：它不为这些包设立层，也不改动 `ARCHITECTURE.md` §2.2 已有的映射——§2.2
+为其中四个包的模块给出了 §2.1 既有层的映射，`robinhood_lp.config` 则没有任何 §2.2 行。其中两项
+已由 §5 第 1、2 条登记为延期事项（qualification 层、`robinhood_lp.config` 的 platform 层）；
+正式设立需要按 ADR-006 的 Migration trigger 走一次单独的 ADR 变更，在此之前由 T006 以有理由、
+有期限的例外条目记录。
+
+### 8.3 待定事项：纯新增任务的计划重构是否也要在 revision 上留标记
+
+这是 A0011 第三条未决项。现状（本条只记录事实，不确立约定）：A0011 只新建 4 个任务、只改
+phase README 的任务行与 `todo/config.yaml` 的 `tasks` 条目，没有改动 `docs/intent/` 与
+`docs/spec/` 的任何文本（本轮的审计补记属 `docs/implement/`，不在 `intent_revision` 与
+`spec_revision` 各自对应的文档集内），因此这两个值都与基线逐字节相同，也没有为「只新增任务、
+不改文档」这一情形单独留标记。`todo/WORKFLOW.md` 只说 PROPHET 层「may change both
+revisions」，即允许而不要求。是否需要一条计划结构上的约定（例如为纯计划重构引入独立的标记
+或字段）留待 Owner 决定；本条不自行确立该约定，也不改动这两个值。

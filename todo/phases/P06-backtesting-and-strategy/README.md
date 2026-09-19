@@ -22,3 +22,4 @@ parameter selection on held-out data, or profitability-based acceptance.
 - [T064 — Add robustness and anti-overfitting analysis](T064.md)
 - [T065 — Implement the maintainable USDG-first adaptive-Range strategy](T065.md)
 - [T066 — Build versioned threshold experiments and provisional candidate review](T066.md)
+- [T067 — Write the strategy authoring guide](T067.md)

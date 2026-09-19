@@ -103,6 +103,43 @@
       "approved_commit": null,
       "latest_review": null
     },
+    "T007": {
+      "phase": "P00",
+      "status": "PLANNED",
+      "depends_on": [
+        "T006"
+      ],
+      "task_file": "todo/phases/P00-engineering-baseline/T007.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
+    },
+    "T008": {
+      "phase": "P00",
+      "status": "PLANNED",
+      "depends_on": [],
+      "task_file": "todo/phases/P00-engineering-baseline/T008.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
+    },
+    "T009": {
+      "phase": "P00",
+      "status": "PLANNED",
+      "depends_on": [
+        "T006"
+      ],
+      "task_file": "todo/phases/P00-engineering-baseline/T009.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
+    },
     "T010": {
       "phase": "P01",
       "status": "APPROVED",
@@ -660,6 +697,20 @@
         "T065"
       ],
       "task_file": "todo/phases/P06-backtesting-and-strategy/T066.md",
+      "attempt": 0,
+      "base_commit": null,
+      "candidate_commit": null,
+      "approved_commit": null,
+      "latest_review": null
+    },
+    "T067": {
+      "phase": "P06",
+      "status": "PLANNED",
+      "depends_on": [
+        "T060",
+        "T061"
+      ],
+      "task_file": "todo/phases/P06-backtesting-and-strategy/T067.md",
       "attempt": 0,
       "base_commit": null,
       "candidate_commit": null,
