@@ -12,7 +12,7 @@
   },
   "active_phase": "P05",
   "active_task": "T049",
-  "workflow_state": "AWAITING_REVIEW",
+  "workflow_state": "APPROVED",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -476,7 +476,7 @@
     },
     "T049": {
       "phase": "P05",
-      "status": "AWAITING_REVIEW",
+      "status": "APPROVED",
       "depends_on": [
         "T012",
         "T042",
@@ -485,9 +485,9 @@
       "task_file": "todo/phases/P05-features-and-valuation/T049.md",
       "attempt": 2,
       "base_commit": "12464ed390f2216d749d54a76aca4f24b14c681c",
-      "candidate_commit": null,
-      "approved_commit": null,
-      "latest_review": null
+      "candidate_commit": "52923f21ca39bcd24b8b71d25d3add809b804a6a",
+      "approved_commit": "52923f21ca39bcd24b8b71d25d3add809b804a6a",
+      "latest_review": "todo/reviews/P05/T049/review-002.json"
     },
     "T050": {
       "phase": "P05",
