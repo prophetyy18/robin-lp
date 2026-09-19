@@ -1085,6 +1085,24 @@ def test_a_prophet_change_targets_no_task_and_names_the_prophet_agent(tmp_path: 
     assert prepared["task_ids"] == []
 
 
+def test_prophet_change_refuses_a_task_it_would_only_ignore(tmp_path: Path) -> None:
+    """--task is a restriction, not an instruction, and it says nothing about a
+    PROPHET change. Accepting one silently would let a caller believe it had
+    constrained a change it had not -- including when the name is a task that
+    does not exist."""
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    for name in ("T001", "T099"):
+        with pytest.raises(WorkflowError, match="takes no --task"):
+            manager.prepare_amendment(
+                task_ids=[name],
+                layer="PROPHET",
+                summary="names a task it would ignore",
+                owner_direction="Not a valid PROPHET change.",
+            )
+
+
 _NEW_CONTRACT = (
     "# T002 — New task\n\n## Dependencies\n\nT000\n\n## Outcome\n\nTest outcome.\n\n"
     "## Deliverables\n\nTest file.\n\n## Acceptance\n\nValue is good.\n\n"

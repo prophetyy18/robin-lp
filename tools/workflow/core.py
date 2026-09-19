@@ -1432,9 +1432,17 @@ class WorkflowManager:
         if active_repairs:
             raise WorkflowError("cannot start an amendment while maintenance is unfinished")
         normalized = tuple(dict.fromkeys(task_ids))
-        # An PROPHET change restructures the plan and may create tasks that do not
-        # exist yet, so it targets no task in particular; every other layer
-        # corrects work that is already in the plan.
+        # ``--task`` names the *existing* contracts a change may edit. It is a
+        # restriction, not an instruction: it never creates anything, and a task
+        # an amendment adds is created by the contract file and config entry the
+        # author writes. A PROPHET change therefore cannot be given one -- it
+        # targets no existing contract, and accepting a name it ignores would let
+        # a caller believe it had constrained a change it had not.
+        if layer == "PROPHET" and normalized:
+            raise WorkflowError(
+                "a PROPHET change takes no --task: it targets no existing contract, and "
+                "the tasks it adds are created by the files the prophet writes"
+            )
         if not normalized and layer != "PROPHET":
             raise WorkflowError(f"a {layer} amendment requires at least one target task")
         if len(normalized) > 8:
