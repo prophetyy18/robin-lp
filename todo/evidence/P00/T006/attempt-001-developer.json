@@ -1,0 +1,34 @@
+{
+  "task_id": "T006",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the deterministic offline import-graph checker (T006). The new tool tools.check_imports parses src/robinhood_lp/ with the stdlib ast, builds a deterministic edge list, and fails on (a) imports from a lower tier to a higher one per ADR-006 (protocol/domain -> rpc -> storage -> reconstruction -> features -> strategy/backtest -> risk -> execution, with application / orchestration above strategy/risk/execution and below presentation / reports), (b) package-level import cycles, (c) time/random/datetime imports inside the protocol, replay, features, strategy and backtest tiers, (d) modules the layer map does not classify, and (e) ARCHITECTURE.md §2.2 rows whose declared layer disagrees with the layer map. Findings are matched against the closed exception list in docs/implement/ci/suppressions.toml, which now carries the documented robinhood_lp.config case (ADR-006 reserves a platform layer for a future ADR; expiry 2027-06-30). The raw edge list is reproducible (verified across two runs). The check is wired into .github/workflows/ci.yml as a strictly additive required step. tools.check_citations/checker.py gained a one-block rule filter so a T006 entry in the shared suppressions.toml never leaks into the T005 'unused' check (T005's acceptance for its own entries is unchanged). All 17 T006 seeded regressions pass; all 35 T005 + T006 tests pass; strict mypy, ruff check, and ruff format --check are clean on the new and modified files.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/test_import_graph.py tests/test_documentation_citations.py",
+      "result": "35 passed in 5.32s (17 T006 regressions + 18 T005 regressions; 0 failed)"
+    },
+    {
+      "command": "PYTHONPATH=src python -m tools.check_imports check --suppressions docs/implement/ci/suppressions.toml --config todo/config.yaml --architecture docs/spec/architecture/ARCHITECTURE.md",
+      "result": "import-graph check passed: no findings (exit 0)"
+    },
+    {
+      "command": "python -m tools.check_imports edges",
+      "result": "283 deterministic edges emitted across two runs; diff /tmp/edges1.csv /tmp/edges2.csv returns no differences"
+    },
+    {
+      "command": "python -m ruff format --check tools/check_imports tools/check_citations tests/test_import_graph.py",
+      "result": "13 files already formatted (clean)"
+    },
+    {
+      "command": "python -m ruff check tools/check_imports tools/check_citations tests/test_import_graph.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python -m mypy --strict tools/check_imports tools/check_citations/checker.py tests/test_import_graph.py",
+      "result": "Success: no issues found in 8 source files"
+    }
+  ],
+  "residual_risks": [
+    "tools/check_citations/checker.py gained a one-block filter that limits 'suppression-unused' findings to T005 rules. The filter is additive and preserves T005's behaviour for its own entries; a future change to suppressions.toml that introduces a rule name absent from both checkers' known-rule sets will be silently ignored by both, which is the intended contract but worth re-checking when a third checker joins."
+  ]
+}

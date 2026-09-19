@@ -59,6 +59,24 @@ jobs:
               --suppressions docs/implement/ci/suppressions.toml \
               --config todo/config.yaml
 
+      # T006: deterministic offline import-graph checker. Enforces
+      # ADR-006's dependency direction against every
+      # ``robinhood_lp.*`` module under ``src/robinhood_lp/``,
+      # parses §2.2 of ARCHITECTURE.md to confirm the layer map and
+      # the binding document agree, and fails on import cycles,
+      # unseeded-clock imports inside the deterministic tiers, and
+      # unclassified modules. The step is strictly additive: it
+      # never skips, never xfails, and does not weaken any
+      # existing check.
+      - name: Import-graph dependency check (T006)
+        shell: bash -l {0}
+        run: |
+          conda run -n "$CONDA_ENV_NAME" \
+            python -m tools.check_imports check \
+              --suppressions docs/implement/ci/suppressions.toml \
+              --config todo/config.yaml \
+              --architecture docs/spec/architecture/ARCHITECTURE.md
+
       - name: Ruff check
         shell: bash -l {0}
         run: conda run -n "$CONDA_ENV_NAME" ruff check .

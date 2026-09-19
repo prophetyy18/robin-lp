@@ -193,8 +193,15 @@ def run(
             continue
         unlisted.append(finding)
 
+    # Filter suppressions to entries that this checker produces. T006
+    # (the import-graph checker) adds entries with rules such as
+    # ``layer-direction`` to the same ``suppressions.toml`` file;
+    # T005 is not the contract owner for those entries and they must
+    # not appear here as "unused" findings.
+    relevant_entries = [entry for entry in entries if entry.rule in _T005_RULES]
+
     _, unused = partition_used_and_unused(
-        entries,
+        relevant_entries,
         ((finding.rule, finding.path, finding.token) for finding in failures),
     )
     for entry in unused:
@@ -232,3 +239,20 @@ def format_findings(findings: Iterable[Finding], repo_root: Path | str) -> str:
 
 
 __all__ = ["CheckError", "format_findings", "run"]
+
+
+#: Rule names produced by the T005 citation checker. The shared
+#: ``suppressions.toml`` file also carries entries for the T006
+#: import-graph checker; the ``suppression-unused`` check scopes
+#: itself to these rules so a T006 entry never leaks into a T005
+#: failure.
+_T005_RULES: frozenset[str] = frozenset(
+    {
+        "module-path",
+        "member-access",
+        "task-id",
+        "requirement-id",
+        "phase-tasks",
+        "architecture-section22",
+    }
+)
