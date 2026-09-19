@@ -1,0 +1,129 @@
+{
+  "task_id": "T005",
+  "base_commit": "2f6d2b93d3756047b4c7cafd6bb55954757692d6",
+  "candidate_commit": "4bdc9a51afbfcbb8633ae8794a26f2524d400c1b",
+  "verdict": "PASS",
+  "checks": [
+    {
+      "id": "worktree_HEAD_matches_candidate",
+      "status": "PASS",
+      "evidence": [
+        "git -C /home/lpdev/lp-worktrees/review-t005-attempt-001 rev-parse HEAD => 4bdc9a51afbfcbb8633ae8794a26f2524d400c1b",
+        "git log shows: 4bdc9a5 feat(t005): candidate attempt 1; parent: 2f6d2b9 chore(workflow): mark T005 ready (== base_commit)"
+      ],
+      "finding": "HEAD of the review worktree equals the candidate commit (4bdc9a51afbfcbb8633ae8794a26f2524d400c1b) and is a direct child of the recorded base."
+    },
+    {
+      "id": "checker_resolves_five_kinds",
+      "status": "PASS",
+      "evidence": [
+        "tools/check_citations/resolvers.py exposes resolve_module_paths (robinhood_lp.* paths under src/), resolve_member_accesses (Class.member; second-component not a file extension; first component must be a class/enum/module under src/), resolve_task_ids (Txxx in todo/config.yaml), resolve_requirement_ids (G-/ADM-/WEB-/ECO-/CTRL-/M-/DS-/R* identifiers vs owning docs), resolve_architecture_section22 (specialised §2.2 row check), and resolve_phase_tasks (Tasks list per phase README vs config.yaml).",
+        "Spot-checked families: G-LIVE-01 -> PROJECT_GOALS.md; ADM-TECH-01 -> ASSET_ADMISSION.md; M-IL-01 -> LP_METRICS.md; R12 -> todo/README.md. 51 G-*, 24 ADM-*, 22 M-* identifiers detected.",
+        "Phase P00 README tasks extracted: {T000,T001,T002,T003,T004,T005,T006,T007,T008,T009,T015}; matches config.yaml P00 set exactly (resolve_phase_tasks returns no finding).",
+        "Architecture §2.2 resolver returns 0 findings on the committed repo (PLANNED rows for T083 and T084-T086 are correctly skipped per the contract).",
+        "Edge-case spot check on member-access: foo.md => skipped (file extension); os.environ => skipped (rule does not apply); ChainId.value => resolves as class member."
+      ],
+      "finding": "All five resolution kinds are implemented and produce the documented behaviour on the real repository."
+    },
+    {
+      "id": "fail_closed_on_input_failures",
+      "status": "PASS",
+      "evidence": [
+        "tools/check_citations/checker.py:78-87 returns a module-path Finding when src/robinhood_lp/ is missing.",
+        "checker.py:104-113 returns a document-set Finding when the discovered document set is empty (covers both 'empty documents=[] argument' and 'no docs at all').",
+        "suppressions.py:67-75 raises SuppressionError on missing/unreadable TOML; checker.py:177-188 converts it into a suppressions Finding.",
+        "tests/test_documentation_citations.py::test_missing_document_set_fails_closed PASSED (passes documents=[] and asserts a document-set finding is produced).",
+        "tests/test_documentation_citations.py::test_unreadable_suppression_entry_fails_closed PASSED (writes 'this is not valid TOML !!!' and asserts a suppressions finding is produced).",
+        "tests/test_documentation_citations.py::test_unparsable_architecture_section22_fails_closed PASSED (writes a §2.2 row for T999 which is not in config.yaml; asserts architecture-section22 finding).",
+        "tests/test_documentation_citations.py::test_empty_scan_fails_closed PASSED (creates a repo with no docs at all; asserts a document-set finding)."
+      ],
+      "finding": "Missing/empty document set, unreadable suppression entry, unparsable §2.2 row, and empty scan all fail closed with explicit Finding objects rather than silently passing."
+    },
+    {
+      "id": "suppressions_registry_format",
+      "status": "PASS",
+      "evidence": [
+        "docs/implement/ci/suppressions.toml carries four suppression entries, each with rule, reason, owner, expiry (plus optional location and token).",
+        "suppressions.py:91 enforces allowed_fields = {rule, reason, owner, expiry, location, token}; unknown fields raise SuppressionError. REQUIRED_FIELDS check at line 96.",
+        "Real findings vs suppressions (produced by temporarily emptying suppressions.toml and re-running the checker): ADR-009-display-decimal-boundary.md:54 (robinhood_lp.protocol.sqrt_price_x96_to_price), ADR-009-display-decimal-boundary.md:55 (robinhood_lp.protocol.price_to_sqrt_price_x96), todo/phases/P08-operations-and-web/T084.md:13 (robinhood_lp.web), todo/phases/P08-operations-and-web/T084.md:14 (robinhood_lp.ops.dossier). All four suppression entries match these findings by rule, token, and location.",
+        "Unused-suppression invariant: tests/test_documentation_citations.py::test_unused_suppression_is_fatal PASSED (writes a stale suppression that matches no finding; asserts a suppression-unused finding is produced)."
+      ],
+      "finding": "docs/implement/ci/suppressions.toml holds four closed exception entries with rule/reason/owner/expiry, and each matches exactly one real finding; the unused-suppression check is enforced."
+    },
+    {
+      "id": "seeded_regressions_actually_fire",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_documentation_citations.py contains five seeded regression tests: test_module_path_seeded_regression, test_member_access_seeded_regression, test_task_id_seeded_regression, test_requirement_id_seeded_regression, test_phase_tasks_seeded_regression. All PASS on the committed repo.",
+        "Perturbation experiment: for each regression, the assertion was temporarily rewritten to require an impossible rule name and the test was re-run (pytest with -p no:cacheprovider after clearing tests/__pycache__). All five failed with non-zero rc (rc=1), confirming each test is wired to its specific resolver.",
+        "Per-test results: test_module_path_seeded_regression rc=1, test_member_access_seeded_regression rc=1, test_task_id_seeded_regression rc=1, test_requirement_id_seeded_regression rc=1, test_phase_tasks_seeded_regression rc=1. The test file was restored with `git restore` after each perturbation (git status clean afterwards)."
+      ],
+      "finding": "Each of the five seeded regressions actually fails when its assertion is perturbed; the can-it-fail property is verified."
+    },
+    {
+      "id": "ci_wiring_strictly_additive",
+      "status": "PASS",
+      "evidence": [
+        "git diff 2f6d2b9 4bdc9a5 -- .github/workflows/ci.yml shows one insertion: a single new step 'Document citation check (T005)' placed between the existing Pytest step (line 47-48) and the Ruff check step (line 62-64).",
+        "No existing job was modified or removed; the quality job still runs Install Miniconda -> Provision environment -> Pytest -> Document citation check -> Ruff check -> Ruff format check -> Mypy -> Upload test artifacts, in that order.",
+        "The new step runs `python -m tools.check_citations check --suppressions docs/implement/ci/suppressions.toml --config todo/config.yaml` and exits non-zero on findings; it never skips, never xfails, never weakens an existing check."
+      ],
+      "finding": "CI integration is strictly additive: one new required step in the existing quality job, no existing step or job modified."
+    },
+    {
+      "id": "no_third_party_dependency",
+      "status": "PASS",
+      "evidence": [
+        "git diff 2f6d2b9 4bdc9a5 -- pyproject.toml requirements.in requirements.lock.txt environment.yml shows zero changes.",
+        "All imports under tools/check_citations/ are from the Python standard library: ast, json, re, tomllib, argparse, sys, collections.abc, dataclasses, pathlib, typing.cast.",
+        "The checker performs no network I/O: it reads src/, docs/, todo/, and the suppressions/config files only; AST parsing is local; no requests, urllib, httpx, socket, or urlopen references."
+      ],
+      "finding": "No third-party dependency added; no network access required."
+    },
+    {
+      "id": "protected_paths_untouched",
+      "status": "PASS",
+      "evidence": [
+        "git diff --name-only 2f6d2b9 4bdc9a5 lists 11 paths; none under tools/workflow/, .claude/, todo/schemas/, docs/intent/, docs/spec/, or any other task's contract file.",
+        "Touched paths: .github/workflows/ci.yml, docs/implement/ci/suppressions.toml, tests/test_documentation_citations.py, todo/config.yaml, todo/evidence/P00/T005/attempt-001-developer.json, tools/check_citations/{__init__,__main__,checker,resolvers,suppressions,tokens}.py.",
+        "todo/config.yaml is modified only for the standard workflow state transition (workflow_state READY->AWAITING_REVIEW; T005 own status READY->AWAITING_REVIEW; attempt 0->1; base_commit populated). The contract text, depends_on list, task_file pointer, phase, and every other task's record are unchanged. This pattern matches every prior candidate commit (T051, T052, T060, T061, T062) and is the documented workflow-controller transition explicitly accepted in the prior review record at todo/reviews/P05/T052/review-001.json (check id 'protected_prefix_files_not_touched').",
+        "docs/implement/ci/suppressions.toml is the file the contract explicitly mandates this task must create/edit."
+      ],
+      "finding": "No protected path is touched by the candidate diff outside the standard workflow state transition in todo/config.yaml."
+    },
+    {
+      "id": "developer_commands_pass",
+      "status": "PASS",
+      "evidence": [
+        "python -m tools.check_citations check => 'citation check passed: no findings' (exit 0).",
+        "python -m pytest tests/test_documentation_citations.py -q => 18 passed in 4.64s (exit 0).",
+        "ruff format --check tools/check_citations/ tests/test_documentation_citations.py => '7 files already formatted' (exit 0).",
+        "ruff check tools/check_citations/ tests/test_documentation_citations.py => 'All checks passed!' (exit 0).",
+        "mypy --strict tools/check_citations/ tests/test_documentation_citations.py => 'Success: no issues found in 7 source files' (exit 0).",
+        "python -m pytest tests/ -q --ignore=tests/test_abi_artifacts.py => 1944 passed, 6 skipped in 20.40s (exit 0). The six skips are pre-existing (test_oracle_drift.py and test_oracle_review_provenance.py require Foundry/GPG; test_protocol_ids.py has a known reordered-inputs vector), as recorded in the developer evidence."
+      ],
+      "finding": "Every developer-reported command reproduces the reported exit code and output; the 1944-test claim is confirmed."
+    },
+    {
+      "id": "suppressions_match_real_findings",
+      "status": "PASS",
+      "evidence": [
+        "Temporarily replaced docs/implement/ci/suppressions.toml with 'suppressions = []' and re-ran the checker. Result: 4 module-path findings listed exactly: ADR-009 line 54 (robinhood_lp.protocol.sqrt_price_x96_to_price), ADR-009 line 55 (robinhood_lp.protocol.price_to_sqrt_price_x96), T084.md line 13 (robinhood_lp.web), T084.md line 14 (robinhood_lp.ops.dossier). File was then restored from /tmp/orig_suppressions.toml backup.",
+        "Each finding matches its suppression entry on rule (module-path), token (exact match), and location substring (docs/spec/architecture/adr/ADR-009-display-decimal-boundary.md or todo/phases/P08-operations-and-web/T084.md).",
+        "Module _resolve_module_path returns None for all four tokens, confirming each citation is genuinely unresolved (not merely suppressed by accident).",
+        "Reasons align with the contract: ADR-009 floats will be deleted by T012 attempt 2; T084 is PLANNED, T083 is PLANNED. Owners (@T012-owner, @T083-owner, @T084-owner) and expiries (2026-12-31 / 2027-06-30) are recorded."
+      ],
+      "finding": "All four suppressions match real, currently-unresolved module-path findings and carry valid owner/expiry metadata."
+    }
+  ],
+  "must_not_violations": [],
+  "unknowns": [],
+  "required_changes": [],
+  "residual_risks": [
+    "The four module-path suppressions are pinned to documents T005 cannot edit (ADR-009 and T084.md). Reviewers on every T005-touching attempt must verify the suppressions are still required (the bound modules have not yet landed) and that the owners/expiries are still appropriate. The next natural expiry date is 2026-12-31 (ADR-009 entries).",
+    "The requirement-id resolver treats family wildcards like 'ADM-TECH-*' as informational (resolver skips them); the family-has-at-least-one-defined-identifier invariant is exercised only against the committed repository, not against the fixture repos built by the seeded regressions (fixture repos lack the family owner docs).",
+    "The §2.2 resolver parses one row at a time and treats the first backticked token in a cell as the primary anchor; multi-line module cells or escaped pipes inside backticks are not handled. Architecture edits that introduce such shapes will require extending the parser.",
+    "Module attribute discovery is static (AST-based), so re-exports created via module-level __getattr__ or __all__ metaprogramming under src/robinhood_lp/ will not be detected.",
+    "The pre-existing tests/test_abi_artifacts.py failure observed in the main checkout is unrelated to T005; the developer correctly excluded it from the suite and the worktree-local failure mode does not regress any existing behaviour."
+  ]
+}
