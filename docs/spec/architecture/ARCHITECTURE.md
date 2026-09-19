@@ -95,7 +95,7 @@ application / backtest orchestration
 | 1 | T012 | `robinhood_lp.protocol.math` | protocol/domain |
 | 1 | T013 | oracle regeneration harness: `tests/test_oracle_drift.py`, `tools/reviewers/allowed_signers` | protocol/domain |
 | 2 | T020 | `robinhood_lp.rpc.adapter` | rpc adapter |
-| 2 | T021 | `robinhood_lp.protocol.abi` (pinned artifacts) | protocol/domain |
+| 2 | T021 | `robinhood_lp.protocol.abi_artifacts` (pinned V4 artifacts: `docs/implement/protocol-artifacts/v4-core-e50237c.json`, `tools/oracle/src/SelectorOracle.sol`) | protocol/domain |
 | 2 | T022 (retired; superseded by T026) | `robinhood_lp.discovery.registry` | storage |
 | 2 | T023 (retired; superseded by T027) | `robinhood_lp.discovery.eligibility` | storage |
 | 2 | T024 | `robinhood_lp.discovery.chain_capability` | rpc adapter |
@@ -135,8 +135,8 @@ application / backtest orchestration
 | 9 | T095 | mainnet canary execution | isolated execution service |
 | 9 | T096 | final V1 traceability dossier | presentation / ops |
 | 2 | T026 | `robinhood_lp.discovery.registry` (pool-first entry, research universe) | storage |
-| 2 | T027 | `robinhood_lp.discovery.eligibility` (research-universe classification) | storage |
-| 3 | T039 | per-pool extended-history acquisition | application / orchestration |
+| 2 | T027 | `robinhood_lp.discovery.research_classification` (research-universe classification) | storage |
+| 3 | T039 | `robinhood_lp.qualification.{per_pool_window,per_pool_coverage,per_pool_window_runbook}` (per-pool extended-history acquisition) | presentation / reports |
 | 10 | T100 | `robinhood_lp.research.dataset` | storage |
 | 10 | T101 | `robinhood_lp.research.panel` (labels, splits, training harness) | backtest / research |
 | 10 | T102 | `robinhood_lp.research.models` (model-backed strategy components) | strategy |

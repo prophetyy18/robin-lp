@@ -5,6 +5,10 @@
 本文件不是验收证据：任何任务的完成仍由独立 Reviewer 对 exact candidate commit 判定。
 本文件不定义产品意图，也不新增任务义务；未修的项与已排期的后续事项见第 4、5 节。
 
+本文件已随 `todo/amendments/A0008/review-001.json`（判 FAIL）之后的修复轮更新：该轮按
+Owner 2026-09-19 追加裁定「同类缺陷一并修正」修正了第 1 节表中三行（T021 / T027 / T039）、
+第 2 节末行（`todo/WORKFLOW.md`），并把同类残留登记为第 4 节第 8 条；修复轮没有做别的改动。
+
 ## 来源与方法
 
 - Owner direction：A0008（2026-09-19，记录于 `todo/amendments/A0008/`）。
@@ -34,9 +38,29 @@
 | T043 | robinhood_lp.replay.evidence | `robinhood_lp.qualification.hook_pack` |
 | T062 | robinhood_lp.backtest.baselines | `robinhood_lp.strategy.baselines` |
 
-上表 9 行是 Owner direction 点名的错误路径。原表里其余已验收任务的行本来就指向真实模块
-（T010–T012、T020–T024、T026、T027、T030、T033、T039、T041、T050–T053、T060、T061），
-未改动；未验收任务的行是计划路径（见第 4 节第 5 条）。补充的行：
+上表 9 行是 Owner direction 点名的错误路径。原表里其余的行中，未验收任务的行是计划路径
+（见第 4 节第 5 条）；已验收任务的行按「该行是否指向这一行任务自己交付的模块、模块组或产物」
+复核。
+
+第一版沿用了「其余已验收行本来就指向真实模块」的判断，但那只核对了路径是否存在，没有核对
+归属，因此当时列出的 T020–T024、T026、T027、T030、T033、T039、T041 等行里混着三处不合格：
+T021 的行指向 `robinhood_lp.protocol.abi`，而该模块由 T010 交付（docstring 标注 T010，
+`e6ed1f3` 引入），T021 自己交付的是 `robinhood_lp.protocol.abi_artifacts`、它钉住的
+`docs/implement/protocol-artifacts/v4-core-e50237c.json` 和 `tools/oracle/src/SelectorOracle.sol`
+（`06e7b48d..ec391edc`）；T027 的行指向 `robinhood_lp.discovery.eligibility`，而该模块由 T023
+交付（`5deda6f`），T027 自己交付的是 `robinhood_lp.discovery.research_classification`
+（`671ff8c`、`a0686f7`）；T039 的行没有指向任何模块，而 T039 交付的是
+`robinhood_lp.qualification.{per_pool_window,per_pool_coverage,per_pool_window_runbook}`
+（`363823e6..90ecfcb0`）。review-001 判 FAIL 后，修复轮把这三行改成 §2.2 里现在的写法，其中
+T039 的行因落到 `robinhood_lp.qualification` 包上，层归属随 §2.2 表下的映射一并改为
+`presentation / reports`。修复轮没有窄化表下的说明，说明原文不变。
+
+修复轮用同一条规则复核了 §2.2 里全部 APPROVED 行：把每行第一个反引号里的 dotted 名解析为
+`src/` 下的模块文件或包，确认它存在，并确认它属于该行自己的任务（出现在该任务
+`base_commit..candidate_commit` 的 diff 里，或该模块 docstring 标注该任务）。T013、T014、T015
+三行指向 `tests/` 与 `tools/` 下的非模块产物，同样按存在性与归属核对（T013 的
+`tests/test_oracle_drift.py`、`tools/reviewers/allowed_signers`，T014 的
+`tools/oracle/test/MathOracle.t.sol`，T015 的 `tests/test_workflow_contracts.py`）。补充的行：
 T014、T015、T035、T036、T037、T038（并标注它已由 T039 取代）、T049，
 以及 qualification 包（T036 / T038 / T043 三行）。
 
@@ -61,6 +85,7 @@ T014、T015、T035、T036、T037、T038（并标注它已由 T039 取代）、T0
 | `P00` / `P01` phase README | 任务表与 `todo/config.yaml` 不一致：P00 缺 T015，P01 缺 T014 | 补齐；P00 同时列入本次新建的 T005、T006 |
 | `CLAUDE.md:61-63` | 依赖清单「in no route's scope and change only by an explicit bootstrap act」，与实测不符 | 改为与 `AGENTS.md` 一致的三句表述：前三个路径 bootstrap 专有；依赖清单不在任何修正层或维护通道范围内、只有任务合同明确要求时才由该任务的 Developer 修改；`src/`、`tests/`、`.github/` 是普通开发任务工作面（维护通道只能改它预声明的具体路径，不得触碰 `.github/` 或 execution、risk、signer 代码） |
 | `ADR-008:78` | 用不存在的文件名 `threat-model.md` 指 `docs/spec/security/THREAT_MODEL.md` | 改为完整路径 `docs/spec/security/THREAT_MODEL.md` |
+| `todo/WORKFLOW.md:175-179` | 与 `AGENTS.md`、`CLAUDE.md` 相反：把 `tools/workflow/`、`.claude/`、`todo/schemas/`、`.github/`、`src/`、`tests/` 与依赖清单一起说成「不在任何层的范围内，只能由显式 bootstrap 动作变更」 | 改为与 `AGENTS.md`、`CLAUDE.md` 一致的三句表述：前三个路径任何角色与任何层都不得改；依赖清单（`pyproject.toml`、`requirements.in`、`requirements.lock.txt`）不在任何修正层与维护通道范围内、只有任务合同明确要求时才由该任务的 Developer 修改；`src/`、`tests/`、`.github/` 是普通开发任务的工作面（Developer 在合同范围内改、经独立 Reviewer 后才算完成，维护通道只能改它预声明的具体路径、不得触碰 `.github/` 或 execution、risk、signer 代码）。修复轮的决定依据：同一句是 Owner direction 第 2 项点名的同一条错误主张的第三处实例，且 `todo/WORKFLOW.md` 在 PROPHET 可写范围内（`tools/workflow/core.py:498-506`），Owner 2026-09-19 追加裁定要求直接改句而不是只登记为残留 |
 
 `README.md` 与 `CLAUDE.md` 的 T038 引用是 Owner direction 只点名 README.md 的同类缺陷；
 ARCHITECTURE 的两行退役标注与 §5 的 T023 同属「把退役任务当作现行归属」这一类。四处都
@@ -68,9 +93,14 @@ ARCHITECTURE 的两行退役标注与 §5 的 T023 同属「把退役任务当�
 References、说明取代关系的正文）不动，见第 4 节第 4 条。
 
 Owner 于 2026-09-19 裁定「全部一并修正」：接受上述同类扩展，并追加两处同规则修正
-（`CLAUDE.md` 的依赖清单措辞、`ADR-008` 的 `threat-model.md` 文件名），见上表末两行。
-同一裁定还要求把 `AGENTS.md` 第一句的维护通道部分写准，因此两处都按可核对的
-路径白名单表述（维护记录里预声明的具体路径）。
+（`CLAUDE.md` 的依赖清单措辞、`ADR-008` 的 `threat-model.md` 文件名），见上表
+`CLAUDE.md:61-63` 与 `ADR-008:78` 两行。同一裁定还要求把 `AGENTS.md` 第一句的维护通道部分
+写准，因此两处都按可核对的路径白名单表述（维护记录里预声明的具体路径）。
+
+`todo/WORKFLOW.md:175-179` 一行是 review-001 的两项 required change 之一，由同一条裁定处理：
+`AGENTS.md` 与 `CLAUDE.md` 已改正而 `todo/WORKFLOW.md` 仍是旧主张，等于同一事实在两份
+同级文档里各说一遍，因此修复轮直接改句，不留「已知未修」条目。同类但无法在本层修的一处
+（`.claude/agents/prophet.md`）登记为第 4 节第 8 条。
 
 ## 3. 机制缺口：本次新增的两个任务
 
@@ -113,6 +143,13 @@ Owner 于 2026-09-19 裁定「全部一并修正」：接受上述同类扩展�
 7. `ARCHITECTURE.md` §4 称 "Each ADR is immutable once accepted"，而 ADR-008 自身写明
    优先级规则 "can be amended by editing ADR-008 alone"；本次按 Owner direction 就地修改
    ADR-008，但未在两处加写例外条款。已裁定为后续事项，见第 5 节第 3 条。
+8. `.claude/agents/prophet.md:56-58` 仍写 `tools/workflow/`、`.claude/`、`todo/schemas/`、
+   `.github/`、`src/`、`tests/` 与依赖清单「outside every role and are changed only by an
+   explicit bootstrap act」，即第 2 节已改正的那条主张的最后一份副本；`.claude/` 不在任何
+   角色的范围内（只能由显式 bootstrap 动作变更），因此本层无法改，与第 3 条的
+   `.claude/agents/planner.md` 同属必须由 bootstrap 处理的一类。修复轮按 Owner 2026-09-19
+   「同类缺陷一并修正」的裁定把 `todo/WORKFLOW.md` 改对，此处是同类中唯一改不动的一处，
+   因此登记而不是留白。
 
 ## 5. 已排期的后续事项（Owner 2026-09-19 裁定）
 
@@ -132,7 +169,8 @@ Owner 对 A0008 的 9 条问题逐条裁定，其中两项按「先记账、后�
    这两道检查在 P06 收尾后才激活。本条只记录在这里，不写进任务合同。
 
 同一裁定对 9 条问题的其它处置：Q1 / Q2 / Q6 为「全部一并修正」，已并入第 2 节（含追加的
-`CLAUDE.md` 依赖清单措辞与 `ADR-008` 的 `threat-model.md` 文件名两处）；Q5（ADR-009 历史
+`CLAUDE.md` 依赖清单措辞与 `ADR-008` 的 `threat-model.md` 文件名两处，以及修复轮追加的
+`todo/WORKFLOW.md:175-179` 一句）；Q5（ADR-009 历史
 符号由 T005 例外条目覆盖）、Q8（§2.2 中 T015 记为 none (repository test)）、Q9
 （`spec_revision` 提升为 v1-2026-09-19-documentation-integrity、`intent_revision` 未改）
 按现状接受，无后续动作。
@@ -144,4 +182,10 @@ git log --oneline -1
 git diff --name-status <base> <candidate>          # 各任务候选提交的真实交付文件
 python -m tools.workflow validate                  # 计划有效性
 grep -rn "superseded_by" todo/config.yaml          # 退役任务与继任者
+# §2.2 每行归属：把该行第一个反引号里的 dotted 名解析成 src/ 下的文件或包，
+# 再确认该路径出现在该行任务自己的 base_commit..candidate_commit diff 里
+# （或该模块 docstring 标注该任务）；APPROVED 行的每个被点名路径都必须存在。
+git diff --name-status <task base_commit> <task candidate_commit>
+# 三份文档对 src/、tests/、.github/ 与依赖清单的说法应一致
+grep -n "bootstrap" AGENTS.md CLAUDE.md todo/WORKFLOW.md
 ```

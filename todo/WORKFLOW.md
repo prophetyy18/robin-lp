@@ -172,11 +172,17 @@ the reviewer:
   evidence pointers, review records, dependencies, phases and contract paths are
   all compared and must be byte-identical.
 
-Everything else is refused by omission: `tools/workflow/`, `.claude/`,
-`todo/schemas/`, `.github/`, `src/`, `tests/` and the dependency manifests are in
-no layer's scope at all. They are changed only by an explicit bootstrap act, and
-that is deliberate — a role that can rewrite the gate it is checked by is not
-checked by anything.
+Everything else is refused by omission. `tools/workflow/`, `.claude/` and
+`todo/schemas/` are in no role's and no layer's scope at all: only an explicit
+bootstrap act changes them, and that is deliberate — a role that can rewrite the
+gate it is checked by is not checked by anything. The dependency manifests
+(`pyproject.toml`, `requirements.in`, `requirements.lock.txt`) are outside every
+amendment layer and the maintenance lane, and only a Developer whose task contract
+requires it changes them. `src/`, `tests/` and `.github/` are the working surface
+of an ordinary development task — a Developer edits them inside its task contract
+and the work counts only after an independent review, and the maintenance lane may
+edit only the explicit paths its record declares in advance and may not touch
+`.github/` or execution, risk or signer code.
 
 Intent belongs to PROPHET rather than to the Planner. The Planner translates a
 goal into task text, and on the triaged route it may reach `docs/intent/` only to
