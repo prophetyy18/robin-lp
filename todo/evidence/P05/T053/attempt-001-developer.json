@@ -1,0 +1,38 @@
+{
+  "task_id": "T053",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the T053 point-in-time quote and gas valuation module under src/robinhood_lp/features/quote.py and its 93-test suite under tests/test_features_quote_t053.py. The implementation delivers every clause of the T053 contract: (1) a provider-neutral observation schema with observed_at / available_at / source / pair / block / time / confidence / staleness, numeraire_level (USDG / QUALIFIED_USD_STABLECOIN / ETH_DISPLAY_ONLY / RELATIVE_ONLY) and per-field unit (RAW_TOKEN_INTEGER / NUMERAIRE_UNITS / RATIO / DIMENSIONLESS), plus chain_id for cross-chain namespacing; (2) a ConversionGraph with explicit MissingPolicy (DELAYED / REVISED / DEPEGGED / MISSING / CROSS_RATE / OK) and per-edge staleness / policy (DIRECT / VIA_CROSS_RATE / DELAYED_TOLERATED / DEPEG_TOLERATED), plus convert_to_usdg / convert_observation / build_relative_only_bar that reject future data, refuse silent current-price substitution, and never assume stablecoin=1USD; (3) a per-numeraire QualificationBundle with one NumeraireQualification per level, exactly one selected, carrying confidence, staleness, rationale, and the non-1USD stablecoin_per_usdg_q64_64 ratio; (4) a RELATIVE_ONLY output path (RelativeOnlyBar) with no USD-denominated field anywhere, guarded by assert_no_usd_fields and ranking_blocked_between; (5) point-in-time USDG conversion shared by performance, exposure, and both 5-minute rules (FIVE_MINUTE_UP_SPIKE_FRACTION / FIVE_MINUTE_DOWN_SPIKE_FRACTION evaluated by the evaluate_five_minute_rules helper using the same QuoteBar); (6) complete bars carrying unit, window (per-edge max_staleness_seconds), observed_at, available_at, source, pair, confidence, and staleness — no non-market fundamental signal is imported. Acceptance evidence: 93 unit tests pass (delayed/revised/depegged/missing/cross-rate fixtures each tagged with the named MissingPolicy; prefix invariance via byte-identical bars and decision_time future-data rejection; USDG semantics shared across performance/exposure/5-min rules via the evaluate_five_minute_rules helper; per-numeraire fixtures including RELATIVE_ONLY carrying token1_per_token0_q64_64 with no USD field; ranking_blocked_between blocks USD vs RELATIVE_ONLY ranking; provenance via SourceKind and chain_id). Must-not is enforced: stablecoin = 1 USD is rejected by the stablecoin_per_usdg_q64_64 requirement; silent current-price substitution is impossible because convert_to_usdg returns MissingPolicy rather than a fabricated value; source/frequency mixing requires two distinct Observation rows via the SourceKind enum; RELATIVE_ONLY conversion to USD is rejected (usdg_per_token_q64_64 stays None); ETH-as-primary is rejected because the default graph has no ETH -> USDG edge. ruff format / check pass on all 152 files; mypy --strict passes on 89 source files including the new module and its tests; the full repository pytest run (excluding the foundry-gated test_abi_artifacts oracle test that fails before this change as well) reports 1488 passed and 6 skipped. Only allowed paths were touched (src/robinhood_lp/features/__init__.py, src/robinhood_lp/features/quote.py, tests/test_features_quote_t053.py) plus todo/config.yaml which was updated by the controller's prepare-develop state transition to IN_DEVELOPMENT and is not an edit attributable to this Developer.",
+  "commands": [
+    {
+      "command": "python -m pytest tests/test_features_quote_t053.py -q",
+      "result": "93 passed in 0.11s"
+    },
+    {
+      "command": "python -m pytest tests/ --ignore=tests/test_abi_artifacts.py -q",
+      "result": "1488 passed, 6 skipped in 14.20s"
+    },
+    {
+      "command": "python -m ruff format --check src/ tests/",
+      "result": "152 files already formatted"
+    },
+    {
+      "command": "python -m ruff check src/ tests/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python -m mypy --strict src/robinhood_lp/ tests/test_features_quote_t053.py",
+      "result": "Success: no issues found in 89 source files"
+    },
+    {
+      "command": "git status -uall && git diff --name-only",
+      "result": "todo/config.yaml (controller-driven IN_DEVELOPMENT transition); untracked: src/robinhood_lp/features/__init__.py, src/robinhood_lp/features/quote.py, tests/test_features_quote_t053.py. No protected prefix (docs/spec/, docs/intent/, todo/phases/, todo/schemas/, tools/workflow/, .claude/, CLAUDE.md, AGENTS.md, todo/README.md, todo/config.yaml) was modified by the Developer."
+    }
+  ],
+  "residual_risks": [
+    "The T053 contract expects a 'qualified, traceable, point-in-time USDG conversion source' from external evidence per todo/README.md §6. The framework exposes the convert_to_usdg contract (and the per-numeraire QualificationBundle) but does not yet wire a specific qualified external feed; consumers must provide a source whose ratio passes the NumeraireQualification.stablecoin_per_usdg_q64_64 record. This is an explicit deferral per todo/README.md §6 ('T053 needs a qualified, traceable, point-in-time USDG conversion source' as external evidence) and matches T053's deliverables (provider-neutral schema + conversion graph + qualification record).",
+    "The default depeg threshold is 5% absolute move in Q64.64 (DEFAULT_DEPEG_THRESHOLD_Q64_64). Production deployment should override this via convert_to_usdg(depeg_threshold_q64_64=...) once the qualified feed is wired.",
+    "The evaluate_five_minute_rules helper reports UP_SPIKE / DOWN_SPIKE verdicts but does not block strategy decisions itself; integration with the strategy layer (T065 / T070) is a downstream task.",
+    "The cross-rate scenario is modeled in the MissingPolicy enum but no edge in the default ConversionGraph produces CROSS_RATE directly; an external feed that surfaces a cross-rate reversal will need a dedicated edge or a refinement to the stablecoin -> USDG path.",
+    "The foundry-gated test_abi_artifacts test_artifact_byte_matches_regenerated_oracle_output fails in this worktree because forge is not on PATH; this is a pre-existing environmental issue unrelated to T053 (the same test passes in the main checkout)."
+  ]
+}
