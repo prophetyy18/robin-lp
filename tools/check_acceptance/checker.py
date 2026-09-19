@@ -22,12 +22,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
-from ..check_citations.suppressions import (
-    SuppressionError,
-    find_matching,
-    partition_used_and_unused,
-)
-from ..check_citations.suppressions import load as load_suppressions
 from . import Finding, contract_set
 from .parser import contract_set as _parser_contract_set
 from .parser import parse_contract
@@ -37,6 +31,12 @@ from .rules import (
     acceptance_present,
     acceptance_quantitative,
 )
+from .suppressions import (
+    SuppressionError,
+    find_matching,
+    partition_used_and_unused,
+)
+from .suppressions import load as load_suppressions
 
 
 class CheckError(Exception):

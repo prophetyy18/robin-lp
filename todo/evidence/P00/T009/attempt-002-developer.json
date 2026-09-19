@@ -1,0 +1,38 @@
+{
+  "task_id": "T009",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Replaced the cross-package import of ..check_citations.suppressions inside tools/check_acceptance/checker.py with a stdlib-only local loader. tools/check_acceptance/suppressions.py now uses tomllib to parse docs/implement/ci/suppressions.toml and re-implements find_matching and partition_used_and_unused inline, preserving the closed registry schema (rule/reason/owner/expiry/location/token) so every existing suppression entry still parses. checker.py now imports only from the local .suppressions module. All 25 pytest regressions pass, the check exits 0 on the committed repository, sys.modules no longer contains tools.check_citations after import, and ruff format/check plus mypy --strict are clean.",
+  "commands": [
+    {
+      "command": "python -c \"import tools.check_acceptance; import sys; print('tools.check_citations' in sys.modules)\"",
+      "result": "False"
+    },
+    {
+      "command": "python -c \"import tools.check_acceptance.checker; import sys; print('tools.check_citations' in sys.modules)\"",
+      "result": "False (was True before the refactor; the local stdlib loader no longer transitively imports a project module)"
+    },
+    {
+      "command": "python -m pytest tests/test_acceptance.py",
+      "result": "25 passed in 0.10s (same 25 cases the prior review accepted)"
+    },
+    {
+      "command": "python -m tools.check_acceptance check --repo-root .",
+      "result": "exit=0, prints the closed vocabulary block (verification surfaces, explicit outcome terms, placeholder markers, comparison operators, unit terms) followed by 'acceptance check passed: no findings'"
+    },
+    {
+      "command": "ruff format --check tools/check_acceptance/ tests/test_acceptance.py",
+      "result": "9 files already formatted"
+    },
+    {
+      "command": "ruff check tools/check_acceptance/ tests/test_acceptance.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "mypy --strict tools/check_acceptance/ tests/test_acceptance.py",
+      "result": "Success: no issues found in 9 source files"
+    }
+  ],
+  "residual_risks": [
+    "tools/check_citations/suppressions.py and tools/check_acceptance/suppressions.py now share the same TOML-loading and matching logic; if the T006 schema or matching semantics change in tools.check_citations, the T009 loader must be kept in sync manually until a shared stdlib-only helper is introduced."
+  ]
+}
