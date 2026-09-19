@@ -99,8 +99,9 @@ Owner 于 2026-09-19 裁定「全部一并修正」：接受上述同类扩展�
 
 `todo/WORKFLOW.md:175-179` 一行是 review-001 的两项 required change 之一，由同一条裁定处理：
 `AGENTS.md` 与 `CLAUDE.md` 已改正而 `todo/WORKFLOW.md` 仍是旧主张，等于同一事实在两份
-同级文档里各说一遍，因此修复轮直接改句，不留「已知未修」条目。同类但无法在本层修的一处
-（`.claude/agents/prophet.md`）登记为第 4 节第 8 条。
+同级文档里各说一遍，因此修复轮直接改句，不留「已知未修」条目。同类但不在任何层可写范围内
+的一处（`.claude/agents/prophet.md`）当时登记为第 4 节第 8 条；它已在 Owner 2026-09-19 授权的
+bootstrap 轮中改正，见第 4 节第 8 条与第 7 节。
 
 ## 3. 机制缺口：本次新增的两个任务
 
@@ -119,7 +120,7 @@ Owner 于 2026-09-19 裁定「全部一并修正」：接受上述同类扩展�
 
 两个任务的合同在 `todo/phases/P00-engineering-baseline/`，`todo/config.yaml` 中对应条目。
 
-## 4. 已发现、本次未修，记录在案的残留
+## 4. 已发现、记录在案的残留（含已由 bootstrap 轮关闭的条目）
 
 1. `src/robinhood_lp/qualification/hook_pack.py:27` 的 "qualification layer per ADR-006"
    与本仓库的 ADR-006 十层不一致（`src/` 不在本层可写范围）。已裁定为后续事项，见第 5 节
@@ -127,8 +128,12 @@ Owner 于 2026-09-19 裁定「全部一并修正」：接受上述同类扩展�
 2. `ADR-009:53-56` 引用两个已被删除的 protocol float helper（该 ADR 自身说明它们必须被删除），
    属历史引用；`docs/spec/` 只有 PROPHET 能改，因此由 T005 的有期限例外条目覆盖，而不是
    去改 ADR-009。
-3. `.claude/agents/planner.md:78-81` 仍写 `CONTRACT` / `SPEC` 两个层与「multiple
-   still-`PLANNED` task contracts」（A0007 已记录；`.claude/` 不在任何角色的范围内）。
+3. `.claude/agents/planner.md:78-81` 曾登记为残留（A0007 记录其只写 `CONTRACT` / `SPEC`
+   两个层与「multiple still-`PLANNED` task contracts」）。2026-09-19 bootstrap 轮**核实为
+   误报，不改**：该段落在讲 Planner 自己能接到的修正层，而同一文件 `:86-90` 紧接着明确写出
+   「Two layers are not yours. `SUPERSEDE` … and `PROPHET` … are authored by other roles」，
+   并要求被交到这两层时返回 `BLOCKED`。判据是该文件自身的两段合起来没有遗漏任何层，
+   因此不存在「与仓库规则相反」的主张。
 4. 历史性引用退役任务、语义正确、本次未改的位置：`ADR-005:57,119`、
    `ADR-013:8,108`、`ADR-014:8,114-115`、`ADR-015:75,102`、
    `docs/spec/security/THREAT_MODEL.md:135,138,143`、
@@ -143,13 +148,14 @@ Owner 于 2026-09-19 裁定「全部一并修正」：接受上述同类扩展�
 7. `ARCHITECTURE.md` §4 称 "Each ADR is immutable once accepted"，而 ADR-008 自身写明
    优先级规则 "can be amended by editing ADR-008 alone"；本次按 Owner direction 就地修改
    ADR-008，但未在两处加写例外条款。已裁定为后续事项，见第 5 节第 3 条。
-8. `.claude/agents/prophet.md:56-58` 仍写 `tools/workflow/`、`.claude/`、`todo/schemas/`、
+8. `.claude/agents/prophet.md:56-58` 曾写 `tools/workflow/`、`.claude/`、`todo/schemas/`、
    `.github/`、`src/`、`tests/` 与依赖清单「outside every role and are changed only by an
-   explicit bootstrap act」，即第 2 节已改正的那条主张的最后一份副本；`.claude/` 不在任何
-   角色的范围内（只能由显式 bootstrap 动作变更），因此本层无法改，与第 3 条的
-   `.claude/agents/planner.md` 同属必须由 bootstrap 处理的一类。修复轮按 Owner 2026-09-19
-   「同类缺陷一并修正」的裁定把 `todo/WORKFLOW.md` 改对，此处是同类中唯一改不动的一处，
-   因此登记而不是留白。
+   explicit bootstrap act」，即第 2 节已改正的那条主张的最后一份副本，而 `.claude/` 不在任何
+   层与维护通道的范围内。**2026-09-19 bootstrap 轮已改正**（Owner 当日授权）：该条现在写
+   `tools/workflow/`、`.claude/`、`todo/schemas/` 三个路径为 bootstrap 专有，`src/`、`tests/`、
+   `.github/` 为普通开发任务的工作面，依赖清单在任何修正层与维护通道之外；对 Prophet 的禁令
+   （这三类都不得触碰）逐字保留。同轮核实 `.claude/agents/prophet-reviewer.md:23-25` 对
+   PROPHET 变更的同类禁令**正确**（控制器 `_prophet_path_allowed` 同样拒绝这些路径），不改。
 
 ## 5. 已排期的后续事项（Owner 2026-09-19 裁定）
 
@@ -189,3 +195,23 @@ git diff --name-status <task base_commit> <task candidate_commit>
 # 三份文档对 src/、tests/、.github/ 与依赖清单的说法应一致
 grep -n "bootstrap" AGENTS.md CLAUDE.md todo/WORKFLOW.md
 ```
+
+## 7. Bootstrap 轮（Owner 2026-09-19 授权，关闭第 4 节第 8 条）
+
+`.claude/` 在任何修正层与维护通道的管辖之外，改动只能由显式 bootstrap 动作完成，因此这一步
+不在 A0008 内，也不经过 amendment 审查。Owner 当日明确授权后执行：
+
+- **改正** `.claude/agents/prophet.md:56-58`：原句把 `tools/workflow/`、`.claude/`、
+  `todo/schemas/`、`.github/`、`src/`、`tests/` 与依赖清单一并说成「outside every role and are
+  changed only by an explicit bootstrap act」。新句拆为三类事实：前三个路径 bootstrap 专有；
+  `src/`、`tests/`、`.github/` 是普通开发任务的工作面；依赖清单在任何修正层与维护通道之外。
+  对 Prophet 的禁令（这三类都不得触碰）逐字保留，未放宽任何约束。
+- **核实后不改** `.claude/agents/prophet-reviewer.md:23-25`：该处说 PROPHET 变更触碰
+  `tools/workflow/`、`.claude/`、`todo/schemas/`、`.github/`、`src/`、`tests/` 一律判失败——
+  这是**正确**的，控制器 `_prophet_path_allowed` 同样拒绝这些路径。
+- **核实为误报** `.claude/agents/planner.md:78-81`（原第 4 节第 3 条）：该段落讲 Planner 能接到的
+  修正层，同文件 `:86-90` 已明确排除 `PROPHET` 与 `SUPERSEDE` 并要求被交付这两层时返回
+  `BLOCKED`，合起来没有遗漏任何层，因此不存在与仓库规则相反的表述，不改。
+
+证据边界：本文件只记录这次 bootstrap 改了什么与为什么；`.claude/` 的改动本身没有独立审查，
+它的可核对性来自这三处文本与 `tools/workflow/core.py:80-108`、`:498-520` 的实际拒绝行为一致。

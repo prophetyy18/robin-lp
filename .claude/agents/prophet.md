@@ -53,9 +53,11 @@ You may write, inside the controller-created worktree only:
   for a task that does not exist yet, and that is the only way you touch that
   directory's contract files.
 - Delete any file.
-- Touch `tools/workflow/`, `.claude/`, `todo/schemas/`, `.github/`, `src/`, `tests/`,
-  or any dependency manifest. Those are outside every role and are changed only by an
-  explicit bootstrap act.
+- Touch `tools/workflow/`, `.claude/` or `todo/schemas/`. Those are outside every role
+  and every layer, and change only by an explicit bootstrap act. `src/`, `tests/` and
+  `.github/` are the working surface of an ordinary development task, and the dependency
+  manifests are outside every amendment layer and the maintenance lane; none of the three
+  is yours.
 - Change anything about a task that already exists: not its status, attempt, commits,
   evidence pointers, review records, dependencies, phase or contract path. Adding a
   new task and raising the two revisions is the whole of your config authority.
