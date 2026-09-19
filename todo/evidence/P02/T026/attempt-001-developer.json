@@ -1,0 +1,47 @@
+{
+  "task_id": "T026",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented T026: a complete, idempotent PoolKey registry that accepts pools by target token, by full V4 PoolKey, or by PoolId; explicit rejection of any 20-byte address supplied as a pool identity; a research-universe membership collection kept disjoint from the single active execution pool; and the configuration-side ResearchMemberConfig collection wired into RootConfig with strict validation. New code: src/robinhood_lp/discovery/onboarding.py (PoolOnboarder, OnboardingPath, AddressRejectionRecord, PoolIdentityNotFoundError, PoolIdentityMismatchError, PoolIdentityRejectionError, entry_path_for); src/robinhood_lp/discovery/research_universe.py (ResearchUniverse, ResearchMember, PoolRole, PoolMembershipView, build_membership_view, DuplicateResearchMemberError, UnknownResearchMemberError, EmptyBlockRangeError). Modifications: PoolRecord gains an entry_paths field; RootConfig gains research_universe with strict duplicate and chain-reference validation; ResearchMemberConfig is the strict pydantic model for a research member. New tests: tests/test_pool_onboarding.py (27 tests), tests/test_research_universe.py (38 tests), tests/test_research_universe_config.py (18 tests). All 83 new tests pass; full suite is 1238 passed / 6 skipped / 1 pre-existing T012 forge blocker failed (unrelated to T026). Ruff check + format clean; mypy strict clean on src and the three new test files.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_pool_onboarding.py -q",
+      "result": "27 passed in 0.14s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_research_universe.py -q",
+      "result": "38 passed in 0.10s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_research_universe_config.py -q",
+      "result": "18 passed in 0.17s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q",
+      "result": "1 failed, 1238 passed, 6 skipped in 12.68s (the single failure is the pre-existing tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output T012 forge blocker, unrelated to T026)"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src tests",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src tests",
+      "result": "141 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src",
+      "result": "Success: no issues found in 81 source files"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src tests/test_pool_onboarding.py tests/test_research_universe.py tests/test_research_universe_config.py",
+      "result": "Success: no issues found in 84 source files"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.workflow validate",
+      "result": "{\"status\": \"OK\"}"
+    }
+  ],
+  "residual_risks": [
+    "OUT-OF-SCOPE: tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails in this worktree because the T012-era forge-std SelectorOracle compile blocker is unaddressed; T026 does not touch this surface (the failure count and message are byte-identical to the base commit cbbf44d and the previous T022 review).",
+    "Operational: mypy on `src tests` (vs `src` alone) reports a pre-existing source-file-found-twice warning on tests/_storage_t031_fixtures.py (a top-level underscore-prefixed file sharing a name with the tests/ package); the failure is in the test fixtures, not in T026 code, and is reproducible on the base commit."
+  ]
+}

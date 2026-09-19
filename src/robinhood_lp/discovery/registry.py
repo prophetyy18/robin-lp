@@ -69,6 +69,15 @@ class PoolRecord:
     PoolId and identical PoolKey are duplicates and merged into a
     single row (``RegistryDuplicateError`` is *not* raised; the
     scanner counts the duplicate and continues).
+
+    T026 added the ``entry_paths`` set: the closed set of
+    :class:`OnboardingPath` values through which this row was added
+    by the explicit onboarding layer (``PoolOnboarder``). The set
+    starts empty for rows ingested via the T022 general scan path
+    and is populated when the user adds the pool by target token,
+    by ``PoolKey``, by ``PoolId``, or by more than one. The set
+    answers the T026 query "on which entry path was this pool
+    added?".
     """
 
     pool_id: PoolId
@@ -88,6 +97,11 @@ class PoolRecord:
     #: produced this row. Surfaces the V4 event's non-indexed data
     #: slot for downstream consumers; does not participate in identity.
     initial_tick: int | None = None
+    #: Entry paths through which this row was added (T026). The set
+    #: is intentionally mutable: ``PoolOnboarder`` adds the path each
+    #: time a successful onboarding call lands on this row. The
+    #: registry never invents a path itself.
+    entry_paths: set[str] = field(default_factory=set)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -112,6 +126,7 @@ class PoolRecord:
             and not self.token1_metadata.is_complete(),
             "sqrt_price_x96": self.sqrt_price_x96,
             "initial_tick": self.initial_tick,
+            "entry_paths": sorted(self.entry_paths),
         }
 
 

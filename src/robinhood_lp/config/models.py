@@ -509,6 +509,92 @@ class TargetTokenConfig(_StrictModel):
         return self
 
 
+class ResearchMemberConfig(_StrictModel):
+    """One ``(chain_id, PoolKey)`` row of the research universe (T026).
+
+    The research universe is the configuration collection that names
+    arbitrary pools the operator wants to study without giving them
+    any execution authority. ADR-014 keeps this collection disjoint
+    from the single active execution pool: a research member is not
+    an approved pool, never holds assets, and never produces a
+    transaction.
+
+    The configuration-side shape is intentionally minimal: chain_id,
+    the canonical ``PoolKey``, the inclusive block range the member
+    covers, the support level the operator assigns at registration
+    time, and a free-form note. The runtime-side counterpart
+    (:class:`robinhood_lp.discovery.research_universe.ResearchMember`)
+    adds the ``added_via`` entry path; the configuration does not
+    carry it because the configuration cannot know which path the
+    operator used at registration time (T026 acceptance: the entry
+    path is a runtime fact).
+
+    The block range fields are inclusive on both ends; ``None`` is
+    the sentinel for ``block_range_end`` meaning "no upper bound"
+    (the framework refuses a runtime range where the end is unknown,
+    but the configuration is the place to declare the user's intent).
+    """
+
+    chain_id: PositiveInt = Field(
+        ...,
+        description=(
+            "Chain on which the research pool is deployed; must match a ChainConfig entry."
+        ),
+    )
+    pool_key: PoolKey = Field(
+        ...,
+        description=(
+            "Canonical V4 PoolKey tuple (currency0, currency1, fee, "
+            "tick_spacing, hooks). The same identity rules as the "
+            "active-pool PoolKey apply."
+        ),
+    )
+    block_range_start: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Inclusive start block of the member's research window. "
+            '``0`` means "from the earliest block the framework can read".'
+        ),
+    )
+    block_range_end: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Inclusive end block of the member's research window. "
+            '``None`` is the sentinel for "no upper bound declared yet". '
+            "The runtime rejects an end that is less than the start."
+        ),
+    )
+    support_level: RunMode = Field(
+        default=RunMode.INGESTION,
+        description=(
+            "Support level the operator assigns to this member at "
+            "registration time. The runtime classifier (T027) may "
+            "raise or lower it on its own evidence; the value here "
+            "is the user's stated intent."
+        ),
+    )
+    notes: str = Field(
+        default="",
+        max_length=512,
+        description=(
+            "Free-form human notes; not parsed. Used to record why "
+            "the member was added or which dataset it is intended for."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _check_block_range_ordering(self) -> ResearchMemberConfig:
+        if self.block_range_end is not None and self.block_range_end < self.block_range_start:
+            raise ValueError(
+                f"research_universe member block_range_end="
+                f"{self.block_range_end} is less than block_range_start="
+                f"{self.block_range_start}"
+            )
+        return self
+
+
 class PoolConfig(_StrictModel):
     """A pool registered for the framework, scoped to a single chain.
 
@@ -575,6 +661,18 @@ class RootConfig(_StrictModel):
         default_factory=list,
         description=(
             "Zero or one PoolConfig is allowed in V1. Multi-pool operation is out of scope."
+        ),
+    )
+    research_universe: list[ResearchMemberConfig] = Field(
+        default_factory=list,
+        description=(
+            "Research-universe members (T026, ADR-014). The list is "
+            "disjoint from the active execution pool collection: a "
+            "research member holds no assets, produces no transactions "
+            "and grants no execution authority. An empty list is a "
+            "valid V1 configuration; the structural single-active-pool "
+            "rule on ``pools`` is independent of this collection and "
+            "fires regardless of how many research members are present."
         ),
     )
     target_token: TargetTokenConfig | None = Field(
@@ -658,6 +756,89 @@ class RootConfig(_StrictModel):
         return self
 
     @model_validator(mode="after")
+    def _check_research_universe_chain_consistency(self) -> RootConfig:
+        """Every research member must reference a known ChainConfig.
+
+        The collection is allowed to be empty (the common V1 case).
+        A populated research universe must reference one of the
+        chains declared at the root; the framework never silently
+        coerces the chain_id.
+        """
+        if not self.research_universe:
+            return self
+        chain_ids = {c.chain_id for c in self.chains}
+        for m in self.research_universe:
+            if m.chain_id not in chain_ids:
+                raise ValueError(
+                    f"research_universe member references chain_id="
+                    f"{m.chain_id} which has no ChainConfig entry"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_research_universe_no_duplicate_identities(self) -> RootConfig:
+        """No two research members may share the same ``PoolId``.
+
+        The research universe is keyed by ``(chain_id, PoolId)``. A
+        duplicate is a configuration mistake and is rejected at
+        parse time (T026 acceptance: a member list containing a
+        duplicate is rejected).
+        """
+        seen: set[tuple[int, str]] = set()
+        for m in self.research_universe:
+            # Derive the PoolId through the protocol layer so a
+            # future PoolKey ordering change cannot desync the two.
+            from robinhood_lp.protocol import (
+                Address,
+                Currency,
+            )
+            from robinhood_lp.protocol import (
+                PoolKey as _ProtocolPoolKey,
+            )
+
+            proto_pk = _ProtocolPoolKey(
+                currency0=Currency.from_address(Address.from_hex(m.pool_key.currency0)),
+                currency1=Currency.from_address(Address.from_hex(m.pool_key.currency1)),
+                fee=m.pool_key.fee,
+                tick_spacing=m.pool_key.tick_spacing,
+                hooks=Address.from_hex(m.pool_key.hooks),
+            )
+            key = (m.chain_id, proto_pk.to_pool_id().to_hex())
+            if key in seen:
+                raise ValueError(
+                    f"research_universe contains duplicate PoolKey "
+                    f"(chain_id={m.chain_id}, pool_id={key[1]}); "
+                    f"each member must have a unique (chain_id, PoolKey) pair"
+                )
+            seen.add(key)
+        return self
+
+    @model_validator(mode="after")
+    def _check_research_member_does_not_become_active_pool(self) -> RootConfig:
+        """A research member is never silently promoted to active pool.
+
+        The structural single-active-pool rule on ``pools`` is
+        independent of the research universe. The framework never
+        writes a research member into the active-pool collection
+        to make a multi-pool research setup pass validation; if the
+        operator wants a pool in both collections they must declare
+        it in both, and the two remain distinct identities at the
+        runtime layer (T026 acceptance: a research-universe member
+        is never reported as, or promoted by, the active execution
+        pool).
+        """
+        if not self.research_universe or not self.pools:
+            return self
+        # The two collections are disjoint by definition. A research
+        # member whose PoolKey matches the active PoolKey is a
+        # distinct identity (different ``support_level``, different
+        # notes), so we do not block it here. We only block the
+        # structural rule that a populated research universe must
+        # not weaken the v1 single-active-pool rule, which is
+        # enforced independently by ``_check_v1_single_active_pool``.
+        return self
+
+    @model_validator(mode="after")
     def _check_default_run_mode_not_live(self) -> RootConfig:
         if self.default_run_mode == RunMode.LIVE:
             raise ValueError(
@@ -702,6 +883,7 @@ __all__ = [
     "PoolConfig",
     "PoolKey",
     "ProjectRisk",
+    "ResearchMemberConfig",
     "RootConfig",
     "RunMode",
     "SignerConfig",
