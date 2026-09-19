@@ -47,6 +47,18 @@ jobs:
         shell: bash -l {0}
         run: conda run -n "$CONDA_ENV_NAME" pytest
 
+      # T005: deterministic offline citation checker. Wired here so every
+      # PR runs the same five resolvers that ``tests/test_documentation_citations.py``
+      # exercises. The step is strictly additive: it never skips, never
+      # xfails, and does not weaken any existing check.
+      - name: Document citation check (T005)
+        shell: bash -l {0}
+        run: |
+          conda run -n "$CONDA_ENV_NAME" \
+            python -m tools.check_citations check \
+              --suppressions docs/implement/ci/suppressions.toml \
+              --config todo/config.yaml
+
       - name: Ruff check
         shell: bash -l {0}
         run: conda run -n "$CONDA_ENV_NAME" ruff check .

@@ -1,0 +1,38 @@
+{
+  "task_id": "T005",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the deterministic offline citation checker introduced by T005. The checker resolves all five citation kinds described in the contract against the repository: (1) dotted robinhood_lp.* module/attribute paths under src/robinhood_lp/, (2) two-part Class.member accesses whose first component is a class, enum or module under src/robinhood_lp/, (3) Txxx task identifiers in todo/config.yaml plus the §2.2 row format of docs/spec/architecture/ARCHITECTURE.md, (4) requirement identifiers from the families owned by the Intent and Spec documents (G-*, ADM-*, WEB-*, ECO-*, CTRL-*, M-*, DS-*), and (5) the Tasks list of every phase README. Findings are matched against the closed exception list in docs/implement/ci/suppressions.toml; unlisted findings are fatal and unused suppressions are themselves fatal. The checker is wired into the existing quality job in .github/workflows/ci.yml as a strictly additive required step. Tests cover five seeded regressions (one per resolution kind), the can-it-fail pattern, and the four fail-closed inputs (missing/empty document set, unreadable suppression entry, unparsable §2.2 row, empty scan). The committed repository passes the check today; pre-existing findings against binding documents that T005 cannot edit are recorded as time-bound suppressions.",
+  "commands": [
+    {
+      "command": "python -m tools.check_citations check",
+      "result": "citation check passed: no findings (exit 0)"
+    },
+    {
+      "command": "python -m pytest tests/test_documentation_citations.py -q",
+      "result": "18 passed in 4.60s (exit 0). Includes 5 seeded regressions (module-path, member-access, task-id, requirement-id, phase-tasks), 5 fail-closed tests (missing document set, unreadable suppression entry, unparsable §2.2 row, empty scan, unused suppression), the document-set coverage test, the real-repository pass test, 3 real-module spot checks, and 2 helper tests."
+    },
+    {
+      "command": "ruff format --check tools/check_citations/ tests/test_documentation_citations.py",
+      "result": "7 files already formatted (exit 0)"
+    },
+    {
+      "command": "ruff check tools/check_citations/ tests/test_documentation_citations.py",
+      "result": "All checks passed! (exit 0)"
+    },
+    {
+      "command": "mypy --strict tools/check_citations/ tests/test_documentation_citations.py",
+      "result": "Success: no issues found in 7 source files (exit 0)"
+    },
+    {
+      "command": "python -m pytest tests/ -q --ignore=tests/test_abi_artifacts.py",
+      "result": "1944 passed, 6 skipped in 18.14s (exit 0). Skips are pre-existing: tests/test_oracle_drift.py and tests/test_oracle_review_provenance.py require Foundry/GPG; tests/test_protocol_ids.py has a known reordered-inputs vector. The single failure in tests/test_abi_artifacts.py is also pre-existing and unrelated (it requires the Foundry library not installed on this workstation)."
+    }
+  ],
+  "residual_risks": [
+    "Four pre-existing module-path findings against binding documents (ADR-009 §54-55 cite the float helpers that T012 attempt 2 will delete; T084.md cites robinhood_lp.web and robinhood_lp.ops.dossier for PLANNED tasks) are recorded as suppressions with explicit owners and expiry dates. The suppressions become fatal as soon as the bound documents move out of the protected layer or the cited modules land; reviewers must verify the owners and expiries on every T005-touching attempt.",
+    "The requirement-id resolver skips family wildcards like 'ADM-TECH-*' on the grounds that the contract only checks for a non-empty identifier set, not the wildcard itself. If a future contract amendment introduces a stricter rule that names the wildcard, this branch must be revisited.",
+    "The §2.2 resolver parses the architecture table row by row. Multi-line module cells or escaped pipes in module names will fall through the existing parser; if the architecture is later edited to use such shapes, the parser must be extended.",
+    "The checker discovers module attributes by static ast parsing rather than import-time inspection. Re-exports created via __getattr__ or module-level __all__ metaprogramming will not be detected; if such patterns appear under src/robinhood_lp/, the resolver must learn them.",
+    "The fixture-driven tests build a temporary repo with stripped directories, so the requirement-id family-owners do not exist in those fixtures. The resolver returns an empty defined set for missing owners and skips the meta-check, which keeps the unit tests fast but means the family-must-have-identifiers invariant is exercised only against the committed repository."
+  ]
+}

@@ -4,6 +4,11 @@
 # required fields below. Lint/test/type suppressions that lack an entry here
 # fail the "every suppression has reason, owner, and expiry" check.
 #
+# Each suppression below carries the four required fields (rule, reason,
+# owner, expiry). The location and token fields are optional and pin a
+# suppression to a specific finding when more than one finding shares a
+# rule.
+#
 # Format:
 #   [[suppression]]
 #   rule = "<lint rule / test id / dependency advisory id>"
@@ -11,6 +16,7 @@
 #   owner = "<github handle or role>"
 #   expiry = "<YYYY-MM-DD; review and renew or remove>"
 #   location = "<optional file path or pattern the suppression targets>"
+#   token = "<optional exact token the suppression covers>"
 #
 # Example (do NOT keep; this is purely illustrative):
 #
@@ -21,4 +27,40 @@
 #   expiry = "2026-12-31"
 #   location = "src/robinhood_lp/rpc/client.py"
 
-suppressions = []
+# T005 introduces the deterministic citation checker. Four findings exist
+# against binding documents that this task is not permitted to edit. They
+# are recorded explicitly so the check passes today; the expiry dates
+# force the owner to revisit them before the bound documents move out of
+# the protected layer.
+
+[[suppression]]
+rule = "module-path"
+reason = "ADR-009 cites the float helpers it requires T012 attempt 2 to delete; the names are intentionally absent from src/robinhood_lp/protocol/math.py until T012 attempt 2 lands."
+owner = "@T012-owner"
+expiry = "2026-12-31"
+location = "docs/spec/architecture/adr/ADR-009-display-decimal-boundary.md"
+token = "robinhood_lp.protocol.sqrt_price_x96_to_price"
+
+[[suppression]]
+rule = "module-path"
+reason = "ADR-009 cites the float helpers it requires T012 attempt 2 to delete; the names are intentionally absent from src/robinhood_lp/protocol/math.py until T012 attempt 2 lands."
+owner = "@T012-owner"
+expiry = "2026-12-31"
+location = "docs/spec/architecture/adr/ADR-009-display-decimal-boundary.md"
+token = "robinhood_lp.protocol.price_to_sqrt_price_x96"
+
+[[suppression]]
+rule = "module-path"
+reason = "T084 is PLANNED; its contract names robinhood_lp.web as the module it will deliver, and the module is intentionally absent until T084 is APPROVED."
+owner = "@T084-owner"
+expiry = "2027-06-30"
+location = "todo/phases/P08-operations-and-web/T084.md"
+token = "robinhood_lp.web"
+
+[[suppression]]
+rule = "module-path"
+reason = "T084 is PLANNED; its contract names robinhood_lp.ops.dossier as a module that is expected to exist when T083 lands, and the module is intentionally absent until T083 is APPROVED."
+owner = "@T083-owner"
+expiry = "2027-06-30"
+location = "todo/phases/P08-operations-and-web/T084.md"
+token = "robinhood_lp.ops.dossier"
