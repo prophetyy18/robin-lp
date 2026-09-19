@@ -12,7 +12,7 @@
   },
   "active_phase": "P00",
   "active_task": "T008",
-  "workflow_state": "READY",
+  "workflow_state": "AWAITING_REVIEW",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -118,11 +118,11 @@
     },
     "T008": {
       "phase": "P00",
-      "status": "READY",
+      "status": "AWAITING_REVIEW",
       "depends_on": [],
       "task_file": "todo/phases/P00-engineering-baseline/T008.md",
-      "attempt": 0,
-      "base_commit": null,
+      "attempt": 1,
+      "base_commit": "9075783e6086bc5ff99d66334bfa0b09219c7fc2",
       "candidate_commit": null,
       "approved_commit": null,
       "latest_review": null

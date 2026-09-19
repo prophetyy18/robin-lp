@@ -1,0 +1,51 @@
+{
+  "task_id": "T008",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented `python -m tools.progress`, the on-demand renderer introduced by T008. The package lives under `tools/progress/` (outside `tools/workflow/` and outside `src/robinhood_lp/`), depends only on the Python standard library, never writes to the repository, and reads every fact it prints from `todo/config.yaml` at run time. `python -m tools.progress` prints every phase (with its purpose from the phase's own README) and every task (with id, title, and Outcome paragraph from the contract), splits the APPROVED set into live and superseded with the successor named, lists blocked / changes-requested / triage-required / owner-decision tasks as such, and surfaces the ready-next set as every PLANNED task whose dependencies are all APPROVED and none of which is superseded -- the same condition `ready` checks. The `--check` flag performs the fail-closed validations (unreadable/unparsable config, status outside the state machine, unresolved dependency/supersession pointer, missing contract file, superseded-but-not-APPROVED) and exits non-zero on the first failure, zero on a clean plan. 22 committed tests cover the committed config, every declared failure input, the superseded/live split, the ready-next computation under status/dependency changes, the no-commit-SHA / no-timestamp / no-test-count invariant, and the working-tree cleanliness contract.",
+  "commands": [
+    {
+      "command": "python -m pytest tests/test_progress.py",
+      "result": "22 passed in 0.77s"
+    },
+    {
+      "command": "python -m pytest tests/test_workflow_contracts.py tests/test_workflow.py tests/test_progress.py tests/test_smoke.py",
+      "result": "73 passed in 3.64s"
+    },
+    {
+      "command": "python -m ruff check tools/progress tests/test_progress.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python -m ruff check .",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python -m ruff format --check tools/progress tests/test_progress.py",
+      "result": "5 files already formatted"
+    },
+    {
+      "command": "python -m ruff format --check .",
+      "result": "402 files already formatted"
+    },
+    {
+      "command": "python -m mypy tools/progress tests/test_progress.py",
+      "result": "Success: no issues found in 5 source files"
+    },
+    {
+      "command": "python -m tools.progress --check",
+      "result": "exit 0, prints 'no configuration issues found'"
+    },
+    {
+      "command": "python -m tools.progress",
+      "result": "exit 0, prints the rendered view (857 lines); the working tree is unchanged before and after (verified via `git status --porcelain` diff)"
+    },
+    {
+      "command": "grep -E '\\b[0-9a-f]{40}\\b' on the rendered output",
+      "result": "no SHA-shaped tokens printed"
+    }
+  ],
+  "residual_risks": [
+    "`mypy src tests` fails in this worktree with 'Source file found twice under different module names: \"_storage_t031_fixtures\" and \"tests._storage_t031_fixtures\"'; the same failure reproduces on the base commit before my changes are applied, so it is a pre-existing environment configuration defect (no `tests/__init__.py`, no `conftest.py`, no `pip install -e .`) that is outside this task's editable scope. The same applies to `tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output`, which fails because the `tools/oracle/lib/v4-core` and `tools/oracle/lib/v4-periphery` git submodules are not initialized in this worktree; the failure reproduces on the base commit and the file is in the existing excluded `tools/oracle` Ruff scope.",
+    "The renderer reads the plan at run time, so any future task whose contract title contains an em-dash and a non-task heading on the first line, or whose `## Outcome` section is missing, would print the `<missing title>` / `<outcome not declared>` placeholder instead of crashing. The validator already rejects tasks with missing or non-string `task_file`, so the renderer can never reach the placeholder path on a clean plan; the placeholder exists only as defensive text for an upstream regression that the validator should catch."
+  ]
+}
