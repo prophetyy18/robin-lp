@@ -1,4 +1,4 @@
-"""V1 strategy layer public surface (T060).
+"""V1 strategy layer public surface (T060 + T062).
 
 The ``robinhood_lp.strategy`` package is the strategy layer per
 ``docs/spec/architecture/ARCHITECTURE.md`` §2.1: it is a *pure*
@@ -11,9 +11,9 @@ replay layer (the replay output is consumed by the caller, which
 packages it into the :class:`MarketSnapshot` and
 :class:`PortfolioSnapshot` the strategy reads).
 
-The T060 module is the *contracts* half of the strategy layer.
-It defines the immutable, versioned snapshots the strategy reads;
-the substitutable :class:`RegimeModel` and
+T060 is the *contracts* half of the strategy layer. It defines
+the immutable, versioned snapshots the strategy reads; the
+substitutable :class:`RegimeModel` and
 :class:`FeeOpportunityModel` components with their respective
 :class:`RegimeAssessment` and
 :class:`FeeOpportunityAssessment` outputs (the sole supported
@@ -29,6 +29,13 @@ is constructed; the structured :class:`ReasonCode` vocabulary the
 the strategy submits to the central risk and execution layers.
 The candidate action is the proposal the strategy submits to
 execution; execution constructs the actual transactions.
+
+T062 is the *baseline policies* half. It exports five auditable,
+pool-agnostic baseline strategies
+(:class:`HoldStrategy`, :class:`BroadRangeStrategy`,
+:class:`FixedWidthStrategy`, :class:`VolatilityWidthStrategy`,
+:class:`OutOfRangeRebalanceStrategy`) that anchor every later
+strategy in the comparison harness.
 """
 
 from __future__ import annotations
@@ -86,6 +93,42 @@ from robinhood_lp.strategy.base import (
     evaluate_decision,
     validate_proposal,
 )
+from robinhood_lp.strategy.baselines import (
+    BASELINE_STRATEGY_VERSION,
+    DEFAULT_BASELINE_CAPITAL_Q64_64,
+    DEFAULT_BASELINE_LIQUIDITY,
+    DEFAULT_FIXED_HALF_WIDTH_TICKS,
+    DEFAULT_MAX_HALF_WIDTH_TICKS,
+    DEFAULT_MIN_HALF_WIDTH_TICKS,
+    DEFAULT_REBALANCE_HALF_WIDTH_TICKS,
+    DEFAULT_VOLATILITY_MULTIPLIER,
+    DEFAULT_VOLATILITY_WINDOW,
+    NOTES_BROAD_RANGE_HOLD,
+    NOTES_BROAD_RANGE_OPEN,
+    NOTES_FIXED_WIDTH_HOLD,
+    NOTES_FIXED_WIDTH_OPEN,
+    NOTES_FIXED_WIDTH_REBALANCE,
+    NOTES_HOLD,
+    NOTES_HOLD_INVALID_TICK,
+    NOTES_INSUFFICIENT_CAPITAL,
+    NOTES_NO_MARKET_DATA,
+    NOTES_REBALANCE_HOLD,
+    NOTES_REBALANCE_OPEN,
+    NOTES_REBALANCE_REBALANCE,
+    NOTES_TICKS_OUT_OF_BOUNDS,
+    NOTES_VOLATILITY_HOLD,
+    NOTES_VOLATILITY_OPEN,
+    NOTES_VOLATILITY_REBALANCE,
+    BaselineStrategyError,
+    BroadRangeStrategy,
+    FixedWidthStrategy,
+    HoldStrategy,
+    InvalidBaselineCapitalError,
+    InvalidBaselineTickError,
+    OutOfRangeRebalanceStrategy,
+    VolatilityWidthStrategy,
+    baseline_kind_tag,
+)
 
 __all__ = [
     "ADMISSION_SNAPSHOT_VERSION",
@@ -139,6 +182,41 @@ __all__ = [
     "collect_strategy_module_imports",
     "evaluate_decision",
     "validate_proposal",
+    # T062 baselines
+    "BASELINE_STRATEGY_VERSION",
+    "BroadRangeStrategy",
+    "DEFAULT_BASELINE_CAPITAL_Q64_64",
+    "DEFAULT_BASELINE_LIQUIDITY",
+    "DEFAULT_FIXED_HALF_WIDTH_TICKS",
+    "DEFAULT_MAX_HALF_WIDTH_TICKS",
+    "DEFAULT_MIN_HALF_WIDTH_TICKS",
+    "DEFAULT_REBALANCE_HALF_WIDTH_TICKS",
+    "DEFAULT_VOLATILITY_MULTIPLIER",
+    "DEFAULT_VOLATILITY_WINDOW",
+    "FixedWidthStrategy",
+    "HoldStrategy",
+    "InvalidBaselineCapitalError",
+    "InvalidBaselineTickError",
+    "BaselineStrategyError",
+    "NOTES_BROAD_RANGE_HOLD",
+    "NOTES_BROAD_RANGE_OPEN",
+    "NOTES_FIXED_WIDTH_HOLD",
+    "NOTES_FIXED_WIDTH_OPEN",
+    "NOTES_FIXED_WIDTH_REBALANCE",
+    "NOTES_HOLD",
+    "NOTES_HOLD_INVALID_TICK",
+    "NOTES_INSUFFICIENT_CAPITAL",
+    "NOTES_NO_MARKET_DATA",
+    "NOTES_REBALANCE_HOLD",
+    "NOTES_REBALANCE_OPEN",
+    "NOTES_REBALANCE_REBALANCE",
+    "NOTES_TICKS_OUT_OF_BOUNDS",
+    "NOTES_VOLATILITY_HOLD",
+    "NOTES_VOLATILITY_OPEN",
+    "NOTES_VOLATILITY_REBALANCE",
+    "OutOfRangeRebalanceStrategy",
+    "VolatilityWidthStrategy",
+    "baseline_kind_tag",
 ]
 
 __version__: str = "0.0.0"

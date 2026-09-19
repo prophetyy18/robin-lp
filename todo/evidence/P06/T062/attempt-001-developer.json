@@ -1,0 +1,41 @@
+{
+  "task_id": "T062",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented five auditable, pool-agnostic baseline LP strategies the research / comparison pipeline anchors every later strategy against. The new module src/robinhood_lp/strategy/baselines.py defines HoldStrategy, BroadRangeStrategy, FixedWidthStrategy, VolatilityWidthStrategy, and OutOfRangeRebalanceStrategy as frozen dataclasses implementing the T061 StrategyCallback signature (StrategyDecisionRequest) -> StrategyDecision. Every baseline takes market + portfolio state via the request, returns a candidate action, documents its parameters with defaults, snaps proposal ticks to tick_spacing, clamps to the V4 [MIN_TICK, MAX_TICK] domain, and translates out-of-bounds ticks or missing market data into a structured NO_TRADE verdict carrying BASELINE_TICKS_OUT_OF_BOUNDS / BASELINE_NO_MARKET_DATA. The broad-range policy explicitly uses min_usable_tick(tick_spacing) / max_usable_tick(tick_spacing) rather than the V4 int24 domain or any full / infinite claim the task contract forbids. The strategy __init__.py re-exports the new public surface. A new test module tests/test_strategy_t062.py covers zero-action golden scenarios for HoldStrategy, known-path golden scenarios for each strategy on flat / drift / volatile walks, the pool-agnostic property, parameter validation, layer purity (the strategy-layer purity assertion passes), tick snapping, insufficient-capital translation, and the version constant. All 33 new tests pass; the full repository suite (excluding the Solidity / Foundry oracle test which depends on tools/oracle/lib/ that the worktree does not check out) reports 1926 passed and 6 skipped with no regressions. ruff format --check, ruff check, and mypy --strict pass on the three files I edited / created.",
+  "commands": [
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_strategy_t062.py -q",
+      "result": "33 passed in 0.10s"
+    },
+    {
+      "command": "PYTHONPATH=/home/lpdev/lp-worktrees/dev-t062-attempt-001/src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ --ignore=tests/test_abi_artifacts.py -q",
+      "result": "1926 passed, 6 skipped in 14.22s (no regressions; the excluded test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output requires tools/oracle/lib/v4-core and tools/oracle/lib/v4-periphery, which are .gitignore-d external bootstrap artifacts not present in this worktree)"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/strategy/baselines.py src/robinhood_lp/strategy/__init__.py tests/test_strategy_t062.py",
+      "result": "3 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/strategy/baselines.py src/robinhood_lp/strategy/__init__.py tests/test_strategy_t062.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/robinhood_lp/strategy/baselines.py src/robinhood_lp/strategy/__init__.py tests/test_strategy_t062.py",
+      "result": "Success: no issues found in 3 source files"
+    },
+    {
+      "command": "git -C /home/lpdev/lp-worktrees/dev-t062-attempt-001 status",
+      "result": "Modified: src/robinhood_lp/strategy/__init__.py (T062 exports + docstring). Untracked: src/robinhood_lp/strategy/baselines.py, tests/test_strategy_t062.py. The todo/config.yaml modification visible in the diff is the controller-managed state change (status READY -> IN_DEVELOPMENT, attempt 0 -> 1) -- not authored by this Developer and not part of the implementation commit."
+    },
+    {
+      "command": "git -C /home/lpdev/lp-worktrees/dev-t062-attempt-001 diff --stat",
+      "result": "src/robinhood_lp/strategy/__init__.py | 86 +++++++++++++++++++++++++++++++++--\ntodo/config.yaml                      |  6 +--\n2 files changed, 85 insertions(+), 7 deletions(-) (no protected-prefix files: docs/intent/, docs/spec/, todo/phases/, todo/schemas/, tools/workflow/, .claude/ are untouched)"
+    }
+  ],
+  "residual_risks": [
+    "The baselines consume the T061 StrategyDecisionRequest (events + ledger) rather than the T060 MarketSnapshot / PortfolioSnapshot snapshots directly; this is the contract the event-driven backtest engine (T061) actually hands a callback. The T062 contract wording (takes market + portfolio snapshots, returns a candidate action per T060 contracts) is satisfied: the strategy reads visible events as the per-decision market state and the ledger (PositionState) as the per-decision portfolio state, and returns a T061 StrategyDecision (the equivalent proposal shape the engine records in the audit chain). A future task that wires the strategies into the larger evaluate_decision / T060 pipeline may need a thin adapter if the snapshot projection is reified -- none such adapter exists today, and the T060 contracts do not provide a StrategyCallback-shaped entry point.",
+    "The integer isqrt round-trip price_q64_64 -> sqrt_price_x96 -> tick can lose up to one tick of precision relative to the original input tick (visible in the drift-walk fixture: tick=60 round-trips to tick=59). This is an inherent property of the V4 fixed-point encoding, not a baseline defect; the test fixtures choose wider price moves (300 ticks / step) so the rebalance path is exercised unambiguously.",
+    "The baselines parameter liquidity is a placeholder integer (DEFAULT_BASELINE_LIQUIDITY = 1_000); the real V4 liquidity for a given capital envelope / Range is computed by the T049 sizing math. The comparison harness (a later task) will thread the sizer in front of the baseline; until then the baseline returns a constant liquidity that lets the engine distinguish a real mint from a WAIT but does not yet match the T049 sizing policy.",
+    "tools/oracle/lib/v4-core and tools/oracle/lib/v4-periphery are .gitignore-d external bootstrap artifacts and are not present in this worktree, so tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output cannot run. The same test passes on the main checkout, so this is a worktree setup gap (not introduced by T062)."
+  ]
+}
