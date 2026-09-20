@@ -1,0 +1,34 @@
+{
+  "task_id": "T070",
+  "outcome": "CANDIDATE_READY",
+  "summary": "The retained worktree already implements the full T070 central risk gateway. Restored the continuation gate, re-ran every verification command, and confirmed the candidate is healthy. New code under src/robinhood_lp/risk/ exports the public surface (RiskVerdict, RiskScope, RiskIntentSource, IntentKind, RiskConfig, RiskContext, RiskIntent, RiskDecision, KillSwitch, GasBudget, EpisodeState, FiveMinuteEmergencyBreach, is_five_minute_emergency_breach, evaluate_risk, evaluate_risk_with_config). The pipeline enforces every acceptance clause of the frozen contract: pool/hook eligibility, deployment-hash match, freshness/completeness (missing/stale/future snapshots, NaN/overflow market values, snapshot-version drift), capital and per-token concentration caps, qualified USDG price (RELATIVE_ONLY / MISSING / DEPEGGED), fixed-Range liquidityDelta sizing via compute_sizing (T049) without widening Range to fit a cap, rebalance cadence/cost, episode loss and high-watermark drawdown (WARNING / NO_NEW_RISK / AUTO_EXIT), Gas reserve / use verification that never spends reserve, global and per-scope kill switches, and the strategy-independent 5-minute target-token USDG return <= -80% circuit breaker that no strategy approval can suppress or relax and that ignores incomplete bars.",
+  "commands": [
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_risk_t070.py -q",
+      "result": "91 passed in 0.18s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_workflow.py tests/test_risk_t070.py -q",
+      "result": "145 passed in 4.11s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ --ignore=tests/test_workflow.py --ignore=tests/test_risk_t070.py --ignore=tests/test_abi_artifacts.py -q",
+      "result": "2329 passed, 6 skipped (foundry/PATH and gpg environment skips, unrelated to T070)"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/risk/ tests/test_risk_t070.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/risk/ tests/test_risk_t070.py",
+      "result": "3 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/robinhood_lp/risk/",
+      "result": "Success: no issues found in 2 source files"
+    }
+  ],
+  "residual_risks": [
+    "tests/test_abi_artifacts.py fails locally because the foundry oracle pre-build cannot find lib/v4-core sources in tools/oracle/lib/; this is an environment-only failure unrelated to T070 (forge is not on PATH per the test_oracle_drift skips). The worktree contains no forge changes."
+  ]
+}
