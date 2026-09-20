@@ -366,6 +366,23 @@ def _build_orchestrator(
     )
 
 
+def _canonical_json(payload: object) -> bytes:
+    """Return the canonical JSON byte representation of ``payload``.
+
+    The helper sorts every mapping and uses the ``("," ":")``
+    separator with no whitespace, matching the deterministic
+    serialisation the orchestrator and the T105 manifest
+    authority use on disk. Two equivalent payloads therefore
+    compare byte-for-byte.
+    """
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
 # ---------------------------------------------------------------------------
 # 1. Module version pinning
 # ---------------------------------------------------------------------------
@@ -605,6 +622,25 @@ class TestRerunReproducibility:
     def test_same_request_produces_byte_equivalent_manifests(
         self, tmp_path: Path
     ) -> None:
+        """A fresh re-run of the same request reproduces canonical artifacts.
+
+        The T069 acceptance clause binds re-run byte-equivalence:
+        two fresh ``RunRequest``s whose inputs (dataset, chain /
+        pool, block range, strategy, parameters, seed, code /
+        dependency revisions, assumptions, numeraire,
+        qualification) are identical must produce canonical
+        artifacts that are byte-identical after excluding the
+        declared observational fields the request itself
+        supplies (``run_id``) and the manifest checksum derived
+        from them (``report_checksum``).
+
+        The terminal record is read-only, so a fresh run needs
+        a new ``run_id``. The test performs two independent
+        submits against two independent orchestrator instances
+        (so the second run cannot short-circuit by reading the
+        first run's persisted record) and compares the
+        canonical artifacts they each wrote to disk.
+        """
         events = _events_for_pool()
         resolver = _StaticDatasetResolver()
         resolver.add(
@@ -614,33 +650,83 @@ class TestRerunReproducibility:
             covered_start=0,
             covered_end=1000,
         )
-        source = _FixedEventSource({(_CHAIN_ID, _POOL_KEY_ID_A): events})
-        # First run.
-        orchestrator = _build_orchestrator(
-            tmp_path=tmp_path, resolver=resolver, event_source=source
+        source_a = _FixedEventSource({(_CHAIN_ID, _POOL_KEY_ID_A): events})
+        source_b = _FixedEventSource({(_CHAIN_ID, _POOL_KEY_ID_A): events})
+        # First fresh run.
+        first_root = tmp_path / "first"
+        first_root.mkdir()
+        first_orchestrator = _build_orchestrator(
+            tmp_path=first_root, resolver=resolver, event_source=source_a
         )
-        first = orchestrator.submit(_build_request(run_id="byte-eq-001"))
-        first_manifest_bytes = Path(first.manifest_path).read_bytes()
-        first_report_bytes = Path(first.report_path).read_bytes()
-        first_record_bytes = orchestrator.store.record_path("byte-eq-001").read_bytes()
-        # The terminal record is read-only, so a fresh run
-        # requires a new run_id; verify byte-equivalence
-        # between the two manifests.
+        first = first_orchestrator.submit(_build_request(run_id="rerun-A"))
+        # Second fresh run: independent store, independent event
+        # source instance, independent ``run_id`` (the request
+        # itself supplies ``run_id``; the same request with a
+        # fresh ``run_id`` reproduces the canonical artifact).
+        second_root = tmp_path / "second"
+        second_root.mkdir()
         second_orchestrator = _build_orchestrator(
-            tmp_path=tmp_path, resolver=resolver, event_source=source
+            tmp_path=second_root, resolver=resolver, event_source=source_b
         )
-        # Re-running with the same run_id on a fresh store
-        # returns the persisted record (no second write).
-        # We assert the persisted record's manifest bytes match
-        # a freshly-built manifest from the same inputs.
-        reloaded = second_orchestrator.store.read("byte-eq-001")
-        reloaded_manifest_bytes = Path(reloaded.manifest_path).read_bytes()
-        # The persisted manifest bytes are byte-identical to the
-        # first run's bytes (no mutation on reload).
-        assert reloaded_manifest_bytes == first_manifest_bytes
-        assert reloaded_manifest_bytes == first_manifest_bytes
-        assert first_report_bytes == first_report_bytes
-        assert first_record_bytes == first_record_bytes
+        second = second_orchestrator.submit(_build_request(run_id="rerun-B"))
+        assert first.state == RunState.SUCCEEDED
+        assert second.state == RunState.SUCCEEDED
+        assert first.manifest_path is not None
+        assert second.manifest_path is not None
+        assert first.report_path is not None
+        assert second.report_path is not None
+        first_manifest_bytes = Path(first.manifest_path).read_bytes()
+        second_manifest_bytes = Path(second.manifest_path).read_bytes()
+        first_report_bytes = Path(first.report_path).read_bytes()
+        second_report_bytes = Path(second.report_path).read_bytes()
+        first_record_bytes = (
+            first_orchestrator.store.record_path("rerun-A").read_bytes()
+        )
+        second_record_bytes = (
+            second_orchestrator.store.record_path("rerun-B").read_bytes()
+        )
+        # Both runs must have produced artifacts of identical
+        # length; the remaining comparisons parse and
+        # canonicalise the declared observational fields out
+        # of the comparison.
+        assert len(first_manifest_bytes) == len(second_manifest_bytes)
+        assert len(first_report_bytes) == len(second_report_bytes)
+        first_manifest = json.loads(first_manifest_bytes)
+        second_manifest = json.loads(second_manifest_bytes)
+        first_report = json.loads(first_report_bytes)
+        second_report = json.loads(second_report_bytes)
+        first_record = json.loads(first_record_bytes)
+        second_record = json.loads(second_record_bytes)
+        # ``run_id`` is the one field the request itself
+        # supplies; it legitimately differs between two fresh
+        # runs of an otherwise identical request. Three other
+        # fields derive from ``run_id``:
+        # - the manifest's ``report_checksum`` (covers the
+        #   manifest payload, which contains ``run_id``);
+        # - the report's ``manifest_checksum`` (mirrors the
+        #   manifest's ``report_checksum``);
+        # - the run record's ``manifest_path`` / ``report_path``
+        #   (encode the run_id in the file name) and the inner
+        #   request's ``run_id``.
+        # Strip every run-id-derived field so the comparison
+        # surfaces only the canonical content the orchestrator
+        # recomputes deterministically from the request.
+        for payload in (first_manifest, second_manifest):
+            payload.pop("run_id", None)
+            payload.pop("report_checksum", None)
+        for payload in (first_report, second_report):
+            payload.pop("run_id", None)
+            payload.pop("manifest_checksum", None)
+        for payload in (first_record, second_record):
+            payload.pop("run_id", None)
+            payload.pop("manifest_path", None)
+            payload.pop("report_path", None)
+            payload["request"].pop("run_id", None)
+        # The canonical serialisation (sorted keys, no
+        # whitespace) of every artifact must be byte-identical.
+        assert _canonical_json(first_manifest) == _canonical_json(second_manifest)
+        assert _canonical_json(first_report) == _canonical_json(second_report)
+        assert _canonical_json(first_record) == _canonical_json(second_record)
 
 
 # ---------------------------------------------------------------------------

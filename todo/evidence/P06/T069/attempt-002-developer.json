@@ -1,0 +1,49 @@
+{
+  "task_id": "T069",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Repaired the T069 implementation by addressing the single required change recorded in review-001. The earlier candidate commit (2f64e64c8d36d19e699c130f367f95f6a071b1f2) already satisfied every other acceptance check; the only outstanding defect was that TestRerunReproducibility::test_same_request_produces_byte_equivalent_manifests contained trivial tautologies ('first_report_bytes == first_report_bytes', 'first_record_bytes == first_record_bytes') and re-read the same on-disk manifest twice, so it never actually verified a fresh re-run. The fixed test now performs two independent submits against two independent orchestrator instances (independent store roots, independent event sources, independent run_id), then parses every artifact, strips the run-id-derived fields the request itself supplies (run_id; report_checksum on the manifest; manifest_checksum on the report; manifest_path / report_path / request.run_id on the run record), and asserts the canonical JSON serialisation of the remaining content is byte-identical. The fix is minimal: one new _canonical_json helper plus the rewritten test. No production code changed; every other previously-passing review check is unchanged.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /tmp/lp-t001-cleanroom-venv/bin/python -m pytest tests/test_backtest_t069.py -v",
+      "result": "38 passed in 0.83s"
+    },
+    {
+      "command": "PYTHONPATH=src /tmp/lp-t001-cleanroom-venv/bin/python -m pytest tests/test_backtest_t069.py::TestRerunReproducibility -v",
+      "result": "1 passed in 0.15s (the repaired test)"
+    },
+    {
+      "command": "/tmp/lp-t001-cleanroom-venv/bin/ruff check src/ tests/ tools/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/tmp/lp-t001-cleanroom-venv/bin/mypy src/",
+      "result": "Success: no issues found in 131 source files"
+    },
+    {
+      "command": "PYTHONPATH=src /tmp/lp-t001-cleanroom-venv/bin/python -m tools.check_imports.check",
+      "result": "clean (no output, no findings)"
+    },
+    {
+      "command": "/tmp/lp-t001-cleanroom-venv/bin/python -m tools.check_acceptance check",
+      "result": "acceptance check passed: no findings"
+    },
+    {
+      "command": "/tmp/lp-t001-cleanroom-venv/bin/python -m tools.check_citations check",
+      "result": "citation check passed: no findings"
+    },
+    {
+      "command": "PYTHONPATH=src /tmp/lp-t001-cleanroom-venv/bin/python -m pytest --no-header --ignore=tests/test_abi_artifacts.py",
+      "result": "2685 passed, 6 skipped in 25.45s (the 6 skips are pre-existing forge / gpg / unsorted-currency skips unrelated to T069)"
+    },
+    {
+      "command": "git diff --stat tests/test_backtest_t069.py",
+      "result": "tests/test_backtest_t069.py | 132 ++++++++++++++++++++++++++++++++++++-------- 1 file changed, 109 insertions(+), 23 deletions(-)"
+    }
+  ],
+  "residual_risks": [
+    "The orchestrator builds its own private _build_model_bundle that mirrors the canonical T105 deterministic model bundle; this is a small duplication with src/robinhood_lp/reports/rerun.py::_build_model_bundle but the two serve different purposes (live run vs. artifact rerun from saved manifest) and is unchanged from the approved base.",
+    "The default risk callback (_approve_risk_callback) approves every decision; wiring the T070 risk gateway is a deliberate follow-up tracked in the orchestrator's docstring and is unchanged from the approved base.",
+    "tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails in this worktree due to a missing forge / Solidity library; the failure is environmental and unrelated to T069 (CI installs Foundry and clones the libraries).",
+    "The T069 acceptance clause 'one manifest per member pool under one run identity' remains ambiguous between 'shared run identity' and 'each member pool under its own run identity'. The Reviewer classified the ambiguity under unknowns rather than required_changes, so the prior test_two_heterogeneous_pools_share_run_identity interpretation (one manifest per pool under its own run identity, sharing the dataset / numeraire / qualification) is preserved unchanged."
+  ]
+}
