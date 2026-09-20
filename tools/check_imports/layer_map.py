@@ -139,6 +139,7 @@ PACKAGE_DEFAULTS: dict[str, str] = {
     "robinhood_lp.backtest": "backtest",
     "robinhood_lp.reports": "backtest",
     "robinhood_lp.robustness": "backtest",
+    "robinhood_lp.experiments": "backtest",
     "robinhood_lp.qualification": "presentation / reports",
     "robinhood_lp.ingestion": "application / orchestration",
     "robinhood_lp.quality": "storage",
@@ -196,6 +197,13 @@ MODULE_OVERRIDES: dict[str, str] = {
     # T103 names ``robinhood_lp.web`` research pages, which the §2.2
     # row classifies as ``presentation / controls`` — the canonical
     # alias for ``presentation / reports``.
+    # T066 adds the versioned-threshold experiment / review package.
+    # The harness aggregates across the backtest, robustness and
+    # candidate-lock modules so the package ``__init__`` is a
+    # backtest-tier façade; per-module overrides below re-classify
+    # individual modules when their actual role differs.
+    "robinhood_lp.experiments.harness": "application / orchestration",
+    "robinhood_lp.experiments.__init__": "application / orchestration",
 }
 
 

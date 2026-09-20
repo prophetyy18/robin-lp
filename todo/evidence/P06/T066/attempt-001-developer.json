@@ -1,0 +1,42 @@
+{
+  "task_id": "T066",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the T066 experiment / review layer as a new `robinhood_lp.experiments` package. Built five modules — `candidate_lock`, `search`, `distributions`, `stability`, `harness` — plus a `tests/test_experiments_t066.py` covering every T066 acceptance clause. The harness writes an immutable candidate-lock record (parameter-set version + code revision + manifest hash + seed + split boundaries + cost assumptions + elimination rules, with content hash, actor and lock time) BEFORE it reads the test fold; the lock verification gate raises `MissingCandidateLockError` when the file is missing and `CandidateLockHashMismatchOnLoadError` when its content hash disagrees with the recomputed digest. The chosen candidate is the first version strictly improving validation (no global-best selection); losing / rejected / failed runs remain on the search manifest. Every output (distributions, stability, stress, recommendation) carries `EXPERIMENTAL_NOT_LIVE_APPROVED` and `USDG_CASH`. The harness result is byte-deterministic across reruns. Test data integrity: 2235 tests pass (the 2 pre-existing failures in `test_abi_artifacts` and `test_documentation_citations` are unrelated to T066). The added `robinhood_lp.experiments` package is registered in `tools/check_imports/layer_map.py` (`backtest` default, `__init__` and `harness` reclassified to `application / orchestration`).",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_experiments_t066.py -q",
+      "result": "59 passed in 0.32s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_import_graph.py -q",
+      "result": "17 passed in 0.47s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ --ignore=tests/test_abi_artifacts.py --ignore=tests/test_documentation_citations.py -q",
+      "result": "2235 passed, 6 skipped in 14.91s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/experiments/ tests/test_experiments_t066.py",
+      "result": "7 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/experiments/ tests/test_experiments_t066.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/robinhood_lp/experiments/",
+      "result": "Success: no issues found in 6 source files"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/robinhood_lp/experiments/",
+      "result": "Success: no issues found in 6 source files"
+    }
+  ],
+  "residual_risks": [
+    "The T066 candidate lock is a local-file artifact; the harness does not yet sign it cryptographically. A motivated attacker who can write to the lock directory can substitute a lock with a matching content hash by replaying a previously-written lock. Production deployments should sign the lock with a deployment-scoped key or store it in a write-once medium; this is left to a later phase (T090–T095 signer / live gates).",
+    "The harness's `_invoke_fold` wraps the fold evaluator in a try/except and tags any raised exception as `FAILED`. A evaluator that silently returns a mis-computed metric (rather than raising) will be recorded as `FILLED` with the wrong value; the harness relies on the evaluator's discipline.",
+    "The recommendation rule (positive median + positive stability spread => `PROVISIONAL_RECOMMENDATION`, otherwise `NO_TRADE`) is a simple heuristic that the contract defers to a future paper-trading review. T066 does not bind a specific threshold; the rules remain explicit candidate-version locks, not live defaults.",
+    "The harness's `_collect_search_records` enumerates the time-holdout train / validation / test folds and every walk-forward train / validation fold plus held-out pools. The TEST fold is enumerated but the record's metric value is the evaluator's output; the harness does NOT read test-fold data until after the candidate lock is in place, so the enumerator's parameter-set-version bookkeeping is safe — but a careless evaluator that consults test-fold data outside the gate would break the DS-031 contract. The orchestrator-supplied evaluator is responsible for that discipline.",
+    "Pre-existing failures in `tests/test_abi_artifacts.py` and `tests/test_documentation_citations.py` are unrelated to T066 (they reference `robinhood_lp.strategy.usdg_range` and a documentation-integrity audit module that T066 does not touch). They were failing on the base commit too; T066 does not regress them."
+  ]
+}
