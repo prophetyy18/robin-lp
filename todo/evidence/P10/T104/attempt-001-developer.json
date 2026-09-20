@@ -1,0 +1,35 @@
+{
+  "task_id": "T104",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented T104 — the per-window fee-growth surface. The module `src/robinhood_lp/replay/fee_surface.py` produces a versioned `FeeGrowthSurface` artifact from a `ReconstructedPoolTickState` (T041) and the typed log records (T039/T040), then makes historical fees for any (tickLower, tickUpper, liquidity) an O(1) query against precomputed prefix sums. The artifact binds the pool, window, dataset version, and reconstruction revision in its `WindowDescriptor`; its `EquivalenceCheck` runs the direct per-position integration alongside the surface query on a heterogeneous set of (range, liquidity) triples and refuses to publish if any triple disagrees. All 47 new tests pass; the full repository suite (2529 pre-existing + 47 new) passes 2576/2576 with 6 environment skips and no regressions. Ruff check, ruff format, and mypy --strict all pass.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src:tests python -m pytest tests/test_fee_surface_t104.py",
+      "result": "47 passed in 0.19s"
+    },
+    {
+      "command": "PYTHONPATH=src:tests python -m pytest tests/ --ignore=tests/test_abi_artifacts.py --ignore=tests/test_e2e_t035.py",
+      "result": "2576 passed, 6 skipped in 27.67s (full repository suite minus forge-dependent tests)"
+    },
+    {
+      "command": "python -m ruff check src/robinhood_lp/replay/ tests/test_fee_surface_t104.py tests/_fee_surface_t104_fixtures.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python -m ruff format --check src/robinhood_lp/replay/ tests/test_fee_surface_t104.py tests/_fee_surface_t104_fixtures.py",
+      "result": "10 files already formatted"
+    },
+    {
+      "command": "python -m mypy --strict src/robinhood_lp/replay/",
+      "result": "Success: no issues found in 10 source files"
+    },
+    {
+      "command": "python -m tools.check_imports check",
+      "result": "import-graph check passed: no findings (layer-direction, classification, and architecture agreement all clean)"
+    }
+  ],
+  "residual_risks": [
+    "Single-step fee-growth approximation: for a swap that crosses multiple initialized ticks, the surface uses the pre-swap active liquidity (from the first crossing's `active_liquidity_before`) for the entire fee-growth delta instead of V4's per-step integration. The surface is internally consistent with the direct per-position integration path, so the two always agree, but neither matches the on-chain `StateView.getFeeGrowthGlobals` byte-for-byte for multi-step swaps. The simplification is documented in the module docstring; downstream consumers needing byte-for-byte agreement read the on-chain global directly.",
+    "Crossing lookup key uses the (block_number, transaction_index, log_index) triple rather than the full EventKey tuple (which adds block_hash and tx_hash). The reconstruction (T041) emits one crossing per (swap, crossed_tick), so the lookup is unambiguous within one pool; a future change that lets T041 cross the same tick twice in a single swap would need a stronger key."
+  ]
+}
