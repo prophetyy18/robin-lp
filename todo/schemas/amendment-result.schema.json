@@ -2,12 +2,42 @@
   "$id": "https://robinhood-lp.local/schemas/amendment-result.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["amendment_id", "outcome", "summary", "rationale", "unresolved_questions"],
+  "required": [
+    "amendment_id",
+    "outcome",
+    "summary",
+    "rationale",
+    "unresolved_questions",
+    "affected_existing_tasks",
+    "resolved_task_impacts"
+  ],
   "properties": {
     "amendment_id": {"type": "string", "pattern": "^A[0-9]{4}$"},
     "outcome": {"enum": ["AMENDMENT_READY", "NO_CHANGE_REQUIRED", "BLOCKED"]},
     "summary": {"type": "string"},
     "rationale": {"type": "string"},
-    "unresolved_questions": {"type": "array", "items": {"type": "string"}}
+    "unresolved_questions": {"type": "array", "items": {"type": "string"}},
+    "affected_existing_tasks": {
+      "description": "Every existing task contract this change leaves asserting something a governing document no longer says. An empty array is a claim the independent review tests; it is not the default for an omission.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["task_id", "reason"],
+        "properties": {
+          "task_id": {"type": "string", "pattern": "^T[0-9]{3}$"},
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The stale statement, the document that now contradicts it, and why a reader would be misled."
+          }
+        }
+      }
+    },
+    "resolved_task_impacts": {
+      "description": "Task IDs whose open conflict, raised by an earlier amendment, this change repairs. A resolution only clears a raise from a strictly earlier amendment.",
+      "type": "array",
+      "items": {"type": "string", "pattern": "^T[0-9]{3}$"}
+    }
   }
 }

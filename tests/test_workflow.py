@@ -307,6 +307,8 @@ def test_owner_amendment_updates_planned_contract_without_activating_task(tmp_pa
             "summary": "clarified the target contract",
             "rationale": "implements the recorded Owner direction",
             "unresolved_questions": [],
+            "affected_existing_tasks": [],
+            "resolved_task_impacts": [],
         },
     )
     candidate = manager.finish_amendment("A0001")
@@ -372,6 +374,8 @@ def test_supersede_amendment_retires_an_approved_task(tmp_path: Path) -> None:
             "summary": "pointed T000 at its successor",
             "rationale": "implements the recorded Owner direction",
             "unresolved_questions": [],
+            "affected_existing_tasks": [],
+            "resolved_task_impacts": [],
         },
     )
     candidate = manager.finish_amendment("A0001")
@@ -426,6 +430,8 @@ def test_supersede_amendment_cannot_alter_approved_evidence(tmp_path: Path) -> N
             "summary": "retired the task and cleared its approval",
             "rationale": "implements the recorded Owner direction",
             "unresolved_questions": [],
+            "affected_existing_tasks": [],
+            "resolved_task_impacts": [],
         },
     )
     with pytest.raises(WorkflowError, match="workflow state, evidence, model, SHA"):
@@ -533,6 +539,8 @@ def test_owner_amendment_rejects_an_untargeted_contract_change(tmp_path: Path) -
             "summary": "changed the wrong task",
             "rationale": "invalid test fixture",
             "unresolved_questions": [],
+            "affected_existing_tasks": [],
+            "resolved_task_impacts": [],
         },
     )
 
@@ -559,6 +567,8 @@ def test_owner_amendment_review_failure_starts_fresh_planner_retry(tmp_path: Pat
             "summary": "incorrectly claimed no change was needed",
             "rationale": "candidate for rejection",
             "unresolved_questions": [],
+            "affected_existing_tasks": [],
+            "resolved_task_impacts": [],
         },
     )
     candidate = manager.finish_amendment("A0001")
@@ -1171,6 +1181,104 @@ def test_prophet_retry_is_authored_by_the_prophet(tmp_path: Path) -> None:
     assert retry["worktree"] == str(worktree)
 
 
+def test_prophet_retry_may_repair_a_contract_the_same_amendment_added(tmp_path: Path) -> None:
+    """A repair must be able to fix the amendment's own output.
+
+    A retry re-bases the attempt on the previous candidate, so without the
+    amendment's original base the contract it had just added would look like a
+    pre-existing file the layer may never touch and the only repair route would
+    be to abandon the change. The safety property is unchanged: a contract that
+    existed at the original base is still refused in the same retry.
+    """
+    manager, worktree = _prepare_prophet_change(tmp_path)
+    (worktree / "todo" / "phases" / "P00" / "T002.md").write_text(_NEW_CONTRACT, encoding="utf-8")
+    _add_task_to_config(worktree)
+    _seal_prophet_result(worktree)
+    candidate = manager.finish_amendment("A0001")
+    review = manager.prepare_amendment_review("A0001")
+    _write_json(
+        Path(str(review["review_worktree"])) / ".workflow" / "amendment-review-result.json",
+        {
+            "amendment_id": "A0001",
+            "base_commit": candidate.base_commit,
+            "candidate_commit": candidate.candidate_commit,
+            "verdict": "FAIL",
+            "summary": "the new contract states the wrong dependency",
+            "required_changes": ["correct the new contract"],
+            "unknowns": [],
+        },
+    )
+    manager.finish_amendment_review("A0001")
+    manager.prepare_amendment_retry("A0001")
+
+    added = worktree / "todo" / "phases" / "P00" / "T002.md"
+    added.write_text(added.read_text(encoding="utf-8") + "\nCorrected.\n", encoding="utf-8")
+    pre_existing = worktree / "todo" / "phases" / "P00" / "T000.md"
+    pre_existing.write_text(
+        pre_existing.read_text(encoding="utf-8") + "\nAnd also do this.\n", encoding="utf-8"
+    )
+    _seal_prophet_result(worktree)
+    with pytest.raises(WorkflowError, match="outside its scope"):
+        manager.finish_amendment("A0001")
+
+    pre_existing.write_text(
+        pre_existing.read_text(encoding="utf-8").replace("\nAnd also do this.\n", ""),
+        encoding="utf-8",
+    )
+    repaired = manager.finish_amendment("A0001")
+    assert repaired.status == "AWAITING_REVIEW"
+    assert repaired.attempt == 2
+    assert "Corrected." in added.read_text(encoding="utf-8")
+
+
+def test_ready_refuses_a_task_an_amendment_recorded_as_conflicting(tmp_path: Path) -> None:
+    """A PROPHET change cannot repair an existing contract, so it records the
+    conflict instead of leaving it to be noticed by hand. The affected task must
+    not be activated while that record is open, and a later amendment closes it.
+    """
+    manager, worktree = _prepare_prophet_change(tmp_path)
+    (worktree / "todo" / "phases" / "P00" / "T002.md").write_text(_NEW_CONTRACT, encoding="utf-8")
+    _add_task_to_config(worktree)
+    _seal_prophet_result(
+        worktree,
+        affected=[{"task_id": "T001", "reason": "the added goal contradicts T001's scope clause"}],
+    )
+    candidate = manager.finish_amendment("A0001")
+    assert _pass_amendment_review(manager, "A0001", candidate) == "APPROVED"
+    assert (repo_amendments := manager.repo / "todo" / "amendments" / "A0001").is_dir()
+    assert "T001" in (repo_amendments / "impacts.json").read_text(encoding="utf-8")
+
+    with pytest.raises(WorkflowError, match="no longer matches a governing document"):
+        manager.ready("T001")
+
+    resolution = manager.prepare_amendment(
+        task_ids=["T001"],
+        layer="CONTRACT",
+        summary="bring T001 back in line with the amended goal",
+        owner_direction="Correct the scope clause.",
+    )
+    resolution_worktree = Path(str(resolution["worktree"]))
+    contract = resolution_worktree / "todo" / "phases" / "P00" / "T001.md"
+    contract.write_text(contract.read_text(encoding="utf-8") + "\nAligned.\n", encoding="utf-8")
+    _write_json(
+        resolution_worktree / ".workflow" / "amendment-result.json",
+        {
+            "amendment_id": "A0002",
+            "outcome": "AMENDMENT_READY",
+            "summary": "aligned the contract with the amended goal",
+            "rationale": "implements the recorded Owner direction",
+            "unresolved_questions": [],
+            "affected_existing_tasks": [],
+            "resolved_task_impacts": ["T001"],
+        },
+    )
+    repaired = manager.finish_amendment("A0002")
+    assert _pass_amendment_review(manager, "A0002", repaired) == "APPROVED"
+
+    assert manager.ready("T001")
+    assert manager.load_config()["tasks"]["T001"]["status"] == "READY"
+
+
 def test_a_contract_amendment_retry_is_still_a_planner(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
     manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
@@ -1241,7 +1349,12 @@ def _prepare_prophet_change(tmp_path: Path) -> tuple[WorkflowManager, Path]:
     return manager, Path(str(prepared["worktree"]))
 
 
-def _seal_prophet_result(worktree: Path) -> None:
+def _seal_prophet_result(
+    worktree: Path,
+    *,
+    affected: list[dict[str, str]] | None = None,
+    resolves: list[str] | None = None,
+) -> None:
     _write_json(
         worktree / ".workflow" / "amendment-result.json",
         {
@@ -1250,8 +1363,29 @@ def _seal_prophet_result(worktree: Path) -> None:
             "summary": "applied the recorded direction",
             "rationale": "matches the recorded direction",
             "unresolved_questions": [],
+            "affected_existing_tasks": affected or [],
+            "resolved_task_impacts": resolves or [],
         },
     )
+
+
+def _pass_amendment_review(manager: WorkflowManager, amendment_id: str, candidate: object) -> str:
+    """Drive one amendment review to PASS and return the recorded verdict."""
+    review = manager.prepare_amendment_review(amendment_id)
+    _write_json(
+        Path(str(review["review_worktree"])) / ".workflow" / "amendment-review-result.json",
+        {
+            "amendment_id": amendment_id,
+            "base_commit": candidate.base_commit,
+            "candidate_commit": candidate.candidate_commit,
+            "verdict": "PASS",
+            "summary": "direction and scope are satisfied",
+            "required_changes": [],
+            "unknowns": [],
+        },
+    )
+    state, _ = manager.finish_amendment_review(amendment_id)
+    return state
 
 
 def _add_task_to_config(worktree: Path, task_id: str = "T002") -> None:

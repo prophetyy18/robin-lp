@@ -172,6 +172,31 @@ the reviewer:
   evidence pointers, review records, dependencies, phases and contract paths are
   all compared and must be byte-identical.
 
+The freeze is measured against the commit the amendment *started* from, not the commit
+the current attempt is based on. A retry re-bases its attempt on the previous candidate,
+which would otherwise turn the amendment's own additions into pre-existing files it may
+never touch — a repair route that cannot repair. Against the original base, a contract
+the same amendment added stays editable (`A`) while every path that existed before the
+amendment stays frozen (`M`) exactly as it was. Deletion stays refused everywhere.
+
+Two consequences follow, and they are the reason the conflict record below exists rather
+than an exception to the freeze. A PROPHET change cannot repair an existing contract, and
+its own additions can leave one asserting something a governing document no longer says —
+a page it says another task owns, a rule restated in the old wording, a task list that has
+since grown. So every amendment result states, explicitly, which existing contracts it
+leaves stale (`affected_existing_tasks`) and which earlier records it repairs
+(`resolved_task_impacts`); an empty list is a claim the independent review tests, not a
+default for an omission. `finish-amendment` writes those declarations to
+`todo/amendments/<id>/impacts.json`, and `ready` refuses to activate a task named by an
+open record until a later amendment resolves it. A goal restatement therefore cannot
+silently leave an instruction that no longer matches the plan, and the affected task
+cannot run on it in the meantime.
+
+Because a plan-structure change can add tasks without touching a line of Intent or Spec
+text, the two revision strings alone cannot say that the plan moved. `todo/README.md`
+carries a plan-structure revision line naming the last amendment that changed the plan's
+structure, and every PROPHET change updates it even when both revisions stay byte-identical.
+
 Everything else is refused by omission. `tools/workflow/`, `.claude/` and
 `todo/schemas/` are in no role's and no layer's scope at all: only an explicit
 bootstrap act changes them, and that is deliberate — a role that can rewrite the

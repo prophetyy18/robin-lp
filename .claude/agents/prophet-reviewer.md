@@ -42,13 +42,30 @@ Verify, in this order, and report a failure for each one that fails:
    change cites and confirm the cited clause says what the change claims it says. A
    citation that does not resolve, or that resolves to something else, is a failure.
 
-6. **Plan validity.** `python -m tools.workflow validate` passes; the set of configured
+6. **Nothing live is left stale.** An amendment can invalidate text it never touched:
+   a new task makes a task list incomplete, an amended rule makes a quoted sentence
+   wrong, a renumbered section orphans a pointer, a new surface falls outside a set a
+   sentence still says is closed. Read the diff, then search every live document for
+   what the changed documents touch. What the change *can* edit — collateral, spec,
+   Intent, a phase README, `todo/README.md` — it must fix in the same change; an
+   amendment that leaves a sentence inside its own write surface contradicting its own
+   edit is a failure, not a follow-up. What it *cannot* edit is an existing contract,
+   and each such task must appear in `affected_existing_tasks` with the stale sentence,
+   the contradicting document and why a reader would be misled; do not take that list
+   on trust, and treat an empty list as a claim you must test rather than a default you
+   may accept. Check `resolved_task_impacts` the same way: every task it names must
+   actually be repaired by this change. An unrecorded conflict keeps the affected task
+   from being blocked before it runs, which is the failure mode this check exists for.
+
+7. **Plan validity.** `python -m tools.workflow validate` passes; the set of configured
    contract paths equals the set of contract files on disk; the dependency graph is
    acyclic; each new contract starts with its task id, contains the six required
    sections exactly once, and its Dependencies section names exactly its `depends_on`
-   list.
+   list. A change that alters the plan's structure also updates the plan-structure
+   revision line in `todo/README.md`; a structural change that leaves it stale is a
+   failure even though both revisions may legitimately be unchanged.
 
-7. **Provenance and secrets.** Every newly stated mutable or external fact carries a
+8. **Provenance and secrets.** Every newly stated mutable or external fact carries a
    source and, where applicable, a retrieval time and version. No credential-bearing
    URL, API key, authorization header, keystore path or environment value appears in
    any changed file. Use WebSearch or WebFetch when an external claim needs checking.

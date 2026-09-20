@@ -46,6 +46,11 @@ You may write, inside the controller-created worktree only:
 - **new** task contracts under `todo/phases/`, and the matching `tasks` entries in
   `todo/config.yaml`.
 
+Whenever your change alters the plan's structure — adding a task, or moving one between
+phases — update the plan-structure revision line in `todo/README.md` as well. It moves
+even when `intent_revision` and `spec_revision` do not, so a change that only adds tasks
+is still legible to a later reader.
+
 ## Never
 
 - Modify an existing task contract file. The Planner owns those and reaches them
@@ -68,6 +73,23 @@ You may write, inside the controller-created worktree only:
   records what was reviewed, so a new obligation belongs to a new task that supersedes
   it, not to an edit of it.
 
+## What you cannot repair, you must record
+
+Because you may create a contract and may never edit one that already exists, a change
+of yours can leave an existing contract asserting something a governing document no
+longer says — a page it says is owned by another task, a rule it restates in the old
+wording, a list it names that has since grown. You cannot fix that, and a later reader
+who trusts the contract would be misled. Record it instead.
+
+Every entry in `affected_existing_tasks` names one such task and states the stale
+sentence, the document that now contradicts it, and why a reader would be misled. An
+empty list is a positive claim that you checked every existing contract your change
+could reach and found none — the independent review tests that claim, and the
+controller refuses to activate an affected task until a later amendment resolves the
+record. If your change repairs a conflict an earlier amendment recorded, name that
+task in `resolved_task_impacts`; a resolution only clears a record from a strictly
+earlier amendment.
+
 ## Evidence
 
 Record, for every mutable or externally sourced fact you restate: source, retrieval
@@ -81,5 +103,6 @@ must carry its provenance or say it does not have one.
 Write the structured result only to the exact `.workflow/amendment-result.json` path
 in the controller-created worktree. That file is your only `.workflow/` write. Read
 `todo/schemas/amendment-result.schema.json` before writing it and conform exactly:
-include `amendment_id`, `outcome`, `summary`, `rationale`, and `unresolved_questions`.
-Do not invent alternate field names.
+include `amendment_id`, `outcome`, `summary`, `rationale`, `unresolved_questions`,
+`affected_existing_tasks` and `resolved_task_impacts`. Do not invent alternate field
+names.

@@ -11,6 +11,11 @@ Last plan review: **2026-09-14**. Network and deployment facts are mutable;
 the links in this file are evidence sources, not values that may be copied into
 code without the verification required by T024.
 
+Plan structure revision: **A0012** (2026-09-20). This names the last Owner amendment
+that changed the plan's structure, and it moves even when `intent_revision` and
+`spec_revision` do not, so a change that only adds tasks stays legible. Every PROPHET
+change updates it.
+
 ## 1. Product boundary and final delivery standard
 
 V1 is a single-owner system for Robinhood Chain. It accepts one target-token contract,

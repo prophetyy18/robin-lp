@@ -210,6 +210,19 @@ class AmendmentRecord:
     candidate_commit: str | None
     branch: str
     worktree: str
+    #: The commit this amendment started from, before a retry re-based
+    #: ``base_commit`` onto the previous candidate. The PROPHET freeze test
+    #: compares changed paths against *this* commit, so a repaired attempt may
+    #: still edit a contract the same amendment added, while every path that
+    #: existed at the original base stays frozen exactly as before. Absent on
+    #: records written before this field existed, where the attempt base is the
+    #: original base.
+    original_base_commit: str | None = None
+
+    @property
+    def freeze_base(self) -> str:
+        """The commit the freeze test compares against."""
+        return self.original_base_commit or self.base_commit
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -222,6 +235,7 @@ class AmendmentRecord:
             "candidate_commit": self.candidate_commit,
             "branch": self.branch,
             "worktree": self.worktree,
+            "original_base_commit": self.original_base_commit,
         }
 
     @classmethod
@@ -254,6 +268,7 @@ class AmendmentRecord:
             candidate_commit=_optional_string(value, "candidate_commit"),
             branch=_required_string(value, "branch"),
             worktree=_required_string(value, "worktree"),
+            original_base_commit=_optional_string(value, "original_base_commit"),
         )
 
 
@@ -842,11 +857,52 @@ class WorkflowManager:
         }:
             raise WorkflowError(f"cannot activate {task_id} while {active} is unfinished")
         self._check_dependencies(config, task_id)
+        blocked = self._unresolved_task_impacts(task_id)
+        if blocked:
+            raise WorkflowError(
+                f"cannot activate {task_id}: an earlier Owner amendment recorded that this "
+                "contract no longer matches a governing document, and no later amendment has "
+                "resolved it -- " + "; ".join(blocked)
+            )
         self._set_state(config, task_id, "READY")
         _write_json(self.config_path, config)
         _git(self.repo, "add", "todo/config.yaml")
         _git(self.repo, "commit", "-m", f"chore(workflow): mark {task_id} ready")
         return _sha(self.repo)
+
+    def _unresolved_task_impacts(self, task_id: str) -> list[str]:
+        """Return the open contract conflicts an earlier amendment raised on a task.
+
+        A property Owner amendment may add tasks and correct collateral
+        documents, and doing so can leave an *existing* contract asserting
+        something a governing document no longer says. Nothing in the layer that
+        makes the change can repair that contract, so the change records the
+        conflict instead; this is what keeps the affected task from being
+        activated until a later amendment resolves it. Resolutions are amendments
+        with a strictly greater ID, so a register can only be closed forward.
+        """
+        root = self.repo / "todo" / "amendments"
+        if not root.is_dir():
+            return []
+        raised: list[tuple[str, str]] = []
+        resolved_by: list[str] = []
+        for path in sorted(root.glob("*/impacts.json")):
+            payload = _load_json(path)
+            amendment_id = str(payload.get("amendment_id", path.parent.name))
+            entries = payload.get("raised")
+            if isinstance(entries, list):
+                for item in entries:
+                    if isinstance(item, Mapping) and item.get("task_id") == task_id:
+                        raised.append((amendment_id, str(item.get("reason", ""))))
+            resolves = payload.get("resolves")
+            if isinstance(resolves, list) and task_id in resolves:
+                resolved_by.append(amendment_id)
+        open_impacts = [
+            (amendment_id, reason)
+            for amendment_id, reason in raised
+            if not any(resolution > amendment_id for resolution in resolved_by)
+        ]
+        return [f"raised by {amendment_id}: {reason}" for amendment_id, reason in open_impacts]
 
     def _attempt_path(self, task_id: str) -> Path:
         return self.runtime_dir / f"{task_id}.json"
@@ -1489,6 +1545,7 @@ class WorkflowManager:
             candidate_commit=None,
             branch=branch,
             worktree=str(worktree),
+            original_base_commit=base,
         )
         request: dict[str, object] = {
             "amendment_id": amendment_id,
@@ -1544,7 +1601,13 @@ class WorkflowManager:
         allowed_contracts = {
             base_config["tasks"][task_id]["task_file"] for task_id in record.task_ids
         }
-        statuses = _change_statuses(worktree, record.base_commit)
+        # The freeze test reads the status letter against the amendment's
+        # *original* base, not the attempt base. A retry re-bases the attempt on
+        # the previous candidate, which would otherwise make the amendment's own
+        # additions look like pre-existing files and refuse to let it repair
+        # them; the original base keeps every path that existed before the
+        # amendment frozen exactly as it was.
+        statuses = _change_statuses(worktree, record.freeze_base)
         forbidden: list[str] = []
         for path in changed:
             if record.layer == "PROPHET":
@@ -1587,6 +1650,18 @@ class WorkflowManager:
         _write_json(worktree / relative_root / "request.json", request)
         author = "prophet" if record.layer == "PROPHET" else "planner"
         _write_json(worktree / relative_root / f"{author}-{record.attempt:03d}.json", result)
+        _write_json(
+            worktree / relative_root / "impacts.json",
+            {
+                "amendment_id": amendment_id,
+                "layer": record.layer,
+                "raised": [
+                    {"task_id": item["task_id"], "reason": item["reason"]}
+                    for item in result["affected_existing_tasks"]
+                ],
+                "resolves": list(result["resolved_task_impacts"]),
+            },
+        )
         result_path.unlink()
         (worktree / ".workflow" / "amendment-request.json").unlink(missing_ok=True)
         if outcome == "BLOCKED":
@@ -1608,6 +1683,7 @@ class WorkflowManager:
             candidate_commit=_sha(worktree),
             branch=record.branch,
             worktree=record.worktree,
+            original_base_commit=record.freeze_base,
         )
         self.save_amendment(updated)
         return updated
@@ -1615,7 +1691,15 @@ class WorkflowManager:
     def _validate_amendment_result(self, result: Mapping[str, Any], amendment_id: str) -> str:
         _validate_object_keys(
             result,
-            required={"amendment_id", "outcome", "summary", "rationale", "unresolved_questions"},
+            required={
+                "amendment_id",
+                "outcome",
+                "summary",
+                "rationale",
+                "unresolved_questions",
+                "affected_existing_tasks",
+                "resolved_task_impacts",
+            },
             label="amendment result",
         )
         if result.get("amendment_id") != amendment_id:
@@ -1628,6 +1712,31 @@ class WorkflowManager:
         ):
             raise WorkflowError("amendment summary and rationale must be strings")
         _validate_string_list(result.get("unresolved_questions"), "amendment unresolved_questions")
+        # Every amendment states, explicitly, whether it left an existing
+        # contract asserting something a governing document no longer says. An
+        # empty list is a claim the independent review can test; silence is not.
+        affected = result.get("affected_existing_tasks")
+        if not isinstance(affected, list):
+            raise WorkflowError("amendment affected_existing_tasks must be a list")
+        for item in affected:
+            if not isinstance(item, Mapping) or set(item) != {"task_id", "reason"}:
+                raise WorkflowError(
+                    "each amendment affected_existing_tasks entry requires exactly "
+                    "task_id and reason"
+                )
+            affected_id = item["task_id"]
+            if not isinstance(affected_id, str) or not TASK_PATTERN.fullmatch(affected_id):
+                raise WorkflowError(f"invalid affected task ID {affected_id!r}")
+            reason = item["reason"]
+            if not isinstance(reason, str) or not reason.strip():
+                raise WorkflowError(
+                    f"affected_existing_tasks[{affected_id}] needs a non-empty reason"
+                )
+        resolves = result.get("resolved_task_impacts")
+        _validate_string_list(resolves, "amendment resolved_task_impacts")
+        for resolved_id in cast(list[str], resolves):
+            if not TASK_PATTERN.fullmatch(resolved_id):
+                raise WorkflowError(f"invalid resolved task ID {resolved_id!r}")
         return cast(str, outcome)
 
     def prepare_amendment_review(self, amendment_id: str) -> dict[str, object]:
@@ -1775,6 +1884,7 @@ class WorkflowManager:
             candidate_commit=None,
             branch=record.branch,
             worktree=record.worktree,
+            original_base_commit=record.freeze_base,
         )
         self.save_amendment(updated)
         request = _load_json(self._amendment_request_path(amendment_id))
