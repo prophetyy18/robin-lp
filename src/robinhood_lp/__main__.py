@@ -22,11 +22,19 @@ from typing import TYPE_CHECKING, Any, cast
 from robinhood_lp import __version__
 
 if TYPE_CHECKING:
+    from robinhood_lp.backtest.events import BacktestEvent
     from robinhood_lp.ingestion.capability import (
         EndpointCapability,
         RemainingBudgetSource,
     )
     from robinhood_lp.ingestion.router import RouterConfig
+    from robinhood_lp.orchestrator import (
+        DatasetCoverage,
+        DatasetResolver,
+        EventSource,
+        RunRequest,
+        UnknownDatasetVersionError,
+    )
 
 __all__ = ["main"]
 
@@ -123,6 +131,129 @@ def _build_parser() -> argparse.ArgumentParser:
             "Used when --strict-numeraire is supplied."
         ),
     )
+    # T069 — product-level backtest run lifecycle. The subcommands
+    # drive the BacktestOrchestrator through the durable
+    # RunStateStore; no Web process is required to start, observe
+    # or cancel a run.
+    backtest = subparsers.add_parser(
+        "backtest",
+        help=(
+            "Drive the T069 product-level backtest run lifecycle "
+            "(start, list, observe, cancel). The lifecycle is "
+            "durable across process restarts; every transition is "
+            "persisted under --runs-root."
+        ),
+    )
+    backtest_sub = backtest.add_subparsers(dest="backtest_command")
+    backtest_start = backtest_sub.add_parser(
+        "start",
+        help=(
+            "Reserve a run as QUEUED and execute it. The lifecycle "
+            "writes one manifest + report under --runs-root when the "
+            "run succeeds; failure or cancellation publishes no "
+            "manifest."
+        ),
+    )
+    backtest_start.add_argument(
+        "--request",
+        type=Path,
+        required=True,
+        help=(
+            "Path to a JSON file carrying a RunRequest "
+            "(see ``robinhood_lp.backtest.orchestrator.RunRequest``)."
+        ),
+    )
+    backtest_start.add_argument(
+        "--runs-root",
+        type=Path,
+        required=True,
+        help=(
+            "Directory under which the orchestrator persists "
+            "run records, manifests and reports. Created if "
+            "missing."
+        ),
+    )
+    backtest_start.add_argument(
+        "--dataset-registry",
+        type=Path,
+        default=None,
+        help=(
+            "Optional path to a JSON file carrying the dataset "
+            "registry the orchestrator consults. When omitted the "
+            "orchestrator uses an empty in-memory registry (a "
+            "run request that names a missing dataset version is "
+            "rejected with a structured reason code)."
+        ),
+    )
+    backtest_list = backtest_sub.add_parser(
+        "list",
+        help="List every persisted run record under --runs-root.",
+    )
+    backtest_list.add_argument(
+        "--runs-root",
+        type=Path,
+        required=True,
+        help="Directory holding the orchestrator's run records.",
+    )
+    backtest_observe = backtest_sub.add_parser(
+        "observe",
+        help=(
+            "Return the persisted record for one run. The record "
+            "carries the run's state, progress, reason code and "
+            "(on success) the manifest and report paths."
+        ),
+    )
+    backtest_observe.add_argument(
+        "--runs-root",
+        type=Path,
+        required=True,
+        help="Directory holding the orchestrator's run records.",
+    )
+    backtest_observe.add_argument(
+        "--run-id",
+        type=str,
+        required=True,
+        help="The run identifier to observe.",
+    )
+    backtest_cancel = backtest_sub.add_parser(
+        "cancel",
+        help=(
+            "Cancel a queued or running run. A terminal record "
+            "is left untouched."
+        ),
+    )
+    backtest_cancel.add_argument(
+        "--runs-root",
+        type=Path,
+        required=True,
+        help="Directory holding the orchestrator's run records.",
+    )
+    backtest_cancel.add_argument(
+        "--run-id",
+        type=str,
+        required=True,
+        help="The run identifier to cancel.",
+    )
+    backtest_cancel.add_argument(
+        "--reason",
+        type=str,
+        default="T069_CANCELLED_BY_OPERATOR",
+        help="Structured reason code recorded on the run record.",
+    )
+    backtest_resume = backtest_sub.add_parser(
+        "resume",
+        help=(
+            "Resume every RUNNING record under --runs-root. A "
+            "restart while a run is in flight neither duplicates "
+            "the run nor loses its state."
+        ),
+    )
+    backtest_resume.add_argument(
+        "--runs-root",
+        type=Path,
+        required=True,
+        help="Directory holding the orchestrator's run records.",
+    )
     return parser
 
 
@@ -137,6 +268,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_ingest(args)
     if args.command == "rerun-manifest":
         return _run_rerun_manifest(args)
+    if args.command == "backtest":
+        return _run_backtest(args)
     parser.print_help()
     return 0
 
@@ -606,6 +739,318 @@ def _validated_budget_source(value: str) -> RemainingBudgetSource:
             f"{sorted(VALID_REMAINING_BUDGET_SOURCES)!r}"
         )
     return cast("RemainingBudgetSource", value)
+
+
+# ---------------------------------------------------------------------------
+# ``backtest`` subcommand (T069)
+# ---------------------------------------------------------------------------
+
+
+def _run_backtest(args: argparse.Namespace) -> int:
+    """Drive the T069 product-level backtest run lifecycle.
+
+    The subcommand supports four operations: ``start``, ``list``,
+    ``observe`` and ``cancel``. Every operation reads or writes
+    the durable ``RunStateStore`` under ``--runs-root``; no Web
+    process is required to start, observe or cancel a run.
+
+    The subcommand is intentionally narrow: it composes the
+    :class:`BacktestOrchestrator` (T069) with a CLI-supplied
+    dataset resolver and event source. The CLI does not wire a
+    Web session; the lifecycle is owned by the on-disk store.
+    """
+    try:
+        from robinhood_lp.orchestrator import (
+            BacktestOrchestrator,
+            BacktestRunError,
+            InvalidRunRequestError,
+            RunRecord,
+            RunState,
+            RunStateStore,
+        )
+    except ImportError as exc:  # pragma: no cover - import smoke
+        sys.stderr.write(f"backtest: required dependency missing: {exc}\n")
+        return 1
+    runs_root: Path = args.runs_root
+    store = RunStateStore(runs_root)
+    if args.backtest_command == "list":
+        records = store.list_runs()
+        payload = {
+            "runs_root": str(runs_root),
+            "run_ids": list(records),
+        }
+        sys.stdout.write(json.dumps(payload, sort_keys=True) + "\n")
+        return 0
+    if args.backtest_command == "observe":
+        try:
+            record = store.read(args.run_id)
+        except FileNotFoundError:
+            sys.stderr.write(f"backtest observe: run_id={args.run_id!r} not found\n")
+            return 1
+        sys.stdout.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
+        return 0
+    if args.backtest_command == "cancel":
+        try:
+            record = store.read(args.run_id)
+        except FileNotFoundError:
+            sys.stderr.write(f"backtest cancel: run_id={args.run_id!r} not found\n")
+            return 1
+        if record.state in (
+            RunState.SUCCEEDED,
+            RunState.FAILED,
+            RunState.CANCELLED,
+        ):
+            sys.stdout.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
+            return 0
+        # Build a terminal record and write it. The orchestrator's
+        # full execution path is not exercised here because the
+        # CLI cancel does not hold the cancel token the in-flight
+        # orchestrator is polling; the next ``resume`` invocation
+        # will observe the terminal record.
+        now = int(_now_unix_seconds())
+        cancelled = RunRecord(
+            version=record.version,
+            run_id=record.run_id,
+            state=RunState.CANCELLED,
+            request=record.request,
+            progress=record.progress,
+            reason_code=str(args.reason),
+            error_message=None,
+            manifest_path=None,
+            report_path=None,
+            source_manifest_path=record.source_manifest_path,
+            source_checksum=record.source_checksum,
+            created_at_unix_seconds=record.created_at_unix_seconds,
+            updated_at_unix_seconds=now,
+            terminal_at_unix_seconds=now,
+        )
+        store.write(cancelled)
+        sys.stdout.write(json.dumps(cancelled.to_dict(), sort_keys=True) + "\n")
+        return 0
+    if args.backtest_command == "resume":
+        # The CLI ``resume`` is the restart-while-in-flight
+        # surface. The orchestrator's resume_in_flight re-executes
+        # every RUNNING record under the store; the CLI composes
+        # the same default event source + dataset resolver the
+        # ``start`` subcommand uses.
+        resolver, event_source = _build_cli_resolver_and_source(args)
+        orchestrator = BacktestOrchestrator(
+            store=store,
+            dataset_resolver=resolver,
+            event_source=event_source,
+        )
+        resumed = orchestrator.resume_in_flight()
+        payload = {
+            "runs_root": str(runs_root),
+            "resumed": [record.run_id for record in resumed],
+        }
+        sys.stdout.write(json.dumps(payload, sort_keys=True) + "\n")
+        return 0
+    if args.backtest_command != "start":
+        sys.stderr.write(
+            f"backtest: unknown sub-command {args.backtest_command!r}\n"
+        )
+        return 2
+    # ``start``: load the request, build the resolver / event
+    # source, run the lifecycle, print the terminal record.
+    request_path: Path = args.request
+    if not request_path.exists():
+        sys.stderr.write(f"backtest start: request file not found: {request_path}\n")
+        return 1
+    try:
+        request_payload = json.loads(request_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        sys.stderr.write(f"backtest start: request load failed: {exc}\n")
+        return 1
+    if not isinstance(request_payload, dict):
+        sys.stderr.write("backtest start: request must be a JSON object\n")
+        return 1
+    try:
+        request = _request_from_cli_payload(request_payload)
+    except InvalidRunRequestError as exc:
+        sys.stderr.write(f"backtest start: invalid request: {exc}\n")
+        return 1
+    resolver, event_source = _build_cli_resolver_and_source(args)
+    orchestrator = BacktestOrchestrator(
+        store=store,
+        dataset_resolver=resolver,
+        event_source=event_source,
+    )
+    try:
+        record = orchestrator.submit(request)
+    except BacktestRunError as exc:
+        sys.stderr.write(f"backtest start: {type(exc).__name__}: {exc}\n")
+        return 1
+    sys.stdout.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
+    if record.state == RunState.SUCCEEDED:
+        return 0
+    return 1
+
+
+def _now_unix_seconds() -> int:
+    """Return the current wall-clock time as integer Unix seconds."""
+    import time
+
+    return int(time.time())
+
+
+def _request_from_cli_payload(payload: dict[str, Any]) -> RunRequest:
+    """Reconstruct a :class:`RunRequest` from a CLI JSON payload.
+
+    The function is the bridge between the JSON file the CLI
+    reads and the dataclass the orchestrator consumes. Unknown
+    fields are ignored so the CLI payload can carry operator
+    comments without failing the parse.
+    """
+    from robinhood_lp.orchestrator import RunRequest as _RunRequest
+
+    def _coerce_strategy_parameters(
+        raw: object,
+    ) -> dict[str, int | bool | str]:
+        if not isinstance(raw, dict):
+            return {}
+        out: dict[str, int | bool | str] = {}
+        for k, v in raw.items():
+            if not isinstance(k, str) or not k:
+                continue
+            if isinstance(v, bool) or not isinstance(v, (int, str)):
+                continue
+            out[k] = v
+        return out
+
+    def _coerce_dependency_revisions(raw: object) -> dict[str, str]:
+        if not isinstance(raw, dict):
+            return {}
+        out: dict[str, str] = {}
+        for k, v in raw.items():
+            if not isinstance(k, str) or not k:
+                continue
+            if not isinstance(v, str):
+                continue
+            out[k] = v
+        return out
+
+    source_manifest_path = payload.get("source_manifest_path")
+    if source_manifest_path is not None and not isinstance(source_manifest_path, str):
+        source_manifest_path = None
+    return _RunRequest(
+        run_id=str(payload.get("run_id") or ""),
+        dataset_version=str(payload.get("dataset_version") or ""),
+        chain_id=int(payload.get("chain_id") or 0),
+        pool_key_id=str(payload.get("pool_key_id") or ""),
+        block_range_start=int(payload.get("block_range_start") or 0),
+        block_range_end=int(payload.get("block_range_end") or 0),
+        interval_seconds=int(payload.get("interval_seconds") or 1),
+        strategy_identity=str(payload.get("strategy_identity") or ""),
+        strategy_parameters=_coerce_strategy_parameters(
+            payload.get("strategy_parameters") or {}
+        ),
+        seed=int(payload.get("seed") or 0),
+        clock_assumption=str(payload.get("clock_assumption") or "EVENT_TIME"),
+        fill_assumption=str(
+            payload.get("fill_assumption") or "DETERMINISTIC_FAILURE"
+        ),
+        cost_assumption=str(payload.get("cost_assumption") or "FLAT_GAS"),
+        quote_assumption=str(payload.get("quote_assumption") or "STATIC_FEE"),
+        latency_units=int(payload.get("latency_units") or 0),
+        latency_ms_estimate=int(payload.get("latency_ms_estimate") or 0),
+        reporting_numeraire=str(payload.get("reporting_numeraire") or "USDG"),
+        valuation_qualification=str(
+            payload.get("valuation_qualification") or "QUALIFIED"
+        ),
+        code_revision=str(payload.get("code_revision") or "UNKNOWN"),
+        dependency_revisions=_coerce_dependency_revisions(
+            payload.get("dependency_revisions") or {}
+        ),
+        created_at_unix_seconds=int(payload.get("created_at_unix_seconds") or _now_unix_seconds()),
+        source_manifest_path=source_manifest_path,
+    )
+
+
+def _build_cli_resolver_and_source(
+    args: argparse.Namespace,
+) -> tuple[DatasetResolver, EventSource]:
+    """Build a CLI-friendly (resolver, event_source) pair.
+
+    The CLI uses a file-backed dataset registry when
+    ``--dataset-registry`` is supplied and a synthetic empty
+    event source otherwise. The synthetic source is the
+    contract surface every test relies on: a CLI invocation
+    with no registered dataset / no events fails closed with
+    a structured reason code (no manifest published).
+    """
+    from robinhood_lp.orchestrator import (
+        DatasetCoverage,
+        DatasetResolver,
+        EventSource,
+    )
+
+    class _CLIDatasetResolver(DatasetResolver):
+        def __init__(self, registry_path: Path | None) -> None:
+            self.registry_path = registry_path
+            self._datasets: dict[tuple[str, int, str], DatasetCoverage] = {}
+            if registry_path is not None and registry_path.exists():
+                payload = json.loads(registry_path.read_text(encoding="utf-8"))
+                if isinstance(payload, dict):
+                    for entry in payload.get("datasets", []):
+                        if not isinstance(entry, dict):
+                            continue
+                        coverage = DatasetCoverage(
+                            chain_id=int(entry["chain_id"]),
+                            pool_key_id=str(entry["pool_key_id"]),
+                            dataset_version=str(entry["dataset_version"]),
+                            dataset_schema_version=int(entry["dataset_schema_version"]),
+                            dataset_decode_version=int(entry["dataset_decode_version"]),
+                            dataset_content_hash=str(entry["dataset_content_hash"]),
+                            reporting_numeraire=str(entry["reporting_numeraire"]),
+                            valuation_qualification=str(
+                                entry["valuation_qualification"]
+                            ),
+                            covered_start=int(entry["covered_start"]),
+                            covered_end=int(entry["covered_end"]),
+                        )
+                        self._datasets[
+                            (
+                                coverage.dataset_version,
+                                coverage.chain_id,
+                                coverage.pool_key_id,
+                            )
+                        ] = coverage
+
+        def resolve(
+            self,
+            *,
+            dataset_version: str,
+            chain_id: int,
+            pool_key_id: str,
+        ) -> DatasetCoverage:
+            key = (dataset_version, chain_id, pool_key_id)
+            if key not in self._datasets:
+                raise UnknownDatasetVersionError(dataset_version=dataset_version)
+            return self._datasets[key]
+
+    class _CLIEventSource(EventSource):
+        def load_events(
+            self,
+            *,
+            chain_id: int,
+            pool_key_id: str,
+            block_range_start: int,
+            block_range_end: int,
+            cancel_token: object,
+        ) -> list[BacktestEvent]:
+            # The CLI subcommand operates with an empty event
+            # source: an operator who supplies no replay / event
+            # adapter gets an immediate failure with the
+            # structured ``T069_NO_EVENTS`` reason. The contract
+            # the CLI binds is: a run whose event source yields
+            # no events is recorded as FAILED with no manifest
+            # published.
+            return []
+
+    resolver = _CLIDatasetResolver(args.dataset_registry)
+    event_source = _CLIEventSource()
+    return resolver, event_source
 
 
 if __name__ == "__main__":

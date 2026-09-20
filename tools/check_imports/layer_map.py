@@ -150,6 +150,7 @@ PACKAGE_DEFAULTS: dict[str, str] = {
     "robinhood_lp.risk": "risk",
     "robinhood_lp.execution": "execution",
     "robinhood_lp.application": "application / orchestration",
+    "robinhood_lp.orchestrator": "application / orchestration",
     "robinhood_lp.ops": "presentation / reports",
     "robinhood_lp.research": "backtest",
     "robinhood_lp.web": "presentation / reports",

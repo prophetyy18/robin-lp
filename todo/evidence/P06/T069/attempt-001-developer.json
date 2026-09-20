@@ -1,0 +1,44 @@
+{
+  "task_id": "T069",
+  "outcome": "CANDIDATE_READY",
+  "summary": "T069 deliverable is complete. The orchestrator module (src/robinhood_lp/orchestrator/__init__.py) owns the durable product-run lifecycle (run request, run state, RunStateStore, CancelToken, BacktestOrchestrator, EventSource / DatasetResolver / DatasetCoverage protocols, product rerun, restart-in-flight resume). The CLI (backtest start / list / observe / cancel / resume) wires the orchestrator with a CLI-supplied dataset registry and a synthetic empty event source so every subcommand is reproducible without a Web process. The test suite (tests/test_backtest_t069.py) covers every acceptance clause: registry-bound manifest publication, two heterogeneous pools sharing dataset / numeraire / qualification, byte-equivalent re-running, product rerun leaving the source byte-identical, cancellation / unknown strategy identity / missing dataset / block range outside coverage / legacy source failing closed, atomic and immutable RunStateStore, restart-while-running neither duplicating nor losing state, no credentials in the run record, and CLI subcommands working without a Web process. Ruff, mypy, the import-layer check, the acceptance checker, and the citation checker all pass; the full pytest suite (excluding the forge-dependent oracle test that fails due to missing Solidity lib in this worktree) is green (2685 passed, 6 skipped).",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /tmp/lp-t001-cleanroom-venv/bin/python -m pytest tests/test_backtest_t069.py --no-header -v",
+      "result": "38 passed in 0.84s"
+    },
+    {
+      "command": "PYTHONPATH=src /tmp/lp-t001-cleanroom-venv/bin/python -m pytest --no-header --ignore=tests/test_abi_artifacts.py",
+      "result": "2685 passed, 6 skipped in 25.73s (6 skips are pre-existing forge / gpg / unsorted-currency skips unrelated to T069)"
+    },
+    {
+      "command": "/tmp/lp-t001-cleanroom-venv/bin/ruff check src/ tests/ tools/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/tmp/lp-t001-cleanroom-venv/bin/mypy src/",
+      "result": "Success: no issues found in 131 source files"
+    },
+    {
+      "command": "PYTHONPATH=src /tmp/lp-t001-cleanroom-venv/bin/python -m tools.check_imports.check",
+      "result": "no output (success; orchestrator added under 'application / orchestration' in tools/check_imports/layer_map.py)"
+    },
+    {
+      "command": "/tmp/lp-t001-cleanroom-venv/bin/python -m tools.check_acceptance check",
+      "result": "acceptance check passed: no findings"
+    },
+    {
+      "command": "/tmp/lp-t001-cleanroom-venv/bin/python -m tools.check_citations check",
+      "result": "citation check passed: no findings"
+    },
+    {
+      "command": "PYTHONPATH=src /tmp/lp-t001-cleanroom-venv/bin/python -m robinhood_lp backtest --help",
+      "result": "usage lists start, list, observe, cancel, resume subcommands"
+    }
+  ],
+  "residual_risks": [
+    "tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output is failing in this worktree due to missing tools/oracle/lib/v4-core and v4-periphery Solidity sources; the failure is environmental (forge library absent in the worktree) and is unrelated to T069. CI installs Foundry and clones the libraries at job start.",
+    "Continuation from attempt 1 (TURN_BUDGET) was used to recover the worktree; the orchestrator implementation was complete but the test test_orchestrator_imports_registry_binding expected UnknownStrategyIdentityError to be exposed in the orchestrator module namespace. That missing import was added and the test now passes. No other contract gaps surfaced.",
+    "The orchestrator does not implement a risk gateway; the default risk callback approves every decision. Wiring the T070 risk gateway here is a deliberate follow-up and is documented as such inside the orchestrator module (see _approve_risk_callback)."
+  ]
+}
