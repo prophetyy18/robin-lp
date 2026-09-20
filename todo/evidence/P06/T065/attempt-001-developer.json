@@ -1,0 +1,41 @@
+{
+  "task_id": "T065",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the maintainable USDG-first adaptive-Range strategy (T065) on top of the T060 contracts and T061 backtest engine. Delivered two new modules: `src/robinhood_lp/strategy/adaptive.py` (replaceable rule-based regime / fee-opportunity models, downside-asymmetric trend/jump filter, Range occupancy/break/return assessment, expected fee/depth/cost distributions, complete out-of-Range lifecycle actions `WAIT`/`WAIT_OUT`/`RETURN`/`REBUILD`/`REBUILD_DEFER`/`EXIT`, immutable parameter schema with uncertainty/reason codes, and the 5-minute USDG return rule) and `src/robinhood_lp/strategy/adapter.py` (the engine-callback adapter per STRATEGY_ECONOMICS.md §7 — projects the engine's `StrategyDecisionRequest` into the T065 snapshots, runs the strategy, returns the engine's `StrategyDecision` without changing either boundary). All 7 acceptance scenarios are covered by 53 passing tests: stable Range, falling token with attractive apparent fee, jumps (with the asymmetric threshold guard), low / wash-like volume, liquidity withdrawal, out-of-Range wait / return / rebuild, and costly rebuild. The 5-minute USDG rule is exercised in three flavours — empty-ledger suppression, held-position exit with in-strategy reassessment, and the incomplete-bar no-fire path. Model replacement, replay determinism, layer purity, downside asymmetry, the no-fundamentals / no-token-appreciation / no-forced-trade / no-bypassed-risk guards, and the engine-level replay of the same manifest producing identical audit chains are also tested. Quality gates: pytest (53/53 in the T065 file; 364/364 in the T060/T061/T062/T063/T064/T065 surface), ruff format+check (clean), strict mypy on new and changed files (no issues).",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_strategy_t065.py -q --no-header",
+      "result": "53 passed in 0.13s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_strategy_t060.py tests/test_strategy_t062.py tests/test_backtest_t061.py tests/test_strategy_t065.py tests/test_robustness_t064.py tests/test_reports_t063.py tests/test_import_graph.py tests/test_layer_direction_t007.py --no-header -q",
+      "result": "364 passed in 1.14s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format src/robinhood_lp/strategy/adaptive.py src/robinhood_lp/strategy/adapter.py tests/test_strategy_t065.py",
+      "result": "3 files reformatted (idempotent on re-run)"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/strategy/adaptive.py src/robinhood_lp/strategy/adapter.py tests/test_strategy_t065.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/robinhood_lp/strategy/adaptive.py src/robinhood_lp/strategy/adapter.py tests/test_strategy_t065.py",
+      "result": "Success: no issues found in 3 source files"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -c \"from robinhood_lp.strategy.adaptive import assert_adaptive_strategy_layer_is_pure; assert_adaptive_strategy_layer_is_pure(); print('layer-purity OK')\"",
+      "result": "layer-purity OK (no forbidden sibling imports)"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_strategy_t065.py -v --no-header 2>&1 | tail -55",
+      "result": "All 53 T065 tests passed (golden scenarios, 5-minute USDG rule, model replacement, replay determinism, must-not guards, snapshot/assessment invariants, public surface)"
+    }
+  ],
+  "residual_risks": [
+    "Two pre-existing test failures in the repository (unrelated to T065) remain: tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output (missing v4-core Solidity source files in tools/oracle/lib) and tests/test_documentation_citations.py::test_check_passes_on_real_repository (doc cites storage.schema and backtest.manifest/backtest.robustness modules that do not resolve). These were present on the base commit before this T065 attempt and were not caused by any change in this attempt; they are outside T065's scope and the layered rules forbid editing the maintenance lane paths the audit report references.",
+    "The T065 strategy uses the standard Q64.64 convention (price_q64_64 = price * 2**64) for the price-to-sqrt-price conversion (shift = 128). This is consistent with the canonical V4 reference math but differs from the in-tree baselines module's pre-existing internal convention (which uses shift = 64). The T061 engine forwards events as-is; tests in this task construct events with the standard Q64.64 convention. The discrepancy with the baselines module is a pre-existing implementation choice the baselines module does not document; the T065 module documents its convention explicitly.",
+    "The 5-minute return computation depends on the visible events carrying a USDG-converted price_q64_64. In production this requires the T053 qualified USDG quote source to feed the ingest pipeline; that gate is owned by an earlier task and T065 only consumes the projected snapshot.",
+    "Default parameters (5% down-trend threshold, 10% / 25% asymmetric jump thresholds, 60% range occupancy threshold, 5 sample minimum, 25% own-share maximum, 1.0 rebuild-cost ratio threshold) are placeholders bound for the post-testnet paper/shadow evidence gate (T093). They are explicit and reversible; no production default is committed by this attempt."
+  ]
+}
