@@ -1,0 +1,11 @@
+{
+  "amendment_id": "A0015",
+  "task_ids": [
+    "T068",
+    "T069"
+  ],
+  "layer": "CONTRACT",
+  "target_status": "PLANNED",
+  "summary": "re-point T068 and T069 to T105 and close the A0013 findings on both",
+  "owner_direction": "Owner direction: execute the A0014-recorded lower-layer follow-through for the two consumers that come first in the recorded cutover order, and close the A0013 legacy finding on each target in the same amendment. T068: remove T063 from its dependency list and do not add T105, because T105 depends on T068; keep T068 the registry producer and move current manifest binding and its integration acceptance to T105, so T068 may expose deterministic registry validation but must not become a second manifest publisher; its verification tests registry behaviour locally and leaves manifest integration and old-path unreachability to T105. T068 must also stop claiming that T060 carries the parameter-schema vocabulary its References assert, and cite instead the surface that actually declares it, which closes the open A0013 finding on that task. T069: replace the T063 dependency and every normative T063 reference with T105, and state the product-run versus rerun-manifest lifecycle boundary explicitly: T069 alone owns durable run state, cancellation and restart; an artifact rerun stays an artifact operation unless it is invoked through a new T069 run record; a product rerun creates a new durable run linked to the source manifest with the source preserved read-only. That boundary, and the T063 acceptance it borders, is exactly the open A0013 finding on T069, so close it here. T069 acceptance must cover a new run, a linked rerun, cancellation and failure, and rejection of legacy or unregistered inputs. Preserve every still-valid obligation, acceptance criterion and Must-not clause of both contracts; change only these two contracts and their dependency fields; do not touch any other task, document or revision; and resolve exactly the open impacts this amendment genuinely closes, leaving every other impact open and saying so."
+}

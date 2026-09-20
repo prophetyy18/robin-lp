@@ -723,7 +723,6 @@
       "depends_on": [
         "T060",
         "T062",
-        "T063",
         "T065"
       ],
       "task_file": "todo/phases/P06-backtesting-and-strategy/T068.md",
@@ -740,8 +739,8 @@
         "T041",
         "T053",
         "T061",
-        "T063",
-        "T068"
+        "T068",
+        "T105"
       ],
       "task_file": "todo/phases/P06-backtesting-and-strategy/T069.md",
       "attempt": 0,
