@@ -1,0 +1,105 @@
+{
+  "amendment_id": "A0014",
+  "outcome": "AMENDMENT_READY",
+  "summary": "Created T105–T108 as the four P06 successors to T063, T064, T066 and T067, with registry-bound contracts and complete replacement/migration duties; updated P06 plan collateral and recorded every planned direct consumer that must be amended before retirement.",
+  "rationale": "The Owner directed a behavioral replacement, not an in-place rewrite of approved work. The four new contracts retain the predecessors' valid acceptance and safety obligations, add the A0013 registry corrections, preserve historical evidence read-only, and require the old authoritative paths to become unreachable after a fail-closed cutover. The dependency order is acyclic: T105 depends on registry producer T068, so T068 must remove its old reverse dependency on T063 rather than point to T105; T106 then consumes T105, T107 consumes T105/T106, and T108 consumes T105. Existing approved contracts and their evidence remain byte-identical. A0013 legacy impacts remain open here because only the later SUPERSEDE amendment may close them while annotating the exact successors.",
+  "unresolved_questions": [],
+  "impact_assessment": {
+    "intent": "Behavioral replacement implementing the already-confirmed G-STRATEGY-REGISTRY-01 and G-BACKTEST-RUN-01 direction. No Intent text or intent_revision changed: A0014 adds execution tasks for settled requirements and introduces no V2, chain, pool-selection, risk or live-policy choice.",
+    "specification": "No Spec/ADR/protocol clause changed. T105–T108 cite and preserve the current strategy, research, architecture and product boundaries. The registry remains authoritative, product run lifecycle stays with T069, and artifact rerun stays distinct. No external or mutable fact was added.",
+    "contracts": "Added exactly four new contracts: T105 replaces T063, T106 replaces T064, T107 replaces T066 and T108 replaces T067. Each declares its exact predecessor in replaces, depends on it, preserves still-valid Outcome/Deliverables/Acceptance/Must-not obligations, and has a complete Replacement and migration section. No existing contract was edited. Six existing PLANNED direct consumers now require CONTRACT amendment before predecessor retirement: T068, T069, T073, T083, T084 and T101.",
+    "dependencies": "The new graph is acyclic: T105=[T063,T068], T106=[T064,T068,T105], T107=[T065,T066,T068,T105,T106], T108=[T067,T068,T105]. T068 must remove T063 without adding T105 because T105 already depends on T068; this establishes registry-before-registry-bound-manifest. T069/T073/T084/T101 must replace T063 with T105, and T073/T083 must replace T066 with T107. T064 and T066 remain only as immutable predecessor dependencies of their successors or dependencies embedded in already-approved history.",
+    "implementation": "T105 governs the current robinhood_lp.reports and rerun publication path; T106 governs robustness surfaces/runner/reports; T107 governs experiments candidate_lock/search/harness; T108 governs the current authoring guide/example/tests. Each contract requires adapting or versioning the old path, forbids dual current authorities, covers CLI/Web/background/test-helper reachability where applicable, and preserves layer separation. No implementation or test file changed in this amendment.",
+    "data": "Existing T063/T064/T066 manifests, reports, surfaces, locks, rejected runs, checksums and review artifacts remain byte-for-byte read-only. New artifacts bind registry/schema identity, version and checksum. Missing bindings are explicit legacy state, never inferred or backfilled; any migration is additive, retains the source checksum/provenance and cannot turn prior test-fold exposure into a fresh candidate. T108 has no mutable production data and leaves manifest migration to T105.",
+    "operations": "Cutover order is T068 registry, T105 manifest, T106 robustness, then T107 candidate lock; T108 can follow T068/T105. Publication/evaluation fails closed on missing or incompatible revisions. Rollback pauses publication/evaluation or restores the last compatible registry-bound release and cannot reactivate hard-coded identity, unrestricted surfaces or old candidate locks. T069 alone owns durable run state, cancellation and restart; rerun-manifest remains an artifact operation unless invoked through a new T069 run record.",
+    "security": "Registry and schema metadata grant no risk, approval, signer, execution or live authority. New manifests/locks exclude secrets, credentials and key material; tampering, identity substitution and downgrade fail closed. The guide/example remains offline, outside product code and unable to trade. Existing Phase 0–8 signing prohibitions and T094 promotion gate are unchanged.",
+    "verification": "Each successor requires positive, negative, compatibility, migration and old-path-unreachable evidence. T105 adds registered/unregistered, parameter/schema/revision/code and artifact-vs-product-rerun cases; T106 adds range-edge and invalid surface cases; T107 changes every new frozen field and tests tamper/downgrade/one-look behavior; T108 tests registered identity, free-text rejection, runnable example, citations and drift. Existing predecessor acceptance remains required. Independent Developer/Reviewer evidence is still required; this planning amendment itself is not acceptance evidence."
+  },
+  "affected_existing_tasks": [
+    {
+      "impact_id": "A0014:T068:remove-manifest-reverse-dependency",
+      "task_id": "T068",
+      "reason": "T068 currently depends on T063 and says it modifies the T063 manifest path. T105 is now the designated registry-bound manifest successor and depends on T068, so replacing T063 with T105 inside T068 would create a cycle while leaving T063 would strand an ordinary PLANNED consumer on a retired predecessor. The contract must identify T068 as the registry producer and T105 as the downstream integration owner rather than claiming the old manifest as its dependency.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT: revise T068 to preserve registry/schema/provenance delivery while moving current manifest binding and its integration acceptance to T105. DEPENDENCY: remove T063 and do not add T105, because T105 depends on T068. IMPLEMENTATION: T068 may expose deterministic registry validation but must not establish a second manifest publisher; T105 performs cutover from the old validator. DATA: registry records are new and deterministic; historical manifests are handled by T105, not rewritten by T068. OPERATIONS: registry must be available before T105 cutover; missing registry fails closed. SECURITY: unchanged—no RPC/storage/signer/Web import or authority. VERIFICATION: test registry behavior locally and let T105 prove manifest integration and old-path unreachability."
+    },
+    {
+      "impact_id": "A0014:T069:consume-registry-bound-manifest",
+      "task_id": "T069",
+      "reason": "T069 depends on and repeatedly names T063 as the manifest/report producer. After T105 becomes current, that text and dependency would route product runs to the retired hard-coded identity path and omit the explicit rerun-manifest versus product-run lifecycle boundary.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "OPERATIONS",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT/DEPENDENCY: replace T063 with T105 and cite T105's registry-bound manifest plus rerun boundary. IMPLEMENTATION: every product run publishes through T105; artifact rerun remains separate, while a product rerun creates a new durable T069 run linked to the source manifest. DATA: preserve source manifests read-only and link rather than overwrite. OPERATIONS: retain queued/running/failed/cancelled/succeeded, restart and no-partial-result semantics. SECURITY: no new permission or secret surface. VERIFICATION: cover new run, linked rerun, cancellation/failure and rejection of legacy/unregistered inputs."
+    },
+    {
+      "impact_id": "A0014:T073:use-current-evidence-and-candidate",
+      "task_id": "T073",
+      "reason": "T073 directly depends on T063 and T066 and presents their backtest evidence and provisional candidate during Owner authorization. Those dependencies would be forbidden after retirement and could display legacy identity-unbound evidence or a candidate lock that does not freeze registry/schema revision.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "OPERATIONS",
+        "SECURITY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT/DEPENDENCY: replace T063/T066 with T105/T107 and name registry-bound evidence and candidate identity. IMPLEMENTATION: authorization views read only current T105/T107 artifacts; legacy artifacts remain historical and visibly non-current. DATA: retain old evidence read-only and never copy it into a new authorization. OPERATIONS: fail closed if current manifest/lock is absent or mismatched; existing pool/token/paper authorization order remains. SECURITY: registration is not authorization and T073 remains the Owner write boundary. VERIFICATION: positive current-evidence display plus negative legacy, mismatch and downgrade cases."
+    },
+    {
+      "impact_id": "A0014:T083:consume-registry-bound-candidate-lock",
+      "task_id": "T083",
+      "reason": "T083 directly depends on T066. Retiring T066 without rewiring leaves a normal PLANNED consumer on the old candidate lock, whose frozen fields do not bind registry identity, schema and revision.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "OPERATIONS",
+        "SECURITY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT/DEPENDENCY: replace T066 with T107 and use T107's candidate/version identity wherever readiness or evidence is consumed. IMPLEMENTATION: current controls query only registry-bound locks. DATA: old locks remain immutable legacy records and cannot be promoted. OPERATIONS: missing/mismatched/downgraded locks block rather than fall back. SECURITY: the lock grants no live permission; existing risk and promotion boundaries remain. VERIFICATION: cover current lock, old-format rejection, mismatch and unavailable-revision behavior."
+    },
+    {
+      "impact_id": "A0014:T084:present-current-manifest-provenance",
+      "task_id": "T084",
+      "reason": "T084 directly depends on T063 for console provenance. Once T105 is current, retaining T063 would strand the shell on a retired producer and allow display of strategy identity without registry/schema provenance.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "SECURITY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT/DEPENDENCY: replace T063 with T105 and require displayed manifest provenance to include registered identity and schema/registry revision. IMPLEMENTATION: presentation reads T105 artifacts without inventing or rewriting identity. DATA: historical T063 artifacts remain explicitly legacy and read-only. OPERATIONS: not otherwise applicable; T084 does not own run lifecycle. SECURITY: presentation grants no strategy or trading approval and redacts secrets as before. VERIFICATION: current and legacy provenance rendering, mismatch/fail-closed and no-free-text-substitution tests."
+    },
+    {
+      "impact_id": "A0014:T101:assemble-panel-from-current-run-manifests",
+      "task_id": "T101",
+      "reason": "T101 directly depends on and cites T063 for the manifest set it uses to assemble panels. After replacement, this would anchor research labels and samples to a retired manifest format without registry identity/schema provenance and without the T069 run lifecycle boundary already identified by A0013.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "OPERATIONS",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT/DEPENDENCY: replace T063 with T105 and, while repairing the existing A0013 finding, bind the panel to T069 run identities and T068 registry identities. IMPLEMENTATION: assemble only validated T105 manifest sets from the declared run; legacy input is explicit compatibility analysis, not current evidence. DATA: preserve source checksums, dataset/run/member identity and registry/schema revision; never merge incompatible revisions. OPERATIONS: cancellation/failure yields no complete-looking panel. SECURITY: not otherwise applicable beyond rejecting identity substitution and secrets. VERIFICATION: panel provenance, deduplication, incompatible-revision, failed/cancelled-run and legacy rejection tests."
+    }
+  ],
+  "resolved_task_impacts": []
+}
