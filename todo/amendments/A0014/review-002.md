@@ -1,0 +1,18 @@
+# A0014 owner amendment review
+
+- Base commit: `57e00704ac971e5d2e78b9373a2f4cbeffb3202f`
+- Candidate commit: `ae8f664bb4431e259c44e3f678c7ac3af738fbfe`
+- Verdict: **FAIL**
+
+## Summary
+
+The cumulative A0014 change preserves every task and contract that existed before A0014, adds exactly four acyclic successor contracts with the required replaces/predecessor dependency and migration sections, keeps safety obligations, updates the plan revision, and passes workflow validation. It is not yet complete: the impact ledger misses three live PLANNED contracts whose current text still names the soon-to-be-retired predecessor as authoritative, and PROPHET-owned architecture/security ownership mappings remain stale. Those omissions would let the later CONTRACT/SUPERSEDE sequence retire T063/T064 while live contracts and governance documents still direct implementers and reviewers to them.
+
+## Required changes
+
+- Add stable, exact A0014 impacts for T087, T088 and T102 to both the current Prophet result and impacts.json, and update the new successor contracts' downstream-migration accounting accordingly. T087:55-56 says range coverage is read against T063, and T088:60-62 says result checksums are reconciled against T063; both are current PLANNED product surfaces and must be amended to consume/cite T105 before T063 is retired, even though T069 can carry T105 transitively after rewiring. T102:70-71 still names T064 as the robustness protocol; its A0013 finding covers the different missing-registry/run-identity conflict and therefore cannot close this new exact successor conflict. Record whether T102 must depend on or otherwise consume T106, and require current schema-bound robustness evidence rather than the retired T064 path. Each disposition must cover dependency/contract text, old implementation reachability, historical artifacts, operations/security where applicable, and positive/negative/migration/old-path-unreachable verification.
+- Synchronize PROPHET-owned live governance collateral for the replacement ownership. ARCHITECTURE.md section 2.2 (lines 119-122 and its table through line 157) still assigns the manifest, robustness and threshold-review modules only to T063/T064/T066 and has no rows for T105-T108, even though its lines 159-161 define the table as the module/artifact ownership map for both APPROVED and planned tasks. THREAT_MODEL.md likewise names only T063/T064 as the current controls/owners/evidence for T-17 and T-21 (lines 369-370, 452-457 and 497). Add the successors while preserving predecessor history during the transition, and phrase the mappings so that after SUPERSEDE the successor is the current authority and the predecessor remains historical evidence rather than a live write/evaluation path. Re-scan all plan/spec/implementation collateral for the four replaced responsibilities so the later annotation-only SUPERSEDE step cannot make another editable live mapping stale.
+
+## Unknowns
+
+- None.
