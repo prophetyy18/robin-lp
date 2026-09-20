@@ -137,6 +137,7 @@ PACKAGE_DEFAULTS: dict[str, str] = {
     "robinhood_lp.features": "features",
     "robinhood_lp.strategy": "strategy",
     "robinhood_lp.backtest": "backtest",
+    "robinhood_lp.reports": "backtest",
     "robinhood_lp.qualification": "presentation / reports",
     "robinhood_lp.ingestion": "application / orchestration",
     "robinhood_lp.quality": "storage",

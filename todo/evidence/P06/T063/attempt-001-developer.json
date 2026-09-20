@@ -1,0 +1,42 @@
+{
+  "task_id": "T063",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented T063: per-pool experiment manifests, multi-pool run identity, validation gates, and one-command rerun. The package reports/ (kept at the location the previous Developer chose) owns RunMetrics + LedgerSnapshot + CoverageSummary + decisions checksums (from the pre-existing metrics.py), the ExperimentManifest dataclass with per-pool invariant and dataset / schema / code / dependency revisions, the RunIdentity for multi-pool runs, the validation layer enforcing required fields, report checksum, numeraire / qualification agreement and per-pool invariant, and a rerun entry point that reconstructs events / strategy / model bundle from the manifest and reproduces the metrics + decisions checksums byte-identically. Added a rerun-manifest CLI subcommand and the corresponding tools/check_imports/layer_map.py entry so the import-graph gate stays green. The candidate ships 35 new tests in tests/test_reports_t063.py covering the per-pool manifest, checksum tamper detection, missing-required-field gates, numeraire / qualification disagreement, multi-pool one-manifest-per-pool under one run identity, byte-identical rerun, no-overwrite of a prior run, and the no-USD-presentation of a RELATIVE_ONLY run guard. The contract dependencies (T061 backtest, T062 strategy baselines) and the dependency edges stay untouched; no docs / Spec / task-contract / workflow / dependencies surface was edited.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/test_reports_t063.py -v",
+      "result": "35 passed in 0.28s. Covers TestManifestConstruction (6 tests), TestManifestValidation (10 tests), TestMultiPoolRunIdentity (6 tests), TestRerun (5 tests), TestReconciliation (2 tests), TestSerialisation (4 tests), and the unknown-strategy-kind guard."
+    },
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/test_backtest_t061.py tests/test_strategy_t062.py tests/test_import_graph.py",
+      "result": "99 passed in 0.55s. T061 engine tests (49), T062 baseline tests (33), T006 import-graph tests (17, including the real-repository check that previously failed because the new reports module was unclassified)."
+    },
+    {
+      "command": "PYTHONPATH=src python -m mypy --strict src/robinhood_lp/reports/ tests/test_reports_t063.py src/robinhood_lp/__main__.py",
+      "result": "Success: no issues found in 8 source files. The reports package, the test module, and the CLI entry point all pass strict mypy."
+    },
+    {
+      "command": "ruff format --check src/robinhood_lp/reports/ tests/test_reports_t063.py src/robinhood_lp/__main__.py",
+      "result": "8 files already formatted. ruff format clean on every new / modified file."
+    },
+    {
+      "command": "ruff check src/robinhood_lp/reports/ tests/test_reports_t063.py src/robinhood_lp/__main__.py",
+      "result": "All checks passed! No lint findings after the strict-mode cleanup; the residual zip(strict=False) and unused 'i' index were addressed."
+    },
+    {
+      "command": "PYTHONPATH=src python -m robinhood_lp rerun-manifest --manifest /tmp/manifest-cli-test.json",
+      "result": "Exit code 0. The CLI writes the canonical JSON rerun result with match=true, decisions_match=true, and the recorded / recomputed checksums equal. End-to-end acceptance of the 'one command reruns a saved manifest' clause."
+    },
+    {
+      "command": "PYTHONPATH=src python -m pytest (full suite)",
+      "result": "2089 passed, 2 failed (pre-existing, unrelated to T063: test_abi_artifacts.py / test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output needs Foundry forge on PATH; test_documentation_citations.py::test_check_passes_on_real_repository trips on docs/implement/DOCUMENTATION_INTEGRITY_AUDIT.md:242 (storage.schema) — both reproduce on the base commit 4cfbdbb and do not touch the reports module), 6 skipped. The T006 import-graph check (test_import_graph.py::test_check_passes_on_real_repository) now passes after the layer_map.py entry was added."
+    }
+  ],
+  "residual_risks": [
+    "The reports package is located at src/robinhood_lp/reports/ (the previous Developer's location); ARCHITECTURE.md §2.2 row 6 names the package robinhood_lp.backtest.manifest. The layer-map classification was set to 'backtest' so the import-graph gate is satisfied; if Owner wants the package renamed to robinhood_lp.backtest.manifest a follow-up PROPHET move is required (this Developer cannot edit the architecture or task contracts).",
+    "The reference RunMetrics.compute_run_metrics uses a placeholder zero IL/LVR proxy and a fee-revenue-as-proxy total return; the proxy is recorded on the metrics record so the manifest can carry the slot but a downstream reviewer should not interpret the value as a true LVR measurement. A T093 follow-up is expected to bind the gas-price oracle.",
+    "The rerun reconstruction supports the published baseline strategy kinds (HOLD / BROAD_RANGE / FIXED_WIDTH / VOLATILITY_WIDTH / OUT_OF_RANGE_REBALANCE) and the canonical model bundle (constant liquidity, static fee, flat gas, zero slippage, deterministic failure, fixed latency). A model bundle with a different model kind would fail reconstruction; the manifest's bundle_version is recorded so the failure is observable. A full rerun-fidelity matrix is left for a later task.",
+    "Pre-existing ruff F841 / B905 findings in metrics.py (the previous Developer's draft) are now resolved; the metrics.py file still contains the simpler-than-ideal _decision_in_range_segments placeholder that filters by payload 'decision_kind' rather than by stage — kept as-is to avoid scope creep into the strategy layer.",
+    "Two pre-existing test failures remain on the base commit (test_abi_artifacts forge dependency, test_documentation_citations storage.schema). They are not introduced by T063 and are listed only for reviewer transparency."
+  ]
+}

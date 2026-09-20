@@ -85,6 +85,41 @@ def _build_parser() -> argparse.ArgumentParser:
             "Optional explicit run identifier. When omitted the runner generates ``run-<uuid>``."
         ),
     )
+    rerun = subparsers.add_parser(
+        "rerun-manifest",
+        help=(
+            "Rerun a saved experiment manifest and verify that the "
+            "recomputed metrics checksum matches the recorded one. "
+            "This is the T063 acceptance gate 'one command reruns a "
+            "saved manifest'."
+        ),
+    )
+    rerun.add_argument(
+        "--manifest",
+        type=Path,
+        required=True,
+        help="Path to a saved experiment manifest JSON file.",
+    )
+    rerun.add_argument(
+        "--strict-numeraire",
+        action="store_true",
+        help=(
+            "Require the manifest's numeraire / qualification to "
+            "match a dataset registry record supplied via "
+            "--dataset-qualification. Without this flag the rerun "
+            "skips the cross-record gate."
+        ),
+    )
+    rerun.add_argument(
+        "--dataset-qualification",
+        type=Path,
+        default=None,
+        help=(
+            "Optional path to a JSON file carrying a DatasetQualificationRecord "
+            "(dataset_version / reporting_numeraire / valuation_qualification). "
+            "Used when --strict-numeraire is supplied."
+        ),
+    )
     return parser
 
 
@@ -97,8 +132,102 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "ingest":
         return _run_ingest(args)
+    if args.command == "rerun-manifest":
+        return _run_rerun_manifest(args)
     parser.print_help()
     return 0
+
+
+# ---------------------------------------------------------------------------
+# ``rerun-manifest`` subcommand (T063)
+# ---------------------------------------------------------------------------
+
+
+def _run_rerun_manifest(args: argparse.Namespace) -> int:
+    """Execute the one-command rerun of a saved experiment manifest.
+
+    The function is the operator's read-only entry point that
+    satisfies the T063 acceptance clause "one command reruns a
+    saved manifest". It loads the manifest, runs the full
+    validation gate (per-pool invariant, required fields, report
+    checksum, optional dataset numeraire / qualification), rebuilds
+    the engine from the manifest's recorded strategy + model
+    parameters, and compares the new ``metrics_checksum`` against
+    the recorded one. A byte-identical match exits with code 0; any
+    mismatch or validation failure exits with code 1 and writes the
+    failure summary to ``stderr``.
+
+    The function never accepts, reads, or forwards any signing
+    material; the rerun is a deterministic, fully local
+    re-execution of the backtest engine (Phase 0–8 read-only
+    boundary).
+    """
+    try:
+        from robinhood_lp.reports import (
+            DatasetQualificationRecord,
+            rerun_manifest,
+        )
+        from robinhood_lp.reports.validation import (
+            ManifestValidationError,
+        )
+    except ImportError as exc:  # pragma: no cover - import smoke
+        sys.stderr.write(f"rerun-manifest: required dependency missing: {exc}\n")
+        return 1
+    manifest_path: Path = args.manifest
+    if not manifest_path.exists():
+        sys.stderr.write(f"rerun-manifest: manifest file not found: {manifest_path}\n")
+        return 1
+    dataset_qualification: DatasetQualificationRecord | None = None
+    if args.strict_numeraire:
+        if args.dataset_qualification is None:
+            sys.stderr.write(
+                "rerun-manifest: --strict-numeraire requires --dataset-qualification <path>\n"
+            )
+            return 1
+        try:
+            raw = json.loads(args.dataset_qualification.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            sys.stderr.write(f"rerun-manifest: dataset-qualification load failed: {exc}\n")
+            return 1
+        if not isinstance(raw, dict):
+            sys.stderr.write("rerun-manifest: dataset-qualification must be a JSON object\n")
+            return 1
+        try:
+            dataset_qualification = DatasetQualificationRecord(
+                dataset_version=str(raw["dataset_version"]),
+                reporting_numeraire=str(raw["reporting_numeraire"]),
+                valuation_qualification=str(raw["valuation_qualification"]),
+            )
+        except (KeyError, ValueError) as exc:
+            sys.stderr.write(f"rerun-manifest: dataset-qualification parse failed: {exc}\n")
+            return 1
+    try:
+        result = rerun_manifest(
+            manifest_path,
+            dataset_qualification=dataset_qualification,
+        )
+    except ManifestValidationError as exc:
+        sys.stderr.write(f"rerun-manifest: validation failed: {type(exc).__name__}: {exc}\n")
+        return 1
+    except Exception as exc:  # noqa: BLE001 — surface unexpected failures too
+        sys.stderr.write(f"rerun-manifest: rerun failed: {type(exc).__name__}: {exc}\n")
+        return 1
+    payload = {
+        "manifest_path": str(manifest_path),
+        "run_id": result.run_id,
+        "chain_id": result.chain_id,
+        "pool_key_id": result.pool_key_id,
+        "match": bool(result.match),
+        "decisions_match": bool(result.decisions_match),
+        "recorded_metrics_checksum": result.recorded_metrics_checksum,
+        "recomputed_metrics_checksum": result.recomputed_metrics_checksum,
+        "recorded_decisions_checksum": result.recorded_decisions_checksum,
+        "recomputed_decisions_checksum": result.recomputed_decisions_checksum,
+        "fills_count": int(result.new_run_metrics.fills_count),
+        "total_return_q64_64": int(result.new_run_metrics.total_return_q64_64),
+    }
+    sys.stdout.write(json.dumps(payload, sort_keys=True) + "\n")
+    return 0 if result.match and result.decisions_match else 1
 
 
 # ---------------------------------------------------------------------------
