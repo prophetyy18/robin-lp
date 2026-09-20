@@ -1,0 +1,266 @@
+# T070 independent review
+
+- Base commit: `94589c9981ad68ce9c9041ec33e32dbbee24077b`
+- Candidate commit: `ac32054e5ccb8626e84655f92718532940f3e0c0`
+- Verdict: **PASS**
+
+## Checks
+
+### centralized_gateway_per_intent — PASS
+
+evaluate_risk / evaluate_risk_with_config are the single entry point; the AUTO_EXIT/NO_NEW_RISK/REJECTED builders derive approved purely from intent.kind and the trigger scope/reason_code, never from intent.source. The 5-minute circuit breaker, the global kill switch, and the eligibility/freshness gates all trip regardless of intent_source.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/__init__.py:55-94 (single public surface exports)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1326-1535 (evaluate_risk_with_config + evaluate_risk)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:990-1190 (approved/warning/rejected/no_new_risk/auto_exit builders do not consult intent_source for relaxation)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1362-1404 (parametrised intent-source test, all three sources hit the same gateway)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:888-902 (emergency suppresses even REDUCE_ONLY)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1392 (parametrised emergency_breaker_blocks_all_sources)
+
+### frozen_audit_decision — PASS
+
+Every public record is a frozen slotted dataclass. Equality and hashing follow dataclass identity, so the audit trail binds the exact decision bytes to the intent.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:840-948 (RiskDecision, frozen + slots, hashing follows dataclass identity)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:274-318 (KillSwitch frozen + slots)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:320-354 (GasBudget frozen + slots)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:357-424 (EpisodeState frozen + slots)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:427-561 (RiskConfig frozen + slots)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:632-700 (RiskIntent frozen + slots)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:703-837 (RiskContext frozen + slots)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:564-596 (FiveMinuteEmergencyBreach frozen + slots)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:497-538 (FrozenInstanceError tests for all dataclasses)
+
+### versioned_configuration — PASS
+
+RiskConfig.version_id is required; every RiskDecision records the config_version it was produced under; the builder helpers copy it verbatim, so a later config change leaves past decisions byte-unchanged.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:461-526 (RiskConfig.__post_init__ validates version_id is non-empty str and threshold ordering)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:528-561 (RiskConfig.default pins EXPERIMENTAL_TAG and the v1 constants)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:990-1190 (every builder sets config_version=config.version_id)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1349-1357 (config.pool_key_id mismatch produces REASON_CONFIG_POOL_MISMATCH)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1321-1354 (decision_records_config_version + future_config_change_does_not_affect_past_decision + config_pool_mismatch_rejected)
+
+### freshness_and_completeness — PASS
+
+Missing snapshots, missing candidate, unknown snapshot versions, future availability, stale snapshots, NaN/overflow, and non-int/bool display values all produce a reason-coded REJECTED before any other check runs.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1213-1231 (_validate_inputs_present; INCREASE_RISK requires candidate + admission + market + portfolio)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1234-1257 (_validate_snapshot_versions rejects unknown or empty versions)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1260-1282 (_validate_freshness; availability_time > decision_time ⇒ FUTURE_SNAPSHOT, age > max_snapshot_age_seconds ⇒ STALE_SNAPSHOT)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1285-1308 (_validate_market_snapshot; int + non-negative + non-zero for sqrt_price_x96; bool rejected)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:939-990 (TestRequiredInputs; missing_candidate_is_rejected, missing_admission_is_rejected, snapshot_version_mismatch_is_rejected)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1057-1109 (TestFreshnessAndNaN; stale_snapshot_is_rejected, nan_market_value_is_rejected, future_snapshot_is_rejected, overflow_market_is_rejected)
+
+### eligibility_and_deployment_hash — PASS
+
+RunMode.REJECTED blocks every intent; REDUCE_ONLY is honoured at the four other support levels; INCREASE_RISK requires paper or live; deployment_hash_match=False triggers REASON_DEPLOYMENT_HASH_MISMATCH.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1311-1323 (_is_eligible_for_runtime; REDUCE_ONLY allowed above RunMode.REJECTED, INCREASE_RISK requires RunMode.PAPER or above)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1417-1425 (eligibility gate)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1426-1434 (deployment_hash_match gate)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:998-1049 (TestEligibilityAndDeployment)
+
+### kill_switches_global_and_scoped — PASS
+
+Global kill switch ⇒ AUTO_EXIT(scope=GLOBAL, approved=False). Scoped kill switch ⇒ NO_NEW_RISK(scope=switch.scope); REDUCE_ONLY is approved, INCREASE_RISK is rejected.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1358-1380 (loop over kill_switches_active: GLOBAL ⇒ AUTO_EXIT(GLOBAL), non-GLOBAL ⇒ NO_NEW_RISK(scope))
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1143-1190 (_auto_exit: GLOBAL ⇒ approved=False, otherwise approved=intent.kind is REDUCE_ONLY)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1101-1140 (_no_new_risk: approved=intent.kind is REDUCE_ONLY)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:749-840 (TestKillSwitches)
+
+### five_minute_emergency_circuit_breaker — PASS
+
+is_complete=False returns False even when the magnitude would trip; complete bar with close-open >= 80% of open returns True; the pipeline routes every such breach to AUTO_EXIT(scope=GLOBAL, approved=False) regardless of intent source/kind; the threshold constant is bound to T053's FIVE_MINUTE_DOWN_SPIKE_FRACTION.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:125-126 (FIVE_MINUTE_EMERGENCY_THRESHOLD_Q64_64 bound to T053's FIVE_MINUTE_DOWN_SPIKE_FRACTION)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:599-629 (is_five_minute_emergency_breach; is_complete=False ⇒ False, up-move ⇒ False, exact threshold trips)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1381-1393 (pipeline integration before eligibility, freshness, etc.)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:683-741 (TestFiveMinuteBreacher complete/incomplete/up-move/exact/custom)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:738-741 (test_emergency_constant_matches_t053 binds to T053)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:848-931 (TestEmergencyBreakerIntegration complete-breach AUTO_EXIT, incomplete stays APPROVED, suppresses REDUCE_ONLY, takes precedence over kill switch)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1458-1472 (emergency_then_eligibility)
+
+### usdg_price_qualification — PASS
+
+RELATIVE_ONLY / MISSING / DEPEGGED QuoteBar values produce reason-coded REJECTED (USDG_PRICE_RELATIVE_ONLY / USDG_PRICE_MISSING / USDG_PRICE_DEPEGGED). Notraded breach is fail-closed.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1705-1739 (_evaluate_usdg_price; RELATIVE_ONLY/MISSING/DEPEGGED all reject with structured reason codes at RiskScope.POOL)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1858+ (TestUSDGPriceQualification)
+
+### fixed_range_sizing_pipeline — PASS
+
+The risk layer never alters tick_lower/tick_upper; compute_sizing (T049) is invoked and its NO_TRADE / SizingError results are mapped to reason codes. Range widening is impossible because the sizer receives the candidate's tick_lower/tick_upper verbatim and the gateway does not rewrite them.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1484-1506 (compute_sizing invocation; SizingError ⇒ SIZING_NO_TRADE; NO_TRADE ⇒ REASON_SIZING_NO_TRADE with the sizer's reason_code)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1905-1934 (_resolve_sizing forwards gas_reserve_wei=0, hook_delta0=0, hook_delta1=0, hook_verified=False; never mutates tick_lower/tick_upper)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1480-1540 (TestIncreaseRisk; degenerate range, NO_TRADE, SizingError propagation)
+
+### rebalance_cadence_and_cost — PASS
+
+Interval < min_rebalance_interval_seconds ⇒ REASON_REBALANCE_TOO_SOON; amortised cost (expected_cost × min_rebalance_interval_seconds) bounded by uint128, then compared to candidate.capital_q64_64; breach ⇒ REASON_REBALANCE_COST_INEFFICIENT. The cost amortisation is now substantive, addressing the review-001 required_change.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1624-1702 (_evaluate_rebalance_cadence; cadence interval check + amortised cost vs candidate capital_q64_64)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1668-1681 (uint128 overflow guard on cost × interval)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1689-1701 (amortised vs candidate.capital_q64_64 comparison; if amortised > capital ⇒ REASON_REBALANCE_COST_INEFFICIENT)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1184-1201 (TestRebalanceCadence; too_soon_rebalance_rejected)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1680-1761 (TestRebalanceCostAmortisation; cost_exceeds_capital_envelope_rejected, cost_within_capital_envelope_advances)
+
+### capital_and_token_concentration_enforced — PASS
+
+The per-side USDG value is computed from the sizer's worst_case_amount0/1 using the per-side price (currency0=Q64_SCALE for USDG, currency1=market.quote_q64_64 for the target token); when either side exceeds max_single_currency_concentration_q64_64 of the total, the gateway returns NO_NEW_RISK at TOKEN scope with REASON_TOKEN_CONCENTRATION_EXCEEDED. The within-cap path is APPROVED. Both breach and within-cap are exercised by TestConcentration, addressing the review-001 required_change.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1801-1902 (_evaluate_concentration; per-side USDG conversion of worst_case_amount0/worst_case_amount1; breach ⇒ NO_NEW_RISK at RiskScope.TOKEN)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1507-1511 (pipeline integration after sizing)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1548-1673 (TestConcentration; test_token_concentration_breach_triggers_no_new_risk asserts NO_NEW_RISK/TOKEN/TOKEN_CONCENTRATION_EXCEEDED/approved=False; test_token_concentration_within_cap_approved asserts APPROVED/OK)
+
+### episode_loss_and_drawdown_warning_no_new_risk_auto_exit — PASS
+
+WARNING is observation-only (approved=True). NO_NEW_RISK approves REDUCE_ONLY, rejects INCREASE_RISK. AUTO_EXIT approves REDUCE_ONLY except for the two global triggers (kill switch and 5-minute emergency), per _auto_exit.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1538-1580 (_evaluate_episode_loss; WARNING / NO_NEW_RISK / AUTO_EXIT ladder)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1583-1622 (_evaluate_drawdown; same ladder with high-watermark drawdown)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1117-1176 (TestEpisodeThresholds)
+
+### gas_reserve_never_spent — PASS
+
+GasBudget constructor enforces reserve_wei ≤ budget_wei and used+expected+reserve ≤ budget_wei; the sizer receives gas_reserve_wei=0 so the LP never spends the reserve; the budget check itself rejects on overflow.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:320-354 (GasBudget invariants: reserve_wei ≤ budget_wei; used+expected+reserve ≤ budget_wei)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1742-1763 (_evaluate_gas_budget; rejects when used+expected+reserve > budget)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1905-1934 (_resolve_sizing forwards gas_reserve_wei=0; reserve never enters the LP envelope)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1209-1241 (TestGasBudget)
+
+### hook_deltas_enforced — PASS
+
+Non-zero hook_delta0/hook_delta1 with hook_verified=False triggers HOOK_DELTA_UNVERIFIED; evidence older than max_hook_evidence_age_seconds triggers HOOK_EVIDENCE_STALE. Both are REJECTED at POOL scope before sizing runs.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1766-1798 (_evaluate_hook_evidence; non-zero delta without hook_verified ⇒ HOOK_DELTA_UNVERIFIED; age > max ⇒ HOOK_EVIDENCE_STALE)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1249-1313 (TestHookEvidence)
+
+### deny_by_default_simultaneous_breaches — PASS
+
+Pipeline order is documented and enforced; simultaneous breaches resolve to the first reason in pipeline order (kill-switch precedence over emergency, emergency over eligibility, earlier checks over later ones).
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1326-1520 (pipeline: config_pool_mismatch → kill switches → 5-minute emergency → missing inputs → snapshot versions → eligibility → deployment hash → freshness → NaN → episode loss → drawdown → cadence → USDG price → gas → hook → REDUCE_ONLY short-circuit → sizing → concentration → approve)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1426-1472 (TestSimultaneousBreaches; kill-switch > emergency > eligibility)
+
+### experimental_thresholds_propagated — PASS
+
+RiskConfig.default marks every threshold EXPERIMENTAL_NOT_LIVE_APPROVED; the tag is propagated onto every RiskDecision.experimental_thresholds; there is no implicit live-default override path.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:120 (EXPERIMENTAL_TAG = 'EXPERIMENTAL_NOT_LIVE_APPROVED')
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:535-561 (RiskConfig.default pins experimental_thresholds=(EXPERIMENTAL_TAG,))
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:990-1190 (every builder propagates config.experimental_thresholds onto decision.experimental_thresholds)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:586-593 (test_default_config_has_experimental_tag)
+
+### no_float_protocol_path — PASS
+
+Every numeric field is validated as a Python int (bool rejected); the market snapshot validator explicitly rejects NaN/float/infinite display values; ADR-004 no-float discipline is preserved end-to-end.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:226-262 (int / non-negative / strictly-positive / Q64.64 / strict Q64.64 helpers; bool rejected)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1285-1308 (market snapshot int / non-NaN / non-negative validator)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:1102-1109 (NaN / overflow test)
+
+### layer_purity_no_forbidden_imports — PASS
+
+The risk module imports only robinhood_lp.features.quote, robinhood_lp.protocol.{ids,run_mode,sizing}, and robinhood_lp.strategy.base. No imports of robinhood_lp.{config,discovery,ingestion,presentation,qualification,quality,replay,rpc,storage,execution,web}.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:97-116 (only robinhood_lp.features.quote, robinhood_lp.protocol.{ids,run_mode,sizing}, robinhood_lp.strategy.base)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/__init__.py:55-94 (re-exports the same surface)
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/tests/test_risk_t070.py:411-489 (TestLayerPurity AST-based scan against an explicit forbidden list)
+
+### tests_lint_mypy_pass — PASS
+
+Full T070 suite, combined workflow+T070 suite, and the rest of the project tests all pass; ruff check/format and mypy are clean; the import-graph check is clean.
+
+Evidence:
+
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_risk_t070.py -q → 95 passed in 0.28s
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_workflow.py tests/test_risk_t070.py -q → 149 passed in 4.32s
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ --ignore=tests/test_workflow.py --ignore=tests/test_risk_t070.py --ignore=tests/test_abi_artifacts.py -q → 2329 passed, 6 skipped (foundry/PATH/gpg skips, all unrelated to T070)
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/risk/ tests/test_risk_t070.py → All checks passed!
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/risk/ tests/test_risk_t070.py → 3 files already formatted
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/robinhood_lp/risk/ → Success: no issues found in 2 source files
+- /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.check_imports check → import-graph check passed: no findings
+
+### dependencies_approved — PASS
+
+All four declared dependencies (T025, T049, T052, T060) are APPROVED with explicit approved_commit hashes.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/todo/config.yaml: T025.status=APPROVED, approved_commit=78fb19f17991191de3c70a6f16db2c457405e809
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/todo/config.yaml: T049.status=APPROVED, approved_commit=52923f21ca39bcd24b8b71d25d3add809b804a6a
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/todo/config.yaml: T052.status=APPROVED, approved_commit=d74de856762ae5dec1fa5423246d2180f5b54e41
+- /home/lpdev/lp-worktrees/review-t070-attempt-003/todo/config.yaml: T060.status=APPROVED, approved_commit=d590909faeac530faa3b26024f2b64769ba5e338
+
+### must_not_clauses_respected — PASS
+
+Every must-not clause from T070 is structurally enforced in the code; no execution/strategy override path exists; the Gas reserve is never on the LP path; hook deltas block before sizing; experimental thresholds propagate as the default tag.
+
+Evidence:
+
+- must-not (override rejection): /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:990-1190 builders derive approved only from intent.kind / scope / reason_code, never from intent.source
+- must-not (continue on risk-service error): /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1285-1308 NaN/overflow validator fails closed; SizingError → SIZING_NO_TRADE (lines 1484-1494)
+- must-not (change Range to fit a cap): /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1905-1934 _resolve_sizing forwards the candidate's tick_lower/tick_upper verbatim
+- must-not (trim only one currency): /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1869-1883 per-side comparison vs cap for both currency0 and currency1
+- must-not (spend Gas reserve): /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1923 (gas_reserve_wei=0 forwarded to compute_sizing); GasBudget invariant at lines 347-354
+- must-not (ignore Hook deltas): /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:1766-1798 _evaluate_hook_evidence rejects on non-zero unverified or stale evidence
+- must-not (provisional thresholds as live-approved defaults): /home/lpdev/lp-worktrees/review-t070-attempt-003/src/robinhood_lp/risk/checks.py:535-561 RiskConfig.default pins EXPERIMENTAL_TAG
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- todo/config.yaml.T070.candidate_commit still records attempt 1's commit (2472aa9af5b913667c9f72214509baccca7a7ca5) even though attempt=3 and the candidate under review is ac32054e5ccb8626e84655f92718532940f3e0c0. The implementation itself is unaffected; the next workflow prepare/finish transition should refresh this metadata field so the audit trail records the actual candidate.
+- The per-side USDG price in _evaluate_concentration assumes PoolKey.currency0 is USDG itself (price = Q64_SCALE) and PoolKey.currency1 is the target token (price = market.quote_q64_64). For pools where this convention does not hold, the concentration check will misprice one side. A typed helper that names the USDG side explicitly should replace the convention-encoding before this is bound to multi-pool support.
+- The risk layer forwards hook_delta0=0, hook_delta1=0, hook_verified=False to compute_sizing (T049); the risk-layer hook evidence check runs earlier in the pipeline, so this is consistent. If a future T049 contract change makes the sizer consult hook fields, the risk layer would silently bypass that check; the hook evidence must remain a hard precondition.
+- The risk layer's 5-minute emergency circuit breaker returns AUTO_EXIT(scope=GLOBAL, approved=False). The pre-approved reduce-only path is intentionally rejected because the system must enter MANUAL_CONTROL per CTRL-MARKET-001; a future task that introduces a pre-approved emergency-reduce must update the must-not clause and the AUTO_EXIT builder together.
