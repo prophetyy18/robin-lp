@@ -17,16 +17,16 @@
 
 | 目标 | 主要任务 | 最终证据 |
 | --- | --- | --- |
-| `G-RESEARCH-01` | T020–T066、T068、T069 | 数据、replay、估值、实验 manifest 与报告 |
+| `G-RESEARCH-01` | T020–T066、T068、T069、T105–T108 | 数据、replay、估值、实验 manifest 与报告；T105–T108 是登记身份修正的后继交付 |
 | `G-PAPER-01` | T071–T083、T093 | 实时 paper ledger、soak 与 post-testnet shadow 报告 |
-| `G-STRATEGY-01`、`G-RECOMMEND-01` | T060–T066、T068、T084–T086、T087 | 版本化候选、注册身份、样本外结果、人工选择审计 |
-| `G-SIGNAL-01`、`G-STRATEGY-SPIKE-01` | T050、T053、T060、T065、T066 | point-in-time 市场特征、合格 USDG 价格、5 分钟规则和策略决策记录 |
-| `G-NUMERAIRE-01`、`G-ECONOMIC-01` | T049、T052、T053、T060、T063–T066 | USDG 估值、PnL 归因、净经济价值与基准报告 |
+| `G-STRATEGY-01`、`G-RECOMMEND-01` | T060–T066、T068、T084–T087、T105–T108 | 版本化候选、注册身份、样本外结果、人工选择审计和登记身份作者指引 |
+| `G-SIGNAL-01`、`G-STRATEGY-SPIKE-01` | T050、T053、T060、T065、T066、T107 | point-in-time 市场特征、合格 USDG 价格、5 分钟规则和登记身份锁定的策略决策记录 |
+| `G-NUMERAIRE-01`、`G-ECONOMIC-01` | T049、T052、T053、T060、T063–T066、T105–T107 | USDG 估值、PnL 归因、净经济价值、基准报告和登记身份绑定的实验证据 |
 | `G-NUMERAIRE-02` | T052、T053、T100、T103 | 研究侧计价层级、`RELATIVE_ONLY` 与执行侧 USDG 不变 |
 | `G-RESEARCH-UNIVERSE-01` | T026、T027、T100 | 研究范围注册表、独立分类与执行权限隔离 |
-| `G-DATASET-01` | T063、T069、T100、T103 | 版本化数据集、manifest 绑定与不可变发布 |
+| `G-DATASET-01` | T063、T069、T100、T103、T105 | 版本化数据集、registry-bound manifest 绑定与不可变发布 |
 | `G-ML-01` | T060、T101、T102、T103 | 模型接口边界、经济判据与拒绝记录 |
-| `G-STRATEGY-MAINTAIN-01` | T060、T063、T065、T066、T068 | 稳定接口、不可变模型/阈值版本、注册身份、重现实验 |
+| `G-STRATEGY-MAINTAIN-01` | T060、T063、T065、T066、T068、T105–T108 | 稳定接口、不可变模型/阈值版本、注册身份、schema-bound robustness、重现实验和当前作者指引 |
 | `G-LIFECYCLE-01` | T051、T052、T061、T062、T065、T071 | 入场至退出的 episode ledger 与反事实路径 |
 | `G-UI-01` | T073、T084–T088、T103 | Web 控制台与端到端用户旅程；结果页与运行页见 T087/T088，研究页由 T103 交付 |
 | `G-AUTO-01` | T072、T080–T082、T090–T095 | 后台恢复、soak、testnet/mainnet 自动运行证据 |
@@ -51,9 +51,9 @@
 | `G-LIMIT-01`、`G-V4-SIZING-01` | T025、T049、T051、T070、T085、T091、T094 | 双层上限、liquidityDelta 反算和两边最坏敞口测试 |
 | `G-EXIT-01` | T070、T081、T085、T091、T092、T095、T097 | 收回执行钱包、撤权、禁止自动外转的演练与交易证据 |
 | `G-RECON-01` | T033、T071、T072、T081、T091、T092、T095 | 重启、RPC、nonce、replacement、reorg 与账本核对测试 |
-| `G-BACKTEST-RUN-01` | T061、T063、T068、T069、T087 | 运行入口、运行身份、状态/进度/取消与可复现 manifest |
-| `G-BACKTEST-RESULT-01` | T063、T069、T088 | 分层结果页、事件标记、归因残差与覆盖缺口证据 |
-| `G-STRATEGY-REGISTRY-01` | T060、T062、T063、T065、T068、T087 | 注册身份、参数 schema、代码来源与 manifest 绑定 |
+| `G-BACKTEST-RUN-01` | T061、T063、T068、T069、T087、T105 | 运行入口、运行身份、状态/进度/取消与 registry-bound 可复现 manifest |
+| `G-BACKTEST-RESULT-01` | T063、T069、T088、T105–T107 | 分层结果页、事件标记、归因残差、覆盖缺口、manifest 身份与稳健性/候选证据 |
+| `G-STRATEGY-REGISTRY-01` | T060、T062、T063、T065、T068、T087、T105–T108 | 注册身份、参数 schema、代码来源、manifest/robustness/candidate-lock 绑定与作者指引 |
 | `G-PERM-WRITE-01` | T025、T073、T085、T097 | Web 提权版本化路径与 reduce-only CLI 边界 |
 | `G-PAPER-AUTHORIZE-01` | T025、T073 | 池选择、`HOLD`/`LP` 审批与 preliminary paper 授权记录 |
 
@@ -63,7 +63,7 @@
 | --- | --- |
 | `ADM-TECH-*`、`ADM-RISK-*`、`ADM-PAIR-*`、`ADM-HOOK-*` | T025、T027、T043、T049、T070、T073、T084、T085、T094 |
 | `WEB-GLOBAL-*`、`WEB-PAGE-*` | T073、T084–T088、T103 |
-| `ECO-*` | T049、T050–T053、T060–T066、T070 |
+| `ECO-*` | T049、T050–T053、T060–T066、T070、T105–T107 |
 | `CTRL-*` | T070、T080、T081、T085、T090–T095、T097 |
 | `M-*`（LP 指标字典） | T052、T101、T102、T103 |
 | `DS-*`（研究数据集与模型评估） | T100–T104 |
@@ -72,5 +72,7 @@
 
 - 新增、删除或改变 `G-*`、`ADM-*`、`WEB-*`、`ECO-*`、`CTRL-*` 时同步本文件。
 - 调整任务编号、依赖或职责时同步映射，但不得借此改变目标含义。
+- 后继任务创建但前驱尚未由 `SUPERSEDE` 退休时，两者都保留在映射中；退休完成后，
+  按 `superseded_by` 只保留当前后继，历史归属仍由任务合同和审查记录保存。
 - 每个任务完成后只链接真实存在的测试、manifest、报告或链上证据；没有证据就
   保持目标未完成。

@@ -323,7 +323,8 @@ Do not guess these in an earlier task:
 - T053 selects and versions qualified USDG quote sources and availability-time semantics. The
   confirmed 5-minute rules use this point-in-time USDG price, not raw activity-pool relative
   price alone.
-- T066/T070 implement the parameter, evidence and enforcement mechanisms. Before paper trading,
+- T066 and its registry-aware successor T107, together with T070, implement the parameter,
+  evidence and enforcement mechanisms. Before paper trading,
   values other than the confirmed 5-minute rules remain explicit experimental fixtures or
   provisional versions and do not become live defaults.
 - T082 proposes and measures preliminary-paper SLOs without granting live qualification.
