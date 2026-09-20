@@ -1,0 +1,9 @@
+{
+  "amendment_id": "A0018",
+  "layer": "CONTRACT",
+  "raised": [],
+  "resolves": [
+    "A0013:T096:legacy",
+    "A0014:T096:include-successor-final-evidence"
+  ]
+}
