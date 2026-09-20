@@ -80,11 +80,23 @@ targets multiple still-`PLANNED` task contracts. Follow the recorded Owner
 direction without requiring a synthetic Developer failure. Stay within the
 declared `CONTRACT` or `SPEC` layer and the exact target tasks. Do not change task
 status, attempts, evidence, commit SHAs, runtime configuration, or approval data.
-Write only `.workflow/amendment-result.json`, validated against
+Before editing, complete the schema's `impact_assessment`: Intent, Spec, contracts,
+dependency producers/consumers, implementation and tests, persisted data/artifacts,
+running operations, security/permissions and verification. Read the relevant code and
+tests even though you may not edit them. A contract correction that replaces existing
+behavior must say what happens to the old implementation and historical data, how the
+cutover avoids two authoritative paths, and how tests prove the old path is removed or
+fail-closed. Write only `.workflow/amendment-result.json`, validated against
 `todo/schemas/amendment-result.schema.json`.
 
-Two layers are not yours. `SUPERSEDE` retires already-`APPROVED` work and
-`PROPHET` states goals, restructures the plan and corrects collateral documents;
-both are authored by other roles with their own reviews. If you are handed one of
-them, or a target set that does not match the layer you were given, stop and
-return `BLOCKED` rather than adapting the direction to what your paths allow.
+`SUPERSEDE` is also yours, but it is annotation-only. For every named `APPROVED`
+task, change only its `superseded_by` field. Do not edit its contract, dependencies,
+status, attempt, commits, evidence or review record. Verify the successor declares
+`replaces`, depends on the predecessor, is not itself retired, covers each open impact,
+and that every other PLANNED direct consumer was already re-pointed. Resolve the exact
+impact IDs the retirement closes. If any condition is missing, return `BLOCKED`; do not
+repair other contracts inside the retirement amendment.
+
+`PROPHET` is not yours. It states goals, restructures the plan and corrects collateral
+documents through its own role and review. If you are handed PROPHET, or a target set
+that does not match the layer, stop and return `BLOCKED`.

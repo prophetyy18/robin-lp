@@ -22,6 +22,12 @@ its direct references, and affected files. Implement only that task. Do not modi
 record, agent definition, or workflow controller. Do not commit, push, merge,
 deploy, sign, broadcast, or send an external message.
 
+If the task declares `replaces`, treat its `Replacement and migration` section as a
+binding part of the contract. Preserve immutable Git/audit/raw history while carrying
+out the specified disposition of current code, APIs, CLI/Web/background paths,
+configuration and persisted artifacts. Do not leave an obsolete path reachable as a
+second authority. Add the specified negative, migration and old-path-unreachable tests.
+
 The Manager supplies one controller-created worktree. Perform all file operations
 and commands in that exact worktree. Before finishing, write the structured result
 to the exact `.workflow/developer-result.json` path in the Manager prompt. This

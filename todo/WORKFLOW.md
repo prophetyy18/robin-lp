@@ -79,6 +79,23 @@ task and activate it explicitly:
 
 ### Owner-directed amendments before implementation
 
+Route a change by the highest authority it changes. Do not split one behavioral
+decision across roles or let a lower layer reinterpret it:
+
+| Requested change | Author | Route | Boundary |
+| --- | --- | --- | --- |
+| New or changed V1 goal, plan structure, phase ownership or collateral | Prophet | `PROPHET` | May add tasks; never edits an existing task |
+| Changed Spec plus still-`PLANNED` contracts | Planner | `SPEC` | Named planned tasks and relevant `docs/spec/` only |
+| Clarification confined to still-`PLANNED` contracts | Planner | `CONTRACT` | Named contracts and their dependency fields only |
+| Retirement of already-`APPROVED` work | Planner | `SUPERSEDE` | Only each target's `superseded_by` annotation |
+| Ordinary implementation of an accepted contract | Developer | develop/review | Implementation, tests and allowed delivery files |
+| Reproduced low-risk implementation defect | Maintenance Developer | maintenance | Predeclared paths; no product, risk, execution or signer change |
+
+If one Owner request spans rows, begin at the highest row, record every lower-layer
+impact, then execute the required lower-layer amendments in dependency-safe order. An
+unclear product choice stops at `OWNER_DECISION_REQUIRED`; an Agent never silently
+chooses wording that is easier to implement.
+
 When the Owner explicitly directs a planning change for one or more tasks that
 are still `PLANNED`, do not manufacture a Developer failure. Prepare one reviewed
 amendment instead:
@@ -100,7 +117,9 @@ python -m tools.workflow finish-amendment-review A0001
 `SPEC` additionally permits `docs/spec/` and `spec_revision`; `PROPHET` targets no
 task: it states Intent, restructures the plan and corrects collateral documents,
 may add tasks, and may change both revisions; `SUPERSEDE` targets `APPROVED` tasks
-and annotates each with the successor it names in `superseded_by`. Every route
+and annotates each with the successor it names in `superseded_by`. The Planner authors
+CONTRACT, SPEC and the annotation-only SUPERSEDE layer; the Prophet authors only
+PROPHET. Every route
 preserves task status, implementation attempts, evidence, commit identities and
 approval metadata. A PASS fast-forwards the reviewed amendment into the clean
 invoking checkout without changing any target's status. FAIL retains the amendment
@@ -123,16 +142,17 @@ python -m tools.workflow prepare-amendment \
 ```
 
 `SUPERSEDE` targets `APPROVED` tasks and may change exactly one config field —
-`superseded_by`, which must name an existing task — plus the target contract
-text. It may touch no document and no approval evidence: `status`, `attempt`,
+`superseded_by`, which must name an existing task. It may touch no contract,
+dependency, document or approval evidence: `status`, `attempt`,
 every commit SHA, the evidence pointer and the review record stay byte-identical,
 so the approval still describes exactly what was reviewed and the retirement is
-an annotation recorded on top of it. `depends_on` is editable as in every other
-layer, so a *planned* task whose dependency was retired must be re-pointed at the
-successor before it can be `ready`; `ready` refuses a dependency that carries
-`superseded_by`. The reason for a retirement lives in the amendment record under
-`todo/amendments/<id>/`, and the successor's contract must state what it
-replaces.
+an annotation recorded on top of it. A successor declares `replaces`, depends on
+the work it replaces, and contains a `Replacement and migration` section covering
+old implementation reachability, historical data/artifacts, runtime cutover,
+downstream dependencies and verification. Every other `PLANNED` direct consumer
+must be re-pointed before retirement; `finish-amendment` rejects a retirement that
+would strand one, and `ready` refuses any task whose dependency closure contains an
+open impact. The reason for retirement lives in `todo/amendments/<id>/`.
 
 #### The PROPHET layer: goals, plan structure and collateral
 
@@ -183,14 +203,21 @@ Two consequences follow, and they are the reason the conflict record below exist
 than an exception to the freeze. A PROPHET change cannot repair an existing contract, and
 its own additions can leave one asserting something a governing document no longer says —
 a page it says another task owns, a rule restated in the old wording, a task list that has
-since grown. So every amendment result states, explicitly, which existing contracts it
-leaves stale (`affected_existing_tasks`) and which earlier records it repairs
-(`resolved_task_impacts`); an empty list is a claim the independent review tests, not a
-default for an omission. `finish-amendment` writes those declarations to
-`todo/amendments/<id>/impacts.json`, and `ready` refuses to activate a task named by an
-open record until a later amendment resolves it. A goal restatement therefore cannot
+since grown. So every amendment result assesses Intent, Spec, contracts, dependencies,
+implementation, data, operations, security and verification; states which existing
+contracts it leaves stale (`affected_existing_tasks`) under stable per-conflict impact
+IDs; and names the exact earlier impacts it repairs (`resolved_task_impacts`). An empty
+list is a claim the independent review tests, not a default for an omission.
+`finish-amendment` writes those declarations to `todo/amendments/<id>/impacts.json`, and
+`ready` refuses to activate a task named by an open record, or a task depending on it,
+until a later amendment resolves that exact impact. A goal restatement therefore cannot
 silently leave an instruction that no longer matches the plan, and the affected task
 cannot run on it in the meantime.
+
+Impact records created before stable IDs were introduced remain immutable. The controller
+exposes each one as `Axxxx:Txxx:legacy`; a later amendment resolves that synthetic ID
+explicitly. It never rewrites the historical amendment or treats a task ID as permission
+to clear every finding on that task.
 
 Because a plan-structure change can add tasks without touching a line of Intent or Spec
 text, the two revision strings alone cannot say that the plan moved. `todo/README.md`

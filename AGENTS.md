@@ -36,13 +36,18 @@
 
 ### 2.1 角色和交接边界
 
-- Planner 只澄清 Intent、Spec 和任务合同，不实现业务代码，也不伪造验收证据。
+- Planner 只澄清 Intent、Spec 和任务合同，并执行只写 `superseded_by` 的退休标注；
+  不实现业务代码，也不伪造验收证据。
 - Owner 可以通过独立 amendment 通道要求 Planner 一次修订一个或多个仍为
   `PLANNED` 的任务。该通道不需要制造 Developer 失败，不激活任务、不增加实现
   attempt，且必须由独立 Plan Reviewer 审查后才能合并。
 - 已 `APPROVED` 的任务由同一通道的 `SUPERSEDE` 层退役：只在 `superseded_by` 记录
   继任者，状态、attempt、commit、证据和审查记录逐字节不变。继任者可以依赖它取代的
   任务；任何其他任务依赖已退役任务都会被 `ready` 拒绝。
+- 后继任务必须用 `replaces` 声明被替代任务、依赖它所替代的工作，并在合同的
+  `Replacement and migration` 部分写清旧代码入口、历史数据与 artifact、运行切换、
+  下游依赖和验证的处置。退休前，其他仍为 `PLANNED` 的直接消费者必须全部改指后继；
+  `SUPERSEDE` 不得修改旧合同或旧任务的 `depends_on`。
 - 目标、计划结构和附属文档由 `PROPHET` 层负责：`prophet` 起草，`prophet-reviewer`
   独立审查。该层可以新建任务合同，但**永不修改已存在的合同**；`todo/config.yaml`
   中已存在的任务必须逐字节不变。它不接受 `--task`，因为新建的任务此刻还不存在。
@@ -72,6 +77,10 @@
 - `tools.workflow` 只执行 worktree、SHA、路径保护、结构化输出和状态转换等机械门禁；
   它不判断产品需求或代码语义，也不得启动 Claude。Manager 使用 Claude Code 原生
   Agent 工具启动、展示和恢复角色，再调用对应的 `prepare-*`/`finish-*` 门禁。
+- 新需求或需求修改必须评估 Intent、Spec、合同、直接与传递依赖、实现与测试、持久化
+  数据和 artifact、运行进程、权限与安全边界以及验证策略。每一条冲突使用稳定 impact
+  ID 单独登记和关闭；`ready` 检查目标任务的完整依赖闭包，不允许依赖仍有未解决冲突
+  的工作继续执行。历史证据保留，但冲突实现不得继续作为当前权威路径。
 - 审查失败后必须启动新的 Developer；修复产生新的 candidate commit 后，再启动新的
   Reviewer。不得复用导致结论偏置的旧上下文。
 - 正常任务只走开发和审查。只有结构化报告明确要求时才进入 triage；不要把普通实现

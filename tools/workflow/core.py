@@ -20,6 +20,7 @@ SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 TASK_PATTERN = re.compile(r"^T[0-9]{3}$")
 MAINTENANCE_PATTERN = re.compile(r"^M[0-9]{4}$")
 AMENDMENT_PATTERN = re.compile(r"^A[0-9]{4}$")
+IMPACT_PATTERN = re.compile(r"^A[0-9]{4}:T[0-9]{3}:[a-z0-9][a-z0-9-]*$")
 PHASE_PATTERN = re.compile(r"^P[0-9]{2}$")
 #: Owner-directed change layers. CONTRACT edits the target task contracts and
 #: their dependency fields; SPEC additionally edits ``docs/spec/``. SUPERSEDE is a
@@ -471,9 +472,10 @@ def _without_amendment_owned_config_fields(
 ) -> dict[str, Any]:
     comparable = cast(dict[str, Any], json.loads(json.dumps(config)))
     for task_id in task_ids:
-        comparable["tasks"][task_id].pop("depends_on", None)
         if layer == "SUPERSEDE":
             comparable["tasks"][task_id].pop("superseded_by", None)
+        else:
+            comparable["tasks"][task_id].pop("depends_on", None)
     if layer in {"SPEC", "PROPHET"}:
         comparable.pop("spec_revision", None)
     if layer == "PROPHET":
@@ -710,6 +712,17 @@ class WorkflowManager:
                     raise WorkflowError(
                         f"{task_id} superseded_by requires APPROVED status, found {status}"
                     )
+            replaces = raw.get("replaces")
+            if replaces is not None:
+                if not isinstance(replaces, list) or len(set(replaces)) != len(replaces):
+                    raise WorkflowError(f"{task_id} replaces must be a unique list")
+                for replaced in replaces:
+                    if not isinstance(replaced, str) or not TASK_PATTERN.fullmatch(replaced):
+                        raise WorkflowError(f"{task_id} replaces contains invalid task ID")
+                    if replaced == task_id:
+                        raise WorkflowError(f"{task_id} must not replace itself")
+                    if replaced not in tasks:
+                        raise WorkflowError(f"{task_id} replaces unknown task {replaced}")
             if raw.get("attempt") is None or not isinstance(raw.get("attempt"), int):
                 raise WorkflowError(f"{task_id} attempt must be an integer")
             for key in ("base_commit", "candidate_commit", "approved_commit"):
@@ -736,6 +749,7 @@ class WorkflowManager:
         ):
             raise WorkflowError("exactly the active task may have an in-progress or READY state")
         self._validate_acyclic(tasks)
+        self._validate_supersession_acyclic(tasks)
 
     def _validate_acyclic(self, tasks: Mapping[str, Any]) -> None:
         visiting: set[str] = set()
@@ -755,6 +769,20 @@ class WorkflowManager:
         for task_id in tasks:
             visit(task_id)
 
+    def _validate_supersession_acyclic(self, tasks: Mapping[str, Any]) -> None:
+        """Reject cycles in the independent supersession relation."""
+        for origin in tasks:
+            seen: set[str] = set()
+            current = origin
+            while True:
+                successor = tasks[current].get("superseded_by")
+                if not isinstance(successor, str):
+                    break
+                if successor in seen or successor == origin:
+                    raise WorkflowError(f"supersession cycle includes {origin}")
+                seen.add(successor)
+                current = successor
+
     def status(self) -> dict[str, object]:
         config = self.load_config()
         active = config.get("active_task")
@@ -768,6 +796,18 @@ class WorkflowManager:
             if record.status in {"IN_DEVELOPMENT", "AWAITING_REVIEW", "CHANGES_REQUESTED"}
         ]
         active_amendments = [record.to_dict() for record in self._amendment_records()]
+        open_impacts = []
+        for task_id in config["tasks"]:
+            for finding in self._unresolved_task_impacts(task_id):
+                impact_id, raised = finding.split(" raised by ", 1)
+                amendment_id = raised.split(":", 1)[0]
+                open_impacts.append(
+                    {
+                        "impact_id": impact_id,
+                        "task_id": task_id,
+                        "amendment_id": amendment_id,
+                    }
+                )
         return {
             "active_phase": config.get("active_phase"),
             "active_task": active,
@@ -777,6 +817,7 @@ class WorkflowManager:
             "plan": active_plan.to_dict() if active_plan else None,
             "active_maintenance": active_maintenance,
             "active_amendments": active_amendments,
+            "open_impacts": open_impacts,
         }
 
     def validate_repository(self) -> None:
@@ -857,7 +898,11 @@ class WorkflowManager:
         }:
             raise WorkflowError(f"cannot activate {task_id} while {active} is unfinished")
         self._check_dependencies(config, task_id)
-        blocked = self._unresolved_task_impacts(task_id)
+        blocked: list[str] = []
+        for dependency in self._dependency_closure(config, task_id):
+            blocked.extend(
+                f"{dependency}: {finding}" for finding in self._unresolved_task_impacts(dependency)
+            )
         if blocked:
             raise WorkflowError(
                 f"cannot activate {task_id}: an earlier Owner amendment recorded that this "
@@ -869,6 +914,22 @@ class WorkflowManager:
         _git(self.repo, "add", "todo/config.yaml")
         _git(self.repo, "commit", "-m", f"chore(workflow): mark {task_id} ready")
         return _sha(self.repo)
+
+    def _dependency_closure(self, config: Mapping[str, Any], task_id: str) -> list[str]:
+        """Return the task and every transitive dependency in stable traversal order."""
+        ordered: list[str] = []
+        visited: set[str] = set()
+
+        def visit(current: str) -> None:
+            if current in visited:
+                return
+            visited.add(current)
+            ordered.append(current)
+            for dependency in config["tasks"][current]["depends_on"]:
+                visit(dependency)
+
+        visit(task_id)
+        return ordered
 
     def _unresolved_task_impacts(self, task_id: str) -> list[str]:
         """Return the open contract conflicts an earlier amendment raised on a task.
@@ -884,8 +945,8 @@ class WorkflowManager:
         root = self.repo / "todo" / "amendments"
         if not root.is_dir():
             return []
-        raised: list[tuple[str, str]] = []
-        resolved_by: list[str] = []
+        raised: list[tuple[str, str, str, str]] = []
+        exact_resolutions: list[tuple[str, str]] = []
         for path in sorted(root.glob("*/impacts.json")):
             payload = _load_json(path)
             amendment_id = str(payload.get("amendment_id", path.parent.name))
@@ -893,16 +954,31 @@ class WorkflowManager:
             if isinstance(entries, list):
                 for item in entries:
                     if isinstance(item, Mapping) and item.get("task_id") == task_id:
-                        raised.append((amendment_id, str(item.get("reason", ""))))
+                        impact_id = item.get("impact_id")
+                        if not isinstance(impact_id, str):
+                            impact_id = f"{amendment_id}:{task_id}:legacy"
+                        raised.append(
+                            (amendment_id, impact_id, task_id, str(item.get("reason", "")))
+                        )
             resolves = payload.get("resolves")
-            if isinstance(resolves, list) and task_id in resolves:
-                resolved_by.append(amendment_id)
+            if isinstance(resolves, list):
+                for resolution in resolves:
+                    if not isinstance(resolution, str):
+                        continue
+                    if resolution.startswith("A") and f":{task_id}:" in resolution:
+                        exact_resolutions.append((amendment_id, resolution))
         open_impacts = [
-            (amendment_id, reason)
-            for amendment_id, reason in raised
-            if not any(resolution > amendment_id for resolution in resolved_by)
+            (amendment_id, impact_id, reason)
+            for amendment_id, impact_id, _affected_task, reason in raised
+            if not any(
+                resolution_amendment > amendment_id and resolution_id == impact_id
+                for resolution_amendment, resolution_id in exact_resolutions
+            )
         ]
-        return [f"raised by {amendment_id}: {reason}" for amendment_id, reason in open_impacts]
+        return [
+            f"{impact_id} raised by {amendment_id}: {reason}"
+            for amendment_id, impact_id, reason in open_impacts
+        ]
 
     def _attempt_path(self, task_id: str) -> Path:
         return self.runtime_dir / f"{task_id}.json"
@@ -1567,6 +1643,13 @@ class WorkflowManager:
                 "the plan, states Intent, or corrects collateral documents; it targets no "
                 "task in particular",
             )
+        elif layer == "SUPERSEDE":
+            agent, scope = (
+                "planner",
+                f"Record the Owner-directed retirement {amendment_id} for exactly these "
+                f"APPROVED tasks: {', '.join(normalized)}. Change only each target's "
+                "superseded_by field; contracts, dependencies and approval evidence are frozen",
+            )
         else:
             agent, scope = (
                 "planner",
@@ -1593,6 +1676,10 @@ class WorkflowManager:
             raise WorkflowError(f"amendment result is missing: {result_path}")
         result = _load_json(result_path)
         outcome = self._validate_amendment_result(result, amendment_id)
+        self._validate_impact_resolutions(
+            record,
+            cast(list[str], result["resolved_task_impacts"]),
+        )
         changed = [
             path for path in _working_tree_changes(worktree) if not path.startswith(".workflow/")
         ]
@@ -1614,6 +1701,8 @@ class WorkflowManager:
                 allowed = path == "todo/config.yaml" or _prophet_path_allowed(
                     path, statuses.get(path, "M")
                 )
+            elif record.layer == "SUPERSEDE":
+                allowed = path == "todo/config.yaml"
             else:
                 allowed = path in allowed_contracts or path == "todo/config.yaml"
                 if record.layer == "SPEC":
@@ -1644,6 +1733,13 @@ class WorkflowManager:
                     "planner changed workflow state, evidence, model, SHA, or a non-target "
                     "config field"
                 )
+        if record.layer == "SUPERSEDE" and outcome == "AMENDMENT_READY":
+            self._validate_supersede_candidate(
+                base_config=base_config,
+                candidate_config=config,
+                task_ids=record.task_ids,
+                resolved_impacts=cast(list[str], result["resolved_task_impacts"]),
+            )
         if outcome == "NO_CHANGE_REQUIRED" and changed:
             raise WorkflowError("NO_CHANGE_REQUIRED contradicts planner file changes")
         relative_root = Path("todo") / "amendments" / amendment_id
@@ -1655,10 +1751,7 @@ class WorkflowManager:
             {
                 "amendment_id": amendment_id,
                 "layer": record.layer,
-                "raised": [
-                    {"task_id": item["task_id"], "reason": item["reason"]}
-                    for item in result["affected_existing_tasks"]
-                ],
+                "raised": [dict(item) for item in result["affected_existing_tasks"]],
                 "resolves": list(result["resolved_task_impacts"]),
             },
         )
@@ -1688,6 +1781,86 @@ class WorkflowManager:
         self.save_amendment(updated)
         return updated
 
+    def _validate_impact_resolutions(
+        self, record: AmendmentRecord, resolved_impacts: Sequence[str]
+    ) -> None:
+        """Bind every resolution to a currently open, in-scope impact."""
+        config = self.load_config()
+        open_impacts: dict[str, str] = {}
+        for task_id in config["tasks"]:
+            for finding in self._unresolved_task_impacts(task_id):
+                impact_id = finding.split(" raised by ", 1)[0]
+                open_impacts[impact_id] = task_id
+        for impact_id in resolved_impacts:
+            affected_task = open_impacts.get(impact_id)
+            if affected_task is None:
+                raise WorkflowError(f"resolved impact is not currently open: {impact_id}")
+            if record.layer != "PROPHET" and affected_task not in record.task_ids:
+                raise WorkflowError(
+                    f"{record.layer} amendment cannot resolve untargeted impact "
+                    f"{impact_id} on {affected_task}"
+                )
+
+    def _validate_supersede_candidate(
+        self,
+        *,
+        base_config: Mapping[str, Any],
+        candidate_config: Mapping[str, Any],
+        task_ids: Sequence[str],
+        resolved_impacts: Sequence[str],
+    ) -> None:
+        """Require an auditable, dependency-safe retirement before sealing it."""
+        for task_id in task_ids:
+            before = base_config["tasks"][task_id]
+            after = candidate_config["tasks"][task_id]
+            successor_id = after.get("superseded_by")
+            if not isinstance(successor_id, str) or successor_id == before.get("superseded_by"):
+                raise WorkflowError(f"SUPERSEDE must set a new successor for {task_id}")
+            successor = candidate_config["tasks"][successor_id]
+            if successor.get("superseded_by"):
+                raise WorkflowError(f"SUPERSEDE successor {successor_id} is itself superseded")
+            if task_id not in successor.get("depends_on", []):
+                raise WorkflowError(
+                    f"SUPERSEDE successor {successor_id} must depend on the work it replaces: "
+                    f"{task_id}"
+                )
+            if task_id not in successor.get("replaces", []):
+                raise WorkflowError(
+                    f"SUPERSEDE successor {successor_id} must declare replaces: {task_id}"
+                )
+            successor_contract = self.repo / successor["task_file"]
+            successor_text = successor_contract.read_text(encoding="utf-8")
+            if (
+                "## Replacement and migration" not in successor_text
+                or task_id not in successor_text.split("## Replacement and migration", 1)[1]
+            ):
+                raise WorkflowError(
+                    f"SUPERSEDE successor {successor_id} must document {task_id} in its "
+                    "Replacement and migration section"
+                )
+            stranded = [
+                consumer_id
+                for consumer_id, consumer in candidate_config["tasks"].items()
+                if consumer_id != successor_id
+                and consumer.get("status") == "PLANNED"
+                and task_id in consumer.get("depends_on", [])
+            ]
+            if stranded:
+                raise WorkflowError(
+                    f"cannot retire {task_id}; PLANNED consumers still depend on it: "
+                    + ", ".join(stranded)
+                )
+            open_impact_ids = {
+                finding.split(" raised by ", 1)[0]
+                for finding in self._unresolved_task_impacts(task_id)
+            }
+            missing_resolutions = sorted(open_impact_ids - set(resolved_impacts))
+            if missing_resolutions:
+                raise WorkflowError(
+                    f"SUPERSEDE must resolve every open impact on {task_id}: "
+                    + ", ".join(missing_resolutions)
+                )
+
     def _validate_amendment_result(self, result: Mapping[str, Any], amendment_id: str) -> str:
         _validate_object_keys(
             result,
@@ -1697,6 +1870,7 @@ class WorkflowManager:
                 "summary",
                 "rationale",
                 "unresolved_questions",
+                "impact_assessment",
                 "affected_existing_tasks",
                 "resolved_task_impacts",
             },
@@ -1712,31 +1886,100 @@ class WorkflowManager:
         ):
             raise WorkflowError("amendment summary and rationale must be strings")
         _validate_string_list(result.get("unresolved_questions"), "amendment unresolved_questions")
+        assessment = result.get("impact_assessment")
+        assessment_fields = {
+            "intent",
+            "specification",
+            "contracts",
+            "dependencies",
+            "implementation",
+            "data",
+            "operations",
+            "security",
+            "verification",
+        }
+        if not isinstance(assessment, Mapping) or set(assessment) != assessment_fields:
+            raise WorkflowError(
+                "amendment impact_assessment must contain exactly: "
+                + ", ".join(sorted(assessment_fields))
+            )
+        for field in sorted(assessment_fields):
+            value = assessment[field]
+            if not isinstance(value, str) or not value.strip():
+                raise WorkflowError(f"amendment impact_assessment.{field} must be non-empty")
         # Every amendment states, explicitly, whether it left an existing
         # contract asserting something a governing document no longer says. An
         # empty list is a claim the independent review can test; silence is not.
         affected = result.get("affected_existing_tasks")
         if not isinstance(affected, list):
             raise WorkflowError("amendment affected_existing_tasks must be a list")
+        impact_ids: set[str] = set()
         for item in affected:
-            if not isinstance(item, Mapping) or set(item) != {"task_id", "reason"}:
+            required_impact_fields = {
+                "impact_id",
+                "task_id",
+                "reason",
+                "categories",
+                "required_disposition",
+            }
+            if not isinstance(item, Mapping) or set(item) != required_impact_fields:
                 raise WorkflowError(
                     "each amendment affected_existing_tasks entry requires exactly "
-                    "task_id and reason"
+                    + ", ".join(sorted(required_impact_fields))
                 )
             affected_id = item["task_id"]
             if not isinstance(affected_id, str) or not TASK_PATTERN.fullmatch(affected_id):
                 raise WorkflowError(f"invalid affected task ID {affected_id!r}")
+            if affected_id not in self.load_config()["tasks"]:
+                raise WorkflowError(f"affected task does not exist: {affected_id}")
+            impact_id = item["impact_id"]
+            if (
+                not isinstance(impact_id, str)
+                or not IMPACT_PATTERN.fullmatch(impact_id)
+                or not impact_id.startswith(f"{amendment_id}:{affected_id}:")
+            ):
+                raise WorkflowError(
+                    f"affected impact ID must bind amendment and task: {impact_id!r}"
+                )
+            if impact_id in impact_ids:
+                raise WorkflowError(f"duplicate affected impact ID: {impact_id}")
+            impact_ids.add(impact_id)
             reason = item["reason"]
             if not isinstance(reason, str) or not reason.strip():
                 raise WorkflowError(
                     f"affected_existing_tasks[{affected_id}] needs a non-empty reason"
                 )
+            categories = item["categories"]
+            allowed_categories = {
+                "CONTRACT",
+                "DEPENDENCY",
+                "IMPLEMENTATION",
+                "DATA",
+                "OPERATIONS",
+                "SECURITY",
+                "VERIFICATION",
+            }
+            if (
+                not isinstance(categories, list)
+                or not categories
+                or len(set(categories)) != len(categories)
+                or any(category not in allowed_categories for category in categories)
+            ):
+                raise WorkflowError(
+                    f"affected_existing_tasks[{affected_id}] has invalid categories"
+                )
+            disposition = item["required_disposition"]
+            if not isinstance(disposition, str) or not disposition.strip():
+                raise WorkflowError(
+                    f"affected_existing_tasks[{affected_id}] needs a required_disposition"
+                )
         resolves = result.get("resolved_task_impacts")
         _validate_string_list(resolves, "amendment resolved_task_impacts")
+        if len(cast(list[str], resolves)) != len(set(cast(list[str], resolves))):
+            raise WorkflowError("amendment resolved_task_impacts must be unique")
         for resolved_id in cast(list[str], resolves):
-            if not TASK_PATTERN.fullmatch(resolved_id):
-                raise WorkflowError(f"invalid resolved task ID {resolved_id!r}")
+            if not IMPACT_PATTERN.fullmatch(resolved_id):
+                raise WorkflowError(f"invalid resolved impact ID {resolved_id!r}")
         return cast(str, outcome)
 
     def prepare_amendment_review(self, amendment_id: str) -> dict[str, object]:

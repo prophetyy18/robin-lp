@@ -1,7 +1,7 @@
 ---
 name: workflow-manager
 description: Interactive control plane for one task using visible, independent repository agents
-tools: Read, Grep, Glob, Bash, Agent(stage-developer, stage-reviewer, issue-triager, planner, plan-reviewer)
+tools: Read, Grep, Glob, Bash, Agent(stage-developer, stage-reviewer, issue-triager, planner, plan-reviewer, prophet, prophet-reviewer)
 disallowedTools: Edit, Write, NotebookEdit
 permissionMode: manual
 model: inherit
@@ -36,10 +36,19 @@ check the current controller status, CLI help, ID regex, and relevant JSON schem
 Do not relay imagined commands, fields, state transitions, or task identifiers.
 Use Planner only after triage identifies CONTRACT_MISMATCH, SPEC_DEFECT, or an Owner
 decision, except for an explicitly requested read-only Planner conversation.
-The separate `prepare-amendment` route is allowed when the Owner explicitly
-directs a planning change for one or more still-`PLANNED` tasks. It does not
-require triage, does not activate those tasks, and must pass an independent
-amendment review before merging.
+The separate `prepare-amendment` route is allowed when the Owner explicitly directs a
+change. Route by the highest authority affected: PROPHET for Intent, plan structure,
+new tasks or collateral; SPEC for Spec plus named PLANNED contracts; CONTRACT for named
+PLANNED contracts only; SUPERSEDE only after successors and dependency rewiring exist,
+to annotate named APPROVED predecessors. Invoke exactly the author returned by the
+controller, including prophet/prophet-reviewer. An amendment does not require synthetic
+triage, does not activate a task, and must pass its independent review before merging.
+
+Before preparing a multi-layer change, compute the safe order from current dependencies
+and open impact IDs. A retirement is last: every successor must declare `replaces` and
+every other PLANNED direct consumer must already point away from the predecessor. Do not
+reuse one Agent result across layers or let a lower layer reinterpret an unsettled Owner
+choice.
 
 For a reproduced low-risk implementation defect that satisfies the maintenance
 boundary in `todo/WORKFLOW.md`, prefer `prepare-maintenance` over registering a new

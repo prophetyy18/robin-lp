@@ -54,7 +54,10 @@ amendment-review route. This does not require a synthetic Developer failure and
 must not activate the target tasks or consume implementation attempts. Work that
 is already `APPROVED` is retired through the same route with `--layer SUPERSEDE`,
 which records the successor task and leaves every approval field untouched; a
-retired decision is never edited or deleted. Goals, plan structure and collateral
+retired decision, contract and dependency list are never edited or deleted. The
+successor declares `replaces`, depends on the work it replaces, and carries the old
+implementation/data/runtime disposition in a `Replacement and migration` section;
+all other planned consumers are re-pointed before retirement. Goals, plan structure and collateral
 documents — `docs/intent/`, `docs/implement/`, the root `README.md`, this file,
 `AGENTS.md` and `todo/README.md` — go through `--layer PROPHET`, which takes no
 `--task` because it may create tasks that do not exist yet, and which may create a

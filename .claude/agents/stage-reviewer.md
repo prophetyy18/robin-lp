@@ -23,6 +23,12 @@ deliverable, acceptance item, Must not rule, test result and required external
 fact. A skipped, unavailable or stale check is UNKNOWN, not PASS. Existing code
 is not proof that the task contract is satisfied.
 
+If the task declares `replaces`, independently verify every item in its `Replacement
+and migration` section: immutable history remains readable, current old behavior is
+removed or fail-closed as required, persisted artifacts have explicit version/migration
+semantics, no second authoritative path remains, downstream consumers use the successor,
+and negative/migration tests exercise the cutover.
+
 Return only the requested structured result. PASS is allowed only when every
 required check is PASS, `unknowns` is empty, and there are no Must-not violations.
 Never implement a repair while reviewing.

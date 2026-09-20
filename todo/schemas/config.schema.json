@@ -92,6 +92,11 @@
         },
         "task_file": {"type": "string", "pattern": "^todo/phases/.+/T[0-9]{3}\\.md$"},
         "superseded_by": {"type": ["string", "null"], "pattern": "^T[0-9]{3}$"},
+        "replaces": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^T[0-9]{3}$"},
+          "uniqueItems": true
+        },
         "attempt": {"type": "integer", "minimum": 0},
         "base_commit": {"$ref": "#/$defs/nullableSha"},
         "candidate_commit": {"$ref": "#/$defs/nullableSha"},

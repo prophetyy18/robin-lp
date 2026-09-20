@@ -46,6 +46,14 @@ def test_python_workflow_never_launches_claude() -> None:
     assert '"claude"' not in sources
 
 
+def test_manager_can_invoke_every_amendment_role_returned_by_controller() -> None:
+    manager = (ROOT / ".claude" / "agents" / "workflow-manager.md").read_text(encoding="utf-8")
+    assert "prophet" in manager
+    assert "prophet-reviewer" in manager
+    planner = (ROOT / ".claude" / "agents" / "planner.md").read_text(encoding="utf-8")
+    assert "`SUPERSEDE` is also yours" in planner
+
+
 def test_every_task_is_a_separate_complete_contract() -> None:
     config = json.loads((ROOT / "todo" / "config.yaml").read_text(encoding="utf-8"))
     for task_id, task in config["tasks"].items():

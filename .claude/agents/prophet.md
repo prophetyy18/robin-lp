@@ -81,14 +81,48 @@ longer says — a page it says is owned by another task, a rule it restates in t
 wording, a list it names that has since grown. You cannot fix that, and a later reader
 who trusts the contract would be misled. Record it instead.
 
-Every entry in `affected_existing_tasks` names one such task and states the stale
-sentence, the document that now contradicts it, and why a reader would be misled. An
-empty list is a positive claim that you checked every existing contract your change
-could reach and found none — the independent review tests that claim, and the
-controller refuses to activate an affected task until a later amendment resolves the
-record. If your change repairs a conflict an earlier amendment recorded, name that
-task in `resolved_task_impacts`; a resolution only clears a record from a strictly
-earlier amendment.
+Every entry in `affected_existing_tasks` names one exact conflict with a stable
+`Axxxx:Txxx:slug` impact ID. State the stale sentence, the governing contradiction,
+why a reader would be misled, the affected dimensions, and the disposition required
+to close it. The disposition covers the contract or successor, dependency rewiring,
+old implementation paths, historical data/artifacts, running operations, security and
+verification; explicitly say when a dimension is not applicable. An empty list is a
+positive claim that you checked every existing contract your change could reach and
+found none. The independent review tests that claim, and `ready` blocks a task when it
+or anything in its dependency closure carries an open impact. If your change repairs
+a conflict an earlier amendment recorded, name the exact impact ID in
+`resolved_task_impacts`; never clear every finding on a task with one broad claim.
+
+## Change-impact assessment
+
+Before editing, classify the Owner direction as additive, an extension, a behavioral
+replacement, a data-semantic change, a permission/security change, or a removal. Trace
+the changed concept through all of these dimensions and record the result in
+`impact_assessment`, even when the answer is "not applicable" with a reason:
+
+- Intent and every governing Spec/ADR/protocol clause;
+- existing contracts, phase entry/exit gates, traceability and acceptance evidence;
+- direct and transitive task dependencies, producers, consumers and ownership sets;
+- implementation and tests, including API, CLI, Web, background, risk, execution and
+  signer paths that still implement the old behavior;
+- persisted schemas, configuration, manifests, reports, raw/audit records and their
+  version or migration semantics;
+- running/deployed processes, operator controls, rollout order and rollback/fail-closed
+  behavior;
+- threats, permissions, authorization invalidation and secret boundaries;
+- positive, negative, migration, compatibility and old-path-unreachable verification.
+
+For replacement or removal, the plan must have one authority at every point. Decide,
+from confirmed Intent/Spec, whether each old path is reused, extended, replaced,
+disabled, removed, migrated, retained read-only, or retained only in Git/audit history.
+If that is a product choice the Owner did not settle, return `BLOCKED`. Never leave the
+old and new paths both able to produce current authoritative state or evidence.
+
+When adding a successor task, add `replaces: [Txxx, ...]` to its config entry, make it
+depend on the work it replaces, and put a `Replacement and migration` section in its
+contract. That section must cover old code reachability, persisted artifacts, runtime
+cutover, downstream dependency rewiring and tests. Do not retire the predecessor here;
+SUPERSEDE occurs only after every ordinary PLANNED consumer has been re-pointed.
 
 ## Evidence
 
@@ -104,5 +138,5 @@ Write the structured result only to the exact `.workflow/amendment-result.json` 
 in the controller-created worktree. That file is your only `.workflow/` write. Read
 `todo/schemas/amendment-result.schema.json` before writing it and conform exactly:
 include `amendment_id`, `outcome`, `summary`, `rationale`, `unresolved_questions`,
-`affected_existing_tasks` and `resolved_task_impacts`. Do not invent alternate field
-names.
+`impact_assessment`, `affected_existing_tasks` and `resolved_task_impacts`. Do not
+invent alternate field names.

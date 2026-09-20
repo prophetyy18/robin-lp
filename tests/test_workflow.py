@@ -21,6 +21,20 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
+def _impact_assessment() -> dict[str, str]:
+    return {
+        "intent": "checked",
+        "specification": "checked",
+        "contracts": "checked",
+        "dependencies": "checked",
+        "implementation": "checked",
+        "data": "not applicable in this fixture",
+        "operations": "not applicable in this fixture",
+        "security": "checked",
+        "verification": "checked",
+    }
+
+
 def _minimal_config(baseline: str) -> dict[str, object]:
     common = {
         "attempt": 0,
@@ -77,7 +91,8 @@ def _make_repo(tmp_path: Path) -> tuple[Path, str]:
             f"# {task_id}\n\n## Dependencies\n\nNone.\n\n"
             "## Outcome\n\nTest outcome.\n\n## Deliverables\n\nTest file.\n\n"
             "## Acceptance\n\nValue is good.\n\n## Must not\n\nDo not edit contracts.\n\n"
-            "## References\n\nNone.\n",
+            "## References\n\nNone.\n\n## Replacement and migration\n\n"
+            "T001 replaces T000; old history remains immutable.\n",
             encoding="utf-8",
         )
     (repo / "src").mkdir()
@@ -284,6 +299,14 @@ def _make_future_task_planned(repo: Path, manager: WorkflowManager) -> None:
     _git(repo, "commit", "-m", "leave future task planned")
 
 
+def _declare_successor(repo: Path, manager: WorkflowManager) -> None:
+    config = manager.load_config()
+    config["tasks"]["T001"]["replaces"] = ["T000"]
+    _write_json(repo / "todo" / "config.yaml", config)
+    _git(repo, "add", "todo/config.yaml")
+    _git(repo, "commit", "-m", "declare successor")
+
+
 def test_owner_amendment_updates_planned_contract_without_activating_task(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
     manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
@@ -307,6 +330,7 @@ def test_owner_amendment_updates_planned_contract_without_activating_task(tmp_pa
             "summary": "clarified the target contract",
             "rationale": "implements the recorded Owner direction",
             "unresolved_questions": [],
+            "impact_assessment": _impact_assessment(),
             "affected_existing_tasks": [],
             "resolved_task_impacts": [],
         },
@@ -349,6 +373,7 @@ def test_supersede_amendment_retires_an_approved_task(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
     manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
     _make_future_task_planned(repo, manager)
+    _declare_successor(repo, manager)
     before = manager.load_config()["tasks"]["T000"]
     prepared = manager.prepare_amendment(
         task_ids=["T000"],
@@ -357,6 +382,7 @@ def test_supersede_amendment_retires_an_approved_task(tmp_path: Path) -> None:
         owner_direction="T001 supersedes T000; record the successor and keep the history.",
     )
     assert prepared["layer"] == "SUPERSEDE"
+    assert prepared["agent"] == "planner"
     amendment = Path(str(prepared["worktree"]))
     request = json.loads(
         (amendment / ".workflow" / "amendment-request.json").read_text(encoding="utf-8")
@@ -374,6 +400,7 @@ def test_supersede_amendment_retires_an_approved_task(tmp_path: Path) -> None:
             "summary": "pointed T000 at its successor",
             "rationale": "implements the recorded Owner direction",
             "unresolved_questions": [],
+            "impact_assessment": _impact_assessment(),
             "affected_existing_tasks": [],
             "resolved_task_impacts": [],
         },
@@ -409,6 +436,7 @@ def test_supersede_amendment_cannot_alter_approved_evidence(tmp_path: Path) -> N
     repo, _ = _make_repo(tmp_path)
     manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
     _make_future_task_planned(repo, manager)
+    _declare_successor(repo, manager)
     before = manager.load_config()["tasks"]["T000"]
     prepared = manager.prepare_amendment(
         task_ids=["T000"],
@@ -430,6 +458,7 @@ def test_supersede_amendment_cannot_alter_approved_evidence(tmp_path: Path) -> N
             "summary": "retired the task and cleared its approval",
             "rationale": "implements the recorded Owner direction",
             "unresolved_questions": [],
+            "impact_assessment": _impact_assessment(),
             "affected_existing_tasks": [],
             "resolved_task_impacts": [],
         },
@@ -437,6 +466,56 @@ def test_supersede_amendment_cannot_alter_approved_evidence(tmp_path: Path) -> N
     with pytest.raises(WorkflowError, match="workflow state, evidence, model, SHA"):
         manager.finish_amendment("A0001")
     assert manager.load_config()["tasks"]["T000"]["approved_commit"] == before["approved_commit"]
+
+
+def test_supersede_amendment_cannot_edit_the_approved_contract(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    _declare_successor(repo, manager)
+    prepared = manager.prepare_amendment(
+        task_ids=["T000"],
+        layer="SUPERSEDE",
+        summary="retire T000",
+        owner_direction="T001 replaces T000.",
+    )
+    amendment = Path(str(prepared["worktree"]))
+    contract = amendment / "todo" / "phases" / "P00" / "T000.md"
+    contract.write_text(contract.read_text(encoding="utf-8") + "\nrewritten\n", encoding="utf-8")
+    config_path = amendment / "todo" / "config.yaml"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["tasks"]["T000"]["superseded_by"] = "T001"
+    _write_json(config_path, config)
+    _seal_prophet_result(amendment)
+
+    with pytest.raises(WorkflowError, match="outside the owner amendment"):
+        manager.finish_amendment("A0001")
+
+
+def test_supersede_refuses_to_strand_a_planned_consumer(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    _declare_successor(repo, manager)
+    (repo / "todo" / "phases" / "P00" / "T002.md").write_text(_NEW_CONTRACT, encoding="utf-8")
+    _add_task_to_config(repo)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "add another planned consumer")
+    prepared = manager.prepare_amendment(
+        task_ids=["T000"],
+        layer="SUPERSEDE",
+        summary="retire T000",
+        owner_direction="T001 replaces T000 after consumers move.",
+    )
+    amendment = Path(str(prepared["worktree"]))
+    config_path = amendment / "todo" / "config.yaml"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["tasks"]["T000"]["superseded_by"] = "T001"
+    _write_json(config_path, config)
+    _seal_prophet_result(amendment)
+
+    with pytest.raises(WorkflowError, match="PLANNED consumers still depend"):
+        manager.finish_amendment("A0001")
 
 
 def test_amendment_layers_require_their_target_status(tmp_path: Path) -> None:
@@ -539,6 +618,7 @@ def test_owner_amendment_rejects_an_untargeted_contract_change(tmp_path: Path) -
             "summary": "changed the wrong task",
             "rationale": "invalid test fixture",
             "unresolved_questions": [],
+            "impact_assessment": _impact_assessment(),
             "affected_existing_tasks": [],
             "resolved_task_impacts": [],
         },
@@ -567,6 +647,7 @@ def test_owner_amendment_review_failure_starts_fresh_planner_retry(tmp_path: Pat
             "summary": "incorrectly claimed no change was needed",
             "rationale": "candidate for rejection",
             "unresolved_questions": [],
+            "impact_assessment": _impact_assessment(),
             "affected_existing_tasks": [],
             "resolved_task_impacts": [],
         },
@@ -1241,7 +1322,15 @@ def test_ready_refuses_a_task_an_amendment_recorded_as_conflicting(tmp_path: Pat
     _add_task_to_config(worktree)
     _seal_prophet_result(
         worktree,
-        affected=[{"task_id": "T001", "reason": "the added goal contradicts T001's scope clause"}],
+        affected=[
+            {
+                "impact_id": "A0001:T001:goal-conflict",
+                "task_id": "T001",
+                "reason": "the added goal contradicts T001's scope clause",
+                "categories": ["CONTRACT", "IMPLEMENTATION"],
+                "required_disposition": "amend T001 and verify the old path is unreachable",
+            }
+        ],
     )
     candidate = manager.finish_amendment("A0001")
     assert _pass_amendment_review(manager, "A0001", candidate) == "APPROVED"
@@ -1268,8 +1357,9 @@ def test_ready_refuses_a_task_an_amendment_recorded_as_conflicting(tmp_path: Pat
             "summary": "aligned the contract with the amended goal",
             "rationale": "implements the recorded Owner direction",
             "unresolved_questions": [],
+            "impact_assessment": _impact_assessment(),
             "affected_existing_tasks": [],
-            "resolved_task_impacts": ["T001"],
+            "resolved_task_impacts": ["A0001:T001:goal-conflict"],
         },
     )
     repaired = manager.finish_amendment("A0002")
@@ -1277,6 +1367,96 @@ def test_ready_refuses_a_task_an_amendment_recorded_as_conflicting(tmp_path: Pat
 
     assert manager.ready("T001")
     assert manager.load_config()["tasks"]["T001"]["status"] == "READY"
+
+
+def test_ready_refuses_a_task_when_an_approved_dependency_has_an_open_impact(
+    tmp_path: Path,
+) -> None:
+    manager, worktree = _prepare_prophet_change(tmp_path)
+    (worktree / "todo" / "phases" / "P00" / "T002.md").write_text(_NEW_CONTRACT, encoding="utf-8")
+    _add_task_to_config(worktree)
+    _seal_prophet_result(
+        worktree,
+        affected=[
+            {
+                "impact_id": "A0001:T000:authority-change",
+                "task_id": "T000",
+                "reason": "the approved dependency implements the superseded authority",
+                "categories": ["IMPLEMENTATION", "DEPENDENCY"],
+                "required_disposition": "create and approve a successor before consumers run",
+            }
+        ],
+    )
+    candidate = manager.finish_amendment("A0001")
+    assert _pass_amendment_review(manager, "A0001", candidate) == "APPROVED"
+
+    with pytest.raises(WorkflowError, match="T000: A0001:T000:authority-change"):
+        manager.ready("T001")
+
+
+def test_impact_resolution_closes_only_the_named_conflict(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _write_json(
+        repo / "todo" / "amendments" / "A0001" / "impacts.json",
+        {
+            "amendment_id": "A0001",
+            "layer": "PROPHET",
+            "raised": [
+                {
+                    "impact_id": "A0001:T001:first-conflict",
+                    "task_id": "T001",
+                    "reason": "first",
+                },
+                {
+                    "impact_id": "A0001:T001:second-conflict",
+                    "task_id": "T001",
+                    "reason": "second",
+                },
+            ],
+            "resolves": [],
+        },
+    )
+    _write_json(
+        repo / "todo" / "amendments" / "A0002" / "impacts.json",
+        {
+            "amendment_id": "A0002",
+            "layer": "CONTRACT",
+            "raised": [],
+            "resolves": ["A0001:T001:first-conflict"],
+        },
+    )
+
+    findings = manager._unresolved_task_impacts("T001")
+    assert not any("first-conflict" in finding for finding in findings)
+    assert any("second-conflict" in finding for finding in findings)
+
+
+def test_legacy_impact_gets_a_stable_synthetic_id(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _write_json(
+        repo / "todo" / "amendments" / "A0001" / "impacts.json",
+        {
+            "amendment_id": "A0001",
+            "layer": "PROPHET",
+            "raised": [{"task_id": "T001", "reason": "legacy conflict"}],
+            "resolves": [],
+        },
+    )
+    _write_json(
+        repo / "todo" / "amendments" / "A0002" / "impacts.json",
+        {
+            "amendment_id": "A0002",
+            "layer": "CONTRACT",
+            "raised": [],
+            "resolves": ["T001"],
+        },
+    )
+
+    assert manager._unresolved_task_impacts("T001") == [
+        "A0001:T001:legacy raised by A0001: legacy conflict"
+    ]
 
 
 def test_a_contract_amendment_retry_is_still_a_planner(tmp_path: Path) -> None:
@@ -1352,7 +1532,7 @@ def _prepare_prophet_change(tmp_path: Path) -> tuple[WorkflowManager, Path]:
 def _seal_prophet_result(
     worktree: Path,
     *,
-    affected: list[dict[str, str]] | None = None,
+    affected: list[dict[str, object]] | None = None,
     resolves: list[str] | None = None,
 ) -> None:
     _write_json(
@@ -1363,6 +1543,7 @@ def _seal_prophet_result(
             "summary": "applied the recorded direction",
             "rationale": "matches the recorded direction",
             "unresolved_questions": [],
+            "impact_assessment": _impact_assessment(),
             "affected_existing_tasks": affected or [],
             "resolved_task_impacts": resolves or [],
         },

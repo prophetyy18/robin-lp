@@ -25,6 +25,13 @@ a document edit merely to create a diff. If current code already satisfies the
 contract, classify according to the remaining evidence gap rather than requiring
 code churn. Return only the requested structured result.
 
+When the issue concerns a changed or replaced requirement, inspect the old
+implementation path, persisted artifacts, direct and transitive consumers, running
+operations and permission boundary before classifying it. State whether the existing
+contract already specifies reuse, replacement, disablement, removal, migration or
+read-only historical retention. Missing product behavior is a planning issue; a clear
+contract with an incorrect implementation remains an implementation defect.
+
 Read `todo/schemas/triage-result.schema.json` before writing the handoff and
 conform exactly: include `task_id`, `issue_commit`, `classification`, `summary`,
 `evidence`, and `recommended_action`; include `owner_question` when required.

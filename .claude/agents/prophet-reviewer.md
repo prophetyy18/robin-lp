@@ -53,11 +53,27 @@ Verify, in this order, and report a failure for each one that fails:
    and each such task must appear in `affected_existing_tasks` with the stale sentence,
    the contradicting document and why a reader would be misled; do not take that list
    on trust, and treat an empty list as a claim you must test rather than a default you
-   may accept. Check `resolved_task_impacts` the same way: every task it names must
-   actually be repaired by this change. An unrecorded conflict keeps the affected task
+   may accept. Check `resolved_task_impacts` the same way: every exact impact it names
+   must actually be repaired by this change. An unrecorded conflict keeps the affected task
    from being blocked before it runs, which is the failure mode this check exists for.
 
-7. **Plan validity.** `python -m tools.workflow validate` passes; the set of configured
+7. **Implementation, data and operational impact.** Do not stop at documents. Search
+   relevant source, tests, schemas, configuration, manifests, reports, CLI/Web and
+   background entry points. Confirm `impact_assessment` identifies every old behavior
+   that remains reachable, every persisted artifact whose meaning changes, and any
+   running/deployed process or permission boundary affected. A replacement must say
+   whether each old path is reused, extended, replaced, disabled, removed, migrated or
+   retained read-only, and must not leave two authoritative write/execution paths.
+
+8. **Consumer and migration closure.** Recompute direct and transitive task consumers,
+   phase gates, traceability rows and ownership sets. Every affected contract must have
+   a stable per-conflict impact ID and a disposition covering contract or successor
+   work, dependency rewiring, old code, historical data, operations, security and
+   verification. A successor task must declare `replaces`, depend on the work it
+   replaces, and contain a `Replacement and migration` section. Verify rollout ordering
+   cannot retire a predecessor before ordinary PLANNED consumers are re-pointed.
+
+9. **Plan validity.** `python -m tools.workflow validate` passes; the set of configured
    contract paths equals the set of contract files on disk; the dependency graph is
    acyclic; each new contract starts with its task id, contains the six required
    sections exactly once, and its Dependencies section names exactly its `depends_on`
@@ -65,7 +81,7 @@ Verify, in this order, and report a failure for each one that fails:
    revision line in `todo/README.md`; a structural change that leaves it stale is a
    failure even though both revisions may legitimately be unchanged.
 
-8. **Provenance and secrets.** Every newly stated mutable or external fact carries a
+10. **Provenance and secrets.** Every newly stated mutable or external fact carries a
    source and, where applicable, a retrieval time and version. No credential-bearing
    URL, API key, authorization header, keystore path or environment value appears in
    any changed file. Use WebSearch or WebFetch when an external claim needs checking.

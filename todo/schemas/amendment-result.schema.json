@@ -8,6 +8,7 @@
     "summary",
     "rationale",
     "unresolved_questions",
+    "impact_assessment",
     "affected_existing_tasks",
     "resolved_task_impacts"
   ],
@@ -17,27 +18,90 @@
     "summary": {"type": "string"},
     "rationale": {"type": "string"},
     "unresolved_questions": {"type": "array", "items": {"type": "string"}},
+    "impact_assessment": {
+      "description": "Evidence-backed assessment across every layer that a requirement change can affect. Use an explicit not-applicable explanation rather than omitting a dimension.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intent",
+        "specification",
+        "contracts",
+        "dependencies",
+        "implementation",
+        "data",
+        "operations",
+        "security",
+        "verification"
+      ],
+      "properties": {
+        "intent": {"type": "string", "minLength": 1},
+        "specification": {"type": "string", "minLength": 1},
+        "contracts": {"type": "string", "minLength": 1},
+        "dependencies": {"type": "string", "minLength": 1},
+        "implementation": {"type": "string", "minLength": 1},
+        "data": {"type": "string", "minLength": 1},
+        "operations": {"type": "string", "minLength": 1},
+        "security": {"type": "string", "minLength": 1},
+        "verification": {"type": "string", "minLength": 1}
+      }
+    },
     "affected_existing_tasks": {
       "description": "Every existing task contract this change leaves asserting something a governing document no longer says. An empty array is a claim the independent review tests; it is not the default for an omission.",
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["task_id", "reason"],
+        "required": [
+          "impact_id",
+          "task_id",
+          "reason",
+          "categories",
+          "required_disposition"
+        ],
         "properties": {
+          "impact_id": {
+            "type": "string",
+            "pattern": "^A[0-9]{4}:T[0-9]{3}:[a-z0-9][a-z0-9-]*$",
+            "description": "Stable per-conflict identity. It must begin with the current amendment and affected task IDs."
+          },
           "task_id": {"type": "string", "pattern": "^T[0-9]{3}$"},
           "reason": {
             "type": "string",
             "minLength": 1,
             "description": "The stale statement, the document that now contradicts it, and why a reader would be misled."
+          },
+          "categories": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "CONTRACT",
+                "DEPENDENCY",
+                "IMPLEMENTATION",
+                "DATA",
+                "OPERATIONS",
+                "SECURITY",
+                "VERIFICATION"
+              ]
+            }
+          },
+          "required_disposition": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The contract/successor, dependency, old-code, historical-data, operational and verification disposition required to close this exact impact; explicitly state not applicable dimensions."
           }
         }
       }
     },
     "resolved_task_impacts": {
-      "description": "Task IDs whose open conflict, raised by an earlier amendment, this change repairs. A resolution only clears a raise from a strictly earlier amendment.",
+      "description": "Stable impact IDs that this change repairs. A resolution clears only the named conflict from a strictly earlier amendment.",
       "type": "array",
-      "items": {"type": "string", "pattern": "^T[0-9]{3}$"}
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^A[0-9]{4}:T[0-9]{3}:[a-z0-9][a-z0-9-]*$"
+      }
     }
   }
 }
