@@ -1,0 +1,18 @@
+# A0014 owner amendment review
+
+- Base commit: `1aa6f4548d9f588956884d80a21c35cc95be45b3`
+- Candidate commit: `a467fd2450ff7e9e7b86bf53cf57acb66a775098`
+- Verdict: **FAIL**
+
+## Summary
+
+The PROPHET change stays within its path boundary, leaves every pre-existing task entry and contract byte-identical, adds exactly four acyclic successor contracts with the required replaces/dependency/migration structure, and passes workflow validation. It is not coherent enough to merge because it leaves live planning collateral stale and omits the final-evidence task from the exact impact ledger.
+
+## Required changes
+
+- Update the PROPHET-owned collateral that the new responsibility split makes stale. docs/implement/TRACEABILITY.md explicitly requires synchronization when task responsibilities change, but its G-RESEARCH-01, G-STRATEGY-01/G-RECOMMEND-01, G-SIGNAL-01/G-STRATEGY-SPIKE-01, G-NUMERAIRE-01/G-ECONOMIC-01, G-DATASET-01, G-STRATEGY-MAINTAIN-01, G-BACKTEST-RUN-01, G-BACKTEST-RESULT-01, G-STRATEGY-REGISTRY-01 and ECO-* mappings still name only T063/T064/T066-era ownership and omit T105-T108. todo/README.md:326 likewise still says T066/T070 implement the parameter/evidence/enforcement mechanisms even though this change designates T107 as T066's current successor. Amend those live mappings/statements now, while preserving predecessor history until SUPERSEDE records retirement.
+- Add a stable A0014 impact for T096 and carry it in both prophet-001.json and impacts.json. T096 promises evidence for every V1 goal, but its current 53-task dependency closure contains T063/T064/T066 and none of T105-T108; after the planned direct-consumer rewiring, T105-T107 can enter transitively through other consumers, but T108 has no ordinary PLANNED consumer at all and therefore still has no path to the final evidence gate. The existing A0013:T096:legacy impact is specifically about the six A0012 tasks and cannot precisely represent this newly introduced four-successor conflict. Its disposition must state the dependency/evidence treatment for all four successors, including how T108 authoring-guide evidence reaches the final traceability gate.
+
+## Unknowns
+
+- None.
