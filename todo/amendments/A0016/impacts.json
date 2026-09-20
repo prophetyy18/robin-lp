@@ -1,0 +1,13 @@
+{
+  "amendment_id": "A0016",
+  "layer": "CONTRACT",
+  "raised": [],
+  "resolves": [
+    "A0014:T073:use-current-evidence-and-candidate",
+    "A0014:T083:consume-registry-bound-candidate-lock",
+    "A0014:T084:present-current-manifest-provenance",
+    "A0013:T084:legacy",
+    "A0014:T101:assemble-panel-from-current-run-manifests",
+    "A0013:T101:legacy"
+  ]
+}

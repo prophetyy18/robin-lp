@@ -799,8 +799,8 @@
       "depends_on": [
         "T025",
         "T027",
-        "T063",
-        "T066"
+        "T105",
+        "T107"
       ],
       "task_file": "todo/phases/P07-risk-and-paper/T073.md",
       "attempt": 0,
@@ -855,8 +855,8 @@
       "phase": "P08",
       "status": "PLANNED",
       "depends_on": [
-        "T066",
-        "T082"
+        "T082",
+        "T107"
       ],
       "task_file": "todo/phases/P08-operations-and-web/T083.md",
       "attempt": 0,
@@ -870,9 +870,9 @@
       "status": "PLANNED",
       "depends_on": [
         "T025",
-        "T063",
         "T072",
-        "T080"
+        "T080",
+        "T105"
       ],
       "task_file": "todo/phases/P08-operations-and-web/T084.md",
       "attempt": 0,
@@ -1077,9 +1077,10 @@
       "status": "PLANNED",
       "depends_on": [
         "T050",
-        "T063",
+        "T069",
         "T100",
-        "T104"
+        "T104",
+        "T105"
       ],
       "task_file": "todo/phases/P10-research-and-models/T101.md",
       "attempt": 0,

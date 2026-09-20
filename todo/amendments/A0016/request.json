@@ -1,0 +1,13 @@
+{
+  "amendment_id": "A0016",
+  "task_ids": [
+    "T073",
+    "T083",
+    "T084",
+    "T101"
+  ],
+  "layer": "CONTRACT",
+  "target_status": "PLANNED",
+  "summary": "re-point T073, T083, T084 and T101 to T105 and T107 and close their A0013 findings",
+  "owner_direction": "Owner direction: execute the A0014-recorded lower-layer follow-through for the four consumers that read the manifest, candidate and console surfaces, and close the A0013 legacy finding on each target that this repair genuinely closes. T073: replace T063 with T105 and T066 with T107 in its dependencies and in every normative reference, and name registry-bound evidence and candidate identity in the authorization views; legacy artifacts remain historical and visibly non-current; fail closed when the current manifest or candidate lock is absent or mismatched; its verification covers positive current-evidence display plus negative legacy, mismatch and downgrade cases, and the existing pool, token and paper authorization order is unchanged. T083: replace T066 with T107, consume only registry-bound candidate locks, keep old locks immutable legacy records that cannot be promoted, and verify current lock, old-format rejection, mismatch and unavailable-revision behaviour. T084: replace T063 with T105 and require the displayed manifest provenance to include registered identity and schema or registry revision without inventing or rewriting identity, with current-and-legacy rendering, mismatch and no-free-text-substitution tests; it must also repair the A0013 finding by reconciling its P08 web-console scope sentence with ARCHITECTURE section 2.2 as it now stands, without claiming ownership of any surface that section assigns to another task. T101: replace T063 with T105 and bind the panel to T069 run identities and T068 registry identities, which is the same repair the A0013 finding on that task requires; preserve source checksums, dataset, run and member identity and the registry revision, never merge incompatible revisions, and verify panel provenance, deduplication, incompatible-revision, failed or cancelled run and legacy rejection. Preserve every still-valid obligation, acceptance criterion and Must-not clause of all four contracts; change only these four contracts and their dependency fields; do not touch any other task, document or revision; and resolve exactly the open impacts this amendment genuinely closes, leaving every other impact open and naming it."
+}
