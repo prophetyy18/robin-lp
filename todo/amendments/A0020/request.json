@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0020",
+  "task_ids": [],
+  "layer": "PROPHET",
+  "target_status": null,
+  "summary": "name the T105-T108 successors in the ARCHITECTURE section 2.2 ownership rows ahead of the retirement",
+  "owner_direction": "Owner direction: make the ARCHITECTURE section 2.2 ownership map consistent with the imminent retirement of T063, T064, T066 and T067 in favour of T105, T106, T107 and T108, so that recording the four supersessions can never turn the repository citation check red. Each predecessor row must name its successor with the literal phrase the citation resolver requires, that is superseded by T10x, while keeping its module tokens and its canonical layer string exactly as the layer map classifies them. Each successor row must stop carrying the predecessor task token in its task cell, so the row is no longer read as a reference to the retired task; if the relationship still needs to be stated, state it in prose outside the task cell. Keep the transition paragraph that says a retired predecessor is history and its successor is the current authority for that surface, and keep every other row, task and document byte-identical. Record in this change that an earlier attempt to make the same retirement was independently reviewed and failed precisely because the ownership table still named the predecessors as current, that the attempt was archived as branch amendment/a0020-attempt-001-failed without landing, and that this annotation must therefore land before the retirement is re-issued. Do not change todo/config.yaml, do not modify any existing task contract, and run the repository citation, import-graph and acceptance checks to show them green before returning."
+}

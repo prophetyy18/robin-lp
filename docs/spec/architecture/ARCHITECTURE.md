@@ -116,11 +116,11 @@ application / backtest orchestration
 | 6 | T060 | `robinhood_lp.strategy.base` | strategy |
 | 6 | T061 | `robinhood_lp.backtest.engine` | backtest |
 | 6 | T062 | `robinhood_lp.strategy.baselines` | strategy |
-| 6 | T063 | `robinhood_lp.reports.{manifest,metrics,rerun,run_identity,validation}` (predecessor delivery) | backtest / research |
-| 6 | T064 | `robinhood_lp.robustness` (predecessor delivery) | backtest / research |
+| 6 | T063 (superseded by T105) | `robinhood_lp.reports.{manifest,metrics,rerun,run_identity,validation}` (predecessor delivery) | backtest / research |
+| 6 | T064 (superseded by T106) | `robinhood_lp.robustness` (predecessor delivery) | backtest / research |
 | 6 | T065 | `robinhood_lp.strategy.{adaptive,adapter}` | strategy |
-| 6 | T066 | `robinhood_lp.experiments` (predecessor delivery) | backtest / research |
-| 6 | T067 | `docs/implement/strategy/AUTHORING_GUIDE.md`, its example and drift tests (predecessor delivery) | none (implementation guidance and repository verification) |
+| 6 | T066 (superseded by T107) | `robinhood_lp.experiments` (predecessor delivery) | backtest / research |
+| 6 | T067 (superseded by T108) | `docs/implement/strategy/AUTHORING_GUIDE.md`, its example and drift tests (predecessor delivery) | none (implementation guidance and repository verification) |
 | 7 | T070 | `robinhood_lp.risk.checks` | risk |
 | 7 | T071 | `robinhood_lp.execution.paper` | execution |
 | 7 | T072 | `robinhood_lp.application.realtime` | application / orchestration |
@@ -152,10 +152,10 @@ application / backtest orchestration
 | 5 | T049 | `robinhood_lp.protocol.sizing` | protocol/domain |
 | 6 | T068 | `robinhood_lp.strategy.registry` (registered strategy identities, parameter schemas and code provenance) | strategy |
 | 6 | T069 | `robinhood_lp.application.backtest_runs` (product-level run entry point over stored data, replay, features, the engine and the manifest) | application / orchestration |
-| 6 | T105 (successor to T063) | `robinhood_lp.reports.{manifest,validation,rerun,run_identity,metrics}` (artifact-rerun entry extended through the application / orchestration CLI surface that T097 maps) | backtest / research |
-| 6 | T106 (successor to T064) | `robinhood_lp.robustness` (schema-bound surfaces, splits, scenarios, runner and reports) | backtest / research |
-| 6 | T107 (successor to T066) | `robinhood_lp.experiments` (search, candidate lock, harness, distributions and stability) | backtest / research |
-| 6 | T108 (successor to T067) | `docs/implement/strategy/AUTHORING_GUIDE.md`, its example and drift tests | none (implementation guidance and repository verification) |
+| 6 | T105 | `robinhood_lp.reports.{manifest,validation,rerun,run_identity,metrics}` (artifact-rerun entry extended through the application / orchestration CLI surface that T097 maps) | backtest / research |
+| 6 | T106 | `robinhood_lp.robustness` (schema-bound surfaces, splits, scenarios, runner and reports) | backtest / research |
+| 6 | T107 | `robinhood_lp.experiments` (search, candidate lock, harness, distributions and stability) | backtest / research |
+| 6 | T108 | `docs/implement/strategy/AUTHORING_GUIDE.md`, its example and drift tests | none (implementation guidance and repository verification) |
 | 7 | T073 | `robinhood_lp.web.prepaper` (the bounded pre-paper authorization entry: active PoolKey, `HOLD`/`LP` approvals, preliminary-paper authorization) | presentation / controls |
 | 8 | T087 | `robinhood_lp.web.runs` (strategy registry and backtest run surfaces: list, trigger, monitor, cancel) | presentation / controls |
 | 8 | T088 | `robinhood_lp.web.backtest_result` (the backtest result page and its layered result view) | presentation / controls |
@@ -175,6 +175,20 @@ successor is the only current authority for new writes, evaluation or guidance; 
 unapproved successor leaves that current path unavailable and must fail closed rather
 than fall back to the predecessor. The predecessor artifact may then be reached only
 through the successor contract's explicit read-only legacy or migration path.
+
+The successor is named in the row itself, ahead of the retirement: T063, T064, T066 and
+T067 carry `superseded by T105`, `T106`, `T107` and `T108` respectively, and the four
+successor rows no longer carry their predecessor's task token, so no §2.2 row is read as a
+reference to a task under retirement. The T005 citation resolver requires that wording as
+soon as `superseded_by` records a retirement — it fails a superseded row that does not name
+its successor — and it reads a task token in a successor row as a reference to that task,
+so the annotation has to land before the retirement is recorded; the retirement that
+records `superseded_by` may change that field and nothing else, and so cannot repair this
+table itself. An earlier attempt to record the same retirement was independently reviewed
+and failed for precisely that reason: the ownership table still named T063, T064, T066 and
+T067 as current, so annotating `superseded_by` turned the citation gate red. That attempt
+was archived as branch `amendment/a0020-attempt-001-failed` and did not land. This
+annotation therefore lands first, and the retirement is re-issued afterwards.
 
 Each row that names `robinhood_lp.*` modules declares the layer the layer map assigns to
 every module it names, so a row spanning two layers names only the modules of its own
