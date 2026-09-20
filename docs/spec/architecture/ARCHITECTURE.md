@@ -116,7 +116,7 @@ application / backtest orchestration
 | 6 | T060 | `robinhood_lp.strategy.base` | strategy |
 | 6 | T061 | `robinhood_lp.backtest.engine` | backtest |
 | 6 | T062 | `robinhood_lp.strategy.baselines` | strategy |
-| 6 | T063 | `robinhood_lp.reports.{manifest,metrics,rerun,run_identity,validation}` (predecessor delivery) | backtest / presentation / reports |
+| 6 | T063 | `robinhood_lp.reports.{manifest,metrics,rerun,run_identity,validation}` (predecessor delivery) | backtest / research |
 | 6 | T064 | `robinhood_lp.robustness` (predecessor delivery) | backtest / research |
 | 6 | T065 | `robinhood_lp.strategy.{adaptive,adapter}` | strategy |
 | 6 | T066 | `robinhood_lp.experiments` (predecessor delivery) | backtest / research |
@@ -152,7 +152,7 @@ application / backtest orchestration
 | 5 | T049 | `robinhood_lp.protocol.sizing` | protocol/domain |
 | 6 | T068 | `robinhood_lp.strategy.registry` (registered strategy identities, parameter schemas and code provenance) | strategy |
 | 6 | T069 | `robinhood_lp.application.backtest_runs` (product-level run entry point over stored data, replay, features, the engine and the manifest) | application / orchestration |
-| 6 | T105 (successor to T063) | `robinhood_lp.reports.{manifest,validation,rerun,run_identity,metrics}` and `robinhood_lp.__main__` artifact-rerun entry | backtest / presentation / reports |
+| 6 | T105 (successor to T063) | `robinhood_lp.reports.{manifest,validation,rerun,run_identity,metrics}` (artifact-rerun entry extended through the application / orchestration CLI surface that T097 maps) | backtest / research |
 | 6 | T106 (successor to T064) | `robinhood_lp.robustness` (schema-bound surfaces, splits, scenarios, runner and reports) | backtest / research |
 | 6 | T107 (successor to T066) | `robinhood_lp.experiments` (search, candidate lock, harness, distributions and stability) | backtest / research |
 | 6 | T108 (successor to T067) | `docs/implement/strategy/AUTHORING_GUIDE.md`, its example and drift tests | none (implementation guidance and repository verification) |
@@ -175,6 +175,12 @@ successor is the only current authority for new writes, evaluation or guidance; 
 unapproved successor leaves that current path unavailable and must fail closed rather
 than fall back to the predecessor. The predecessor artifact may then be reached only
 through the successor contract's explicit read-only legacy or migration path.
+
+Each row that names `robinhood_lp.*` modules declares the layer the layer map assigns to
+every module it names, so a row spanning two layers names only the modules of its own
+layer and describes the rest in prose: T105 extends the artifact-rerun entry through the
+`robinhood_lp.__main__` CLI surface, which the map classifies as application /
+orchestration and which the T097 row already maps.
 
 ## 3. Cross-cutting policies
 
