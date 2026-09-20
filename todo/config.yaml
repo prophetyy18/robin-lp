@@ -3,7 +3,7 @@
   "project": "robinhood-lp-v1",
   "product_baseline_commit": "6c3177883a676a06f8b571d0a598f524e319fa34",
   "intent_revision": "v1-2026-09-20-backtest-runs-and-permission-entry",
-  "spec_revision": "v1-2026-09-20-admission-write-boundary-and-threat-owners",
+  "spec_revision": "v1-2026-09-20-strategy-successor-ownership",
   "agent_runtime": {
     "provider": "MiniMax Anthropic-compatible API",
     "model": "MiniMax-M3[1m]",

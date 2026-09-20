@@ -1,5 +1,14 @@
 # V1 Strategy Authoring Guide
 
+> **A0014 transition notice.** This file is the implementation artifact delivered by
+> T067. T108 is its designated registry-aware successor. Until T108 is independently
+> approved, use this guide only for the preserved callback mechanics cited below; its
+> free-text `notes` examples are not strategy identity, registration or approval.
+> T068 defines registered identity and parameter schema, and T105 defines their manifest
+> binding. Once T067 is retired, this file is historical guidance and no current
+> authoring flow may fall back to its identity wording; that flow remains unavailable
+> until T108 supplies and validates the replacement guide, example and drift tests.
+
 > **Audience.** A strategy author who has only this repository, no other context.
 > **Goal.** Write a strategy the event-driven backtest engine actually runs.
 > **Scope.** V1 (Robinhood Chain / Uniswap V4 LP research).

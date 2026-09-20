@@ -24,11 +24,11 @@ parameter selection on held-out data, or profitability-based acceptance.
 - [T060 — Define strategy contracts](T060.md)
 - [T061 — Build the event-driven backtest engine](T061.md)
 - [T062 — Implement baseline strategies](T062.md)
-- [T063 — Add experiment manifests and reports](T063.md)
-- [T064 — Add robustness and anti-overfitting analysis](T064.md)
+- [T063 — Add experiment manifests and reports](T063.md) — predecessor delivery; T105 is the designated current successor after retirement
+- [T064 — Add robustness and anti-overfitting analysis](T064.md) — predecessor delivery; T106 is the designated current successor after retirement
 - [T065 — Implement the maintainable USDG-first adaptive-Range strategy](T065.md)
-- [T066 — Build versioned threshold experiments and provisional candidate review](T066.md)
-- [T067 — Write the strategy authoring guide](T067.md)
+- [T066 — Build versioned threshold experiments and provisional candidate review](T066.md) — predecessor delivery; T107 is the designated current successor after retirement
+- [T067 — Write the strategy authoring guide](T067.md) — predecessor delivery; T108 is the designated current successor after retirement
 - [T068 — Register strategy identities with their parameter schema and code provenance](T068.md)
 - [T069 — Deliver the product-level backtest run entry point](T069.md)
 - [T105 — Bind experiment manifests and reports to the strategy registry](T105.md)

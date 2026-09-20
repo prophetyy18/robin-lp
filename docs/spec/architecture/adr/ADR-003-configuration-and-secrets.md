@@ -69,8 +69,9 @@ Positive:
   chain IDs, malformed addresses, and duplicate identities;
 - secret names are explicit and auditable; redaction is enforceable
   via a custom serializer rather than convention;
-- a config object can be hashed and recorded in experiment manifests
-  (T063) without exposing secrets.
+- a config object can be hashed and recorded without exposing secrets in the
+  predecessor T063 experiment manifests and, after retirement, in the registry-bound
+  T105 successor manifests; T063 artifacts then remain read-only history.
 
 Negative / risks:
 
