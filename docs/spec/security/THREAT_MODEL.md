@@ -67,7 +67,10 @@ Boundary properties:
   release).
 - The Web console is an untrusted input boundary even when locally deployed. It never
   receives a private key or Keystore password; risk-changing requests require session,
-  CSRF, reauthentication, version and audit checks (T084–T086).
+  CSRF, reauthentication, version and audit checks (T073, T084–T086). The reduce-only
+  CLI write surface T097 is a second write entry into the same versioned store: it shares
+  the version and audit binding, refuses every increase, and cannot bypass the risk
+  gateway, pre-execution or the signer boundary.
 - Local storage is *untrusted* from the process's point of view: data
   may be tampered with by an attacker with filesystem access. Mitigations
   are append-only layout, SHA-256 manifests, and re-derivation from raw
@@ -302,10 +305,13 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
   PoolKey, strategy, limit, promotion or pause decision without the owner's current intent.
 - **Controls:** authenticated local deployment; CSRF protection; reauthentication for
   risk-changing operations; optimistic concurrency; immutable version/audit binding;
-  deny on timeout or ambiguous result (T084–T086).
-- **Owner:** T084–T086
-- **Residual risk:** Compromise of the operator's authenticated workstation/session.
-- **Evidence:** `WEB-GLOBAL-003`, T085/T086 acceptance.
+  deny on timeout or ambiguous result (T073, T084–T086); the reduce-only CLI write
+  surface (T097) writes through the same versioned store and audit event and refuses any
+  increase, so it is not a second authority.
+- **Owner:** T073 + T084–T086 + T097
+- **Residual risk:** Compromise of the operator's authenticated workstation/session, or of
+  the local CLI session.
+- **Evidence:** `WEB-GLOBAL-003`, `CTRL-CLI-001`, T073/T085/T086/T097 acceptance.
 
 ### T-14 Forged, replayed, or stale signer/executor request
 
@@ -314,11 +320,13 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
   nonce, fee, deadline or stale simulation, or a request is executed twice.
 - **Controls:** T090 authenticated request schema binds every field and authorization;
   T091 deterministic decoding/preflight; T092/T095 idempotent nonce, replacement,
-  finality and reconciliation evidence.
-- **Owner:** T090–T095
+  finality and reconciliation evidence. The reduce-only CLI surface T097 issues its
+  LP-side requests through the same schema, preflight and signer boundary, and a plan
+  that fails pre-execution is not submitted.
+- **Owner:** T090–T095 + T097
 - **Residual risk:** A compromise spanning both authorization storage and isolated
   execution services; mitigated by limits, independent reconciliation and kill switches.
-- **Evidence:** Phase 9 acceptance and G-EXEC-01.
+- **Evidence:** Phase 9 acceptance, G-EXEC-01 and T097 acceptance.
 
 ### T-15 Keystore, password, or backup exposure
 
@@ -478,8 +486,8 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
 | T-10 | Hard gates + human approval | `docs/spec/product/ASSET_ADMISSION.md` |
 | T-11 | No wall clock in protocol layers | ADR-006 + import test |
 | T-12 | Live-mode refusal + import/path scan | `tests/test_no_signing_paths.py` |
-| T-13 | Authenticated/versioned Web writes | T085/T086 evidence |
-| T-14 | Bound signer request + deterministic planner/executor | T090–T095 evidence |
+| T-13 | Authenticated/versioned Web and reduce-only CLI writes | T073/T085/T086/T097 evidence |
+| T-14 | Bound signer request + deterministic planner/executor | T090–T095, T097 evidence |
 | T-15 | Encrypted Keystore + interactive unlock + locked restart | T081/T090 evidence |
 | T-16 | Qualified point-in-time USDG quotes + fail-closed risk | T049/T053/T070 evidence |
 | T-17 | Point-in-time features/labels, horizon-derived purge/embargo, temporal-only splits | T101 acceptance; `DS-020`–`DS-022` |

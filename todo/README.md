@@ -11,7 +11,7 @@ Last plan review: **2026-09-14**. Network and deployment facts are mutable;
 the links in this file are evidence sources, not values that may be copied into
 code without the verification required by T024.
 
-Plan structure revision: **A0012** (2026-09-20). This names the last Owner amendment
+Plan structure revision: **A0013** (2026-09-20). This names the last Owner amendment
 that changed the plan's structure, and it moves even when `intent_revision` and
 `spec_revision` do not, so a change that only adds tasks stays legible. Every PROPHET
 change updates it.
@@ -54,6 +54,9 @@ The current product is delivered only when all of these statements are true:
 - preliminary paper mode restarts without gaps, duplicated decisions, or balance drift;
 - the Web console supports discovery, evidence review, pool selection, strategy comparison,
   paper operation, approvals, audit and emergency control without exposing secrets;
+- the CLI keeps its read-only query commands and adds the reduce-only write path — reduce
+  or remove LP, collect, exit, turn `HOLD`/`LP`/`AUTO_SWAP` off, lower a USDG exposure
+  limit — while every increase in a permission or an exposure stays Web-only;
 - unsupported hook semantics, stale/incomplete data, failed reconciliation, and
   breached risk limits fail closed;
 - the isolated signer, deterministic planner and executor pass testnet and post-testnet
@@ -188,10 +191,11 @@ During **Phases 0–8**, do not:
   hook deltas, and benchmark PnL into an unreconciled number;
 - weaken a test, tolerance, type, safety gate, or risk limit merely to make CI pass.
 
-Phase 9 permits only the signing and broadcast surfaces named in T090–T095. The private key
-must remain inside the isolated signer process, encrypted at rest, unlocked only by hidden
-interactive terminal input, and bound to the current approved request. No task authorizes an
-arbitrary-call signer, Web password input, automatic external transfer, or live execution before T094.
+Phase 9 permits only the signing and broadcast surfaces named in T090–T095 and the read-only
+query and reduce-only write commands T097 delivers. The private key must remain inside the
+isolated signer process, encrypted at rest, unlocked only by hidden interactive terminal
+input, and bound to the current approved request. No task authorizes an arbitrary-call
+signer, Web password input, automatic external transfer, or live execution before T094.
 
 ## 3. Support levels and promotion rules
 

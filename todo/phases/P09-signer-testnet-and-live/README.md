@@ -11,11 +11,11 @@ every intent, risk decision, simulation, signature, transaction, receipt, balanc
 reconciles; T096 maps every V1 goal to final evidence.
 
 **Phase prohibitions:** no key/password in Web/config/env/CLI args/logs/database; no arbitrary
-signing or call target; no CLI path that raises a permission or an exposure limit, creates a new
-LP position or increases liquidity, bypasses the risk gateway or pre-execution, or writes a
-version the Web write path did not authorize; no mainnet broadcast before T094; no external
-asset transfer; no reuse of testnet economics as profitability evidence; no automatic expansion
-after canary success.
+signing or call target; no CLI path that raises a permission or an exposure, creates a new
+LP position or increases liquidity, bypasses the risk gateway or pre-execution, or writes
+into a version store the Web write path does not govern; no mainnet broadcast before T094;
+no external asset transfer; no reuse of testnet economics as profitability evidence; no
+automatic expansion after canary success.
 
 ## Tasks
 

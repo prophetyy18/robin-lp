@@ -8,8 +8,11 @@ run entry point that names the registered strategy, its parameters and its data 
 
 **Exit gate:** manifests reproduce decisions/ledger/reports; look-ahead adversarial
 tests pass; results include honest USDG cash/HODL/rebalancing benchmarks and full costs;
-T066 produces an explicitly provisional candidate marked
-`EXPERIMENTAL_NOT_LIVE_APPROVED`, or an honest `NO_TRADE`. Neither is live approval.
+T068's registry is the identity source for every strategy a run can execute, and T069's
+product-level run entry point turns a registered strategy, its parameters and a data range
+into a reproducible manifest and report with observable run state; T066 produces an
+explicitly provisional candidate marked `EXPERIMENTAL_NOT_LIVE_APPROVED`, or an honest
+`NO_TRADE`. Neither is live approval.
 
 **Phase prohibitions:** no strategy RPC/storage access, same-event clairvoyant fill,
 parameter selection on held-out data, or profitability-based acceptance.

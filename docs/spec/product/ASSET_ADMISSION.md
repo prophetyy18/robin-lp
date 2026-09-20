@@ -281,6 +281,12 @@ User Decision: APPROVED_WITH_LIMITS
   处置，不能删除、隐藏或自动外转。
 - 审批：任何提权或提高敞口都生成新版本并使相关 live 授权失效；降低权限立即
   生效，不触发自动清仓。
+- 写入边界：任何提权或提高敞口只能通过 Web 写入入口完成，并依次经过草稿、
+  影响预览、重新身份验证、明确确认，然后生成不可变的新版本与审计事件；降低
+  权限或敞口不得被增加风险的流程阻塞，并且除 Web 外还可通过 reduce-only 的
+  CLI 命令完成，CLI 不得提高权限或敞口，也不得绕过风险检查、预执行或审计
+  （`G-PERM-WRITE-01`、`G-TOKEN-PERM-01`；CLI 边界见
+  [`OPERATOR_CONTROL.md`](../operations/OPERATOR_CONTROL.md) 的 `CTRL-CLI-001`）。
 - V4 仓位缩放：任一 token 上限降低时保持获批 `tickLower`/`tickUpper` 不变，
   缩小单一 `liquidityDelta`，再按当前 `sqrtPriceX96` 和 canonical V4 整数数学
   计算 `amount0`/`amount1`。不得独立削减一边或自动修改 Range；区间外新增仓位

@@ -43,7 +43,7 @@
 | `G-TOKEN-01`、`G-TOKEN-PERM-01`、`G-TOKEN-LIFECYCLE-01` | T025、T070、T073、T084、T085、T097 | 双资产独立资格、权限/敞口和失效状态机 |
 | `G-ASSET-HARD-GATE-01`、`G-HOOK-01`、`G-POOL-01` | T021、T024–T027、T034、T042、T043、T070 | 硬门槛、Hook evidence pack 和支持等级 |
 | `G-LIVE-01`、`G-LIVE-GATE-01` | T083、T086、T090–T096 | testnet、post-testnet paper、安全复核、晋级和 mainnet lifecycle |
-| `G-EXEC-01` | T070、T081、T090–T095 | allowlist、simulation、risk、sign、receipt 与 reconciliation 链路 |
+| `G-EXEC-01` | T070、T081、T090–T095、T097 | allowlist、simulation、risk、sign、receipt 与 reconciliation 链路 |
 | `G-SIGNER-01` | T081、T090、T092、T095 | Keystore 生成/导入/备份、交互解锁和隔离签名证据 |
 | `G-FUNDING-01` | T070、T081、T085、T090、T094、T095 | 独立钱包、可用额度、超额余额和无外部转账证明 |
 | `G-VALUATION-01` | T049、T052、T053、T070、T084 | 原始数量、USDG 换算来源、route 独立状态和缺失处理 |
