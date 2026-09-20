@@ -91,7 +91,10 @@ def _build_parser() -> argparse.ArgumentParser:
             "Rerun a saved experiment manifest and verify that the "
             "recomputed metrics checksum matches the recorded one. "
             "This is the T063 acceptance gate 'one command reruns a "
-            "saved manifest'."
+            "saved manifest' extended by the T105 registry-binding "
+            "clause. Both current T105 artifacts and legacy T063 "
+            "artifacts are accepted; legacy artifacts are surfaced "
+            "under an explicit LEGACY_T063 marker."
         ),
     )
     rerun.add_argument(
@@ -148,14 +151,21 @@ def _run_rerun_manifest(args: argparse.Namespace) -> int:
 
     The function is the operator's read-only entry point that
     satisfies the T063 acceptance clause "one command reruns a
-    saved manifest". It loads the manifest, runs the full
-    validation gate (per-pool invariant, required fields, report
-    checksum, optional dataset numeraire / qualification), rebuilds
-    the engine from the manifest's recorded strategy + model
-    parameters, and compares the new ``metrics_checksum`` against
-    the recorded one. A byte-identical match exits with code 0; any
-    mismatch or validation failure exits with code 1 and writes the
-    failure summary to ``stderr``.
+    saved manifest" extended by the T105 registry-binding clause
+    "verify and deterministically reproduce an already saved
+    manifest as an artifact operation".
+
+    The function auto-detects the artifact's manifest version:
+
+    - A current T105 manifest is loaded through the standard
+      :func:`rerun_manifest` entry point; the registry-binding
+      check runs as part of the validation gate.
+    - A legacy T063 manifest is loaded through
+      :func:`load_legacy_manifest_from_path` and rerun under its
+      recorded legacy schema with an explicit ``LEGACY_T063``
+      marker in the response payload. A legacy artifact cannot be
+      re-promoted as current evidence by this command; the
+      migration is a separate ``migrate-legacy-manifest`` operation.
 
     The function never accepts, reads, or forwards any signing
     material; the rerun is a deterministic, fully local
@@ -164,8 +174,16 @@ def _run_rerun_manifest(args: argparse.Namespace) -> int:
     """
     try:
         from robinhood_lp.reports import (
+            LEGACY_MANIFEST_VERSION,
             DatasetQualificationRecord,
+            InvalidLegacyManifestError,
+            LegacyManifestError,
+            load_legacy_manifest_from_path,
             rerun_manifest,
+            rerun_manifest_from_object,
+        )
+        from robinhood_lp.reports.registry_binding import (
+            RegistryBindingError,
         )
         from robinhood_lp.reports.validation import (
             ManifestValidationError,
@@ -201,19 +219,42 @@ def _run_rerun_manifest(args: argparse.Namespace) -> int:
         except (KeyError, ValueError) as exc:
             sys.stderr.write(f"rerun-manifest: dataset-qualification parse failed: {exc}\n")
             return 1
+    # Auto-detect the artifact's schema version. The check is a
+    # byte-level read of the ``version`` field; both readers refuse
+    # to load a mismatched version, so the dispatch is unambiguous.
+    is_legacy = _manifest_version_is_legacy(manifest_path)
     try:
-        result = rerun_manifest(
-            manifest_path,
-            dataset_qualification=dataset_qualification,
-        )
+        if is_legacy:
+            legacy = load_legacy_manifest_from_path(
+                manifest_path, dataset_qualification=dataset_qualification
+            )
+            result = rerun_manifest_from_object(
+                legacy.legacy_manifest, manifest_path=str(manifest_path)
+            )
+            legacy_marker = legacy.legacy_marker
+            source_checksum = legacy.source_checksum
+        else:
+            result = rerun_manifest(
+                manifest_path, dataset_qualification=dataset_qualification
+            )
+            legacy_marker = None
+            source_checksum = None
     except ManifestValidationError as exc:
         sys.stderr.write(f"rerun-manifest: validation failed: {type(exc).__name__}: {exc}\n")
+        return 1
+    except (RegistryBindingError, InvalidLegacyManifestError, LegacyManifestError) as exc:
+        sys.stderr.write(f"rerun-manifest: load failed: {type(exc).__name__}: {exc}\n")
         return 1
     except Exception as exc:  # noqa: BLE001 — surface unexpected failures too
         sys.stderr.write(f"rerun-manifest: rerun failed: {type(exc).__name__}: {exc}\n")
         return 1
     payload = {
         "manifest_path": str(manifest_path),
+        "manifest_version": (
+            LEGACY_MANIFEST_VERSION if is_legacy else "t105.experiment_manifest.v1"
+        ),
+        "legacy_marker": legacy_marker,
+        "source_checksum": source_checksum,
         "run_id": result.run_id,
         "chain_id": result.chain_id,
         "pool_key_id": result.pool_key_id,
@@ -228,6 +269,27 @@ def _run_rerun_manifest(args: argparse.Namespace) -> int:
     }
     sys.stdout.write(json.dumps(payload, sort_keys=True) + "\n")
     return 0 if result.match and result.decisions_match else 1
+
+
+def _manifest_version_is_legacy(manifest_path: Path) -> bool:
+    """Return ``True`` iff the saved manifest declares the legacy version.
+
+    The check is a byte-level read of the ``version`` field so the
+    dispatch does not depend on the current publication path's
+    structural rules. A malformed or unreadable JSON file falls
+    through to the current path, where the standard loader raises
+    with a structural error.
+    """
+    from robinhood_lp.reports import LEGACY_MANIFEST_VERSION as _LEGACY
+
+    try:
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return False
+    if not isinstance(raw, dict):
+        return False
+    declared_version = raw.get("version")
+    return declared_version == _LEGACY
 
 
 # ---------------------------------------------------------------------------

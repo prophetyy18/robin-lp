@@ -1,11 +1,12 @@
-"""Tests for the T063 experiment manifests and reports layer.
+"""Tests for the T063 experiment manifests and reports layer (T105 binding).
 
 T063 binds every published LP result to an :class:`ExperimentManifest`
 that records the dataset / schema / code / dependency revisions, the
 chain and ``PoolKey``, the interval and block bounds, the strategy
 parameters and seed, the clock / fill / cost / quote assumptions,
 the dataset version, the reporting numeraire and its valuation
-qualification (per ADR-014 §3), and the deterministic decisions,
+qualification (per ADR-014 §3), the registry binding that authorised
+the strategy identity (T105), and the deterministic decisions,
 ledger, metrics and report checksums the reconciliation contract
 depends on.
 
@@ -31,6 +32,13 @@ The acceptance clauses the tests cover:
 - **Byte-identical rerun.** A saved manifest rerun via
   :func:`rerun_manifest` reproduces both the metrics checksum and
   the decisions checksum; a tampered field produces a mismatch.
+
+The T105 cutover extended the manifest with registry-binding fields
+(strategy identity, strategy version, registry version + checksum,
+parameter schema version + checksum, code provenance). The T063
+acceptance behaviours continue to pass under the new schema; the
+fixture below uses :func:`build_strategy_binding` to bind the T062
+HOLD identity against the live registry.
 
 The must-not clauses the tests cover:
 
@@ -78,7 +86,6 @@ from robinhood_lp.backtest.models import (
     ZeroSlippageModel,
 )
 from robinhood_lp.reports import (
-    MANIFEST_VERSION,
     Q64_SCALE,
     VALUATION_QUALIFIED,
     VALUATION_RELATIVE_ONLY,
@@ -99,8 +106,10 @@ from robinhood_lp.reports import (
     RunIdentity,
     RunMetrics,
     SerialisedEvent,
+    StrategyBinding,
     assert_no_prior_run_at_path,
     assert_presentation_numeraire_safe,
+    bind_strategy_to_registry,
     build_coverage_summary,
     build_experiment_manifest,
     compute_run_metrics,
@@ -135,6 +144,11 @@ _DATASET_CONTENT_HASH: Final[str] = "0x" + "12" * 32
 _NUMERAIRE: Final[str] = "USDG"
 _QUAL: Final[str] = VALUATION_QUALIFIED
 _CODE_REV: Final[str] = "0123456789abcdef0123456789abcdef01234567"
+#: Identity used by the T063 fixture. T063 itself predates the
+#: registry; the T105 cutover binds the fixture's HOLD parameter set
+#: to the registered ``t062.hold.v1`` identity so the registry-binding
+#: clause (T105) passes alongside the T063 acceptance clauses.
+_HOLD_IDENTITY: Final[str] = "t062.hold.v1"
 
 
 def _swap_event(
@@ -253,6 +267,15 @@ def _run_a_small_backtest(
     )
 
 
+def _hold_binding() -> StrategyBinding:
+    """Build the registry binding the T063 fixture uses.
+
+    The HOLD strategy carries no parameters; the binding is just the
+    registry identity anchor.
+    """
+    return bind_strategy_to_registry(identity=_HOLD_IDENTITY, parameters={})
+
+
 def _build_manifest(
     *,
     chain_id: int = _CHAIN_ID,
@@ -266,6 +289,7 @@ def _build_manifest(
     block_range_end: int = 300,
     interval_seconds: int = 300,
     created_at: int = 1_700_000_000,
+    strategy_binding: StrategyBinding | None = None,
 ) -> ExperimentManifest:
     """Build a manifest for a single (chain, pool) with default fixtures."""
     (
@@ -292,8 +316,7 @@ def _build_manifest(
         valuation_qualification=valuation_qualification,
         code_revision=code_revision,
         dependency_revisions={"robinhood-lp": "0.0.0"},
-        strategy_kind="HOLD",
-        strategy_params={},
+        strategy_binding=strategy_binding if strategy_binding is not None else _hold_binding(),
         seed=0,
         clock_assumption="EVENT_TIME",
         fill_assumption="DETERMINISTIC_FAILURE",
@@ -319,50 +342,41 @@ class TestManifestConstruction:
         manifest = _build_manifest()
         validate_manifest(manifest)
 
-    def test_manifest_rejects_unknown_strategy_kind(self) -> None:
-        from robinhood_lp.reports.manifest import (
-            ExperimentManifest as _E,
+    def test_manifest_rejects_unknown_strategy_identity_at_build(self) -> None:
+        # T105 — bind_strategy_to_registry rejects an unregistered
+        # identity with :class:`UnknownStrategyIdentityError`. The
+        # binding is the gate the manifest builder consumes; the
+        # hard-coded ``strategy_kind`` vocabulary is gone from the
+        # publication path.
+        from robinhood_lp.reports.registry_binding import (
+            bind_strategy_to_registry,
         )
-        from robinhood_lp.reports.manifest import (
-            InvalidManifestFieldError as _I,
+        from robinhood_lp.strategy.registry import (
+            UnknownStrategyIdentityError as _U,
         )
 
-        # Constructor rejects an unknown strategy_kind at __post_init__.
-        with pytest.raises(_I):
-            _E(
-                version=MANIFEST_VERSION,
-                run_id=_RUN_ID,
-                chain_id=_CHAIN_ID,
-                pool_key_id=_POOL_KEY_ID_A,
-                block_range_start=100,
-                block_range_end=300,
-                interval_seconds=300,
-                dataset_version=_DATASET_VERSION,
-                dataset_schema_version=_DATASET_SCHEMA_VERSION,
-                dataset_decode_version=_DATASET_DECODE_VERSION,
-                dataset_content_hash=_DATASET_CONTENT_HASH,
-                reporting_numeraire=_NUMERAIRE,
-                valuation_qualification=_QUAL,
-                code_revision=_CODE_REV,
-                dependency_revisions={},
-                strategy_kind="BOGUS_STRATEGY",
-                strategy_params={},
-                seed=0,
-                clock_assumption="EVENT_TIME",
-                fill_assumption="DETERMINISTIC_FAILURE",
-                cost_assumption="FLAT_GAS",
-                quote_assumption="STATIC_FEE",
-                latency_units=0,
-                latency_ms_estimate=0,
-                decisions_checksum="0x" + "00" * 32,
-                ledger_checksum="0x" + "00" * 32,
-                metrics_checksum="0x" + "00" * 32,
-                coverage_checksum="0x" + "00" * 32,
-                report_checksum="0x" + "00" * 32,
-                metrics_version="t063.run_metrics.v1",
-                input_event_list=(),
-                created_at_unix_seconds=0,
-            )
+        with pytest.raises(_U):
+            bind_strategy_to_registry(identity="t999.bogus.v1", parameters={})
+
+    def test_manifest_rejects_mismatched_binding_at_validation(self) -> None:
+        # A manifest that was built against one registry revision
+        # but loaded under a different registry revision must fail
+        # :func:`validate_manifest` with
+        # :class:`RegistryBindingError`.
+        from robinhood_lp.reports.registry_binding import (
+            RegistryBindingError as _B,
+        )
+
+        manifest = _build_manifest()
+        # Tamper with the code_provenance_revision field on the
+        # manifest, then recompute the report checksum so the
+        # binding check (not the checksum check) is what fails.
+        bogus_revision = "0" * 40
+        tampered = replace(manifest, code_provenance_revision=bogus_revision)
+        new_checksum = manifest_checksum(tampered)
+        tampered = replace(tampered, report_checksum=new_checksum)
+        with pytest.raises(_B):
+            validate_manifest(tampered)
 
     def test_per_pool_invariant_rejects_foreign_event(self) -> None:
         manifest = _build_manifest()

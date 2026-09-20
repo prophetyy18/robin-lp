@@ -1,13 +1,31 @@
-"""Experiment manifests — every published run's source of truth (T063).
+"""Experiment manifests — every published run's source of truth (T063 + T105).
 
 A run manifest is the *only* artifact that ties a published LP result
 back to its inputs. The manifest records the dataset, schema, code and
 dependency revisions, the chain and ``PoolKey``, the interval and
 block bounds, the strategy parameters, the random seed, the clock,
 fill, cost and quote assumptions, the dataset version, the reporting
-numeraire and its valuation qualification (ADR-014 §3), and the
+numeraire and its valuation qualification (ADR-014 §3), the registry
+binding that authorised the strategy identity (T105), and the
 deterministic checksums the consumer needs to reconcile the result
 without trusting any intermediate artifact.
+
+T105 cutover (binding):
+
+- The hard-coded ``VALID_STRATEGY_KINDS`` vocabulary the T063 manifest
+  carried is **deprecated**. The T105 manifest records a registered
+  ``strategy_identity`` plus the full registry binding (registry
+  version + checksum, parameter-schema version + checksum, and code
+  provenance) so every published result is bound to the exact registry
+  revision that authorised it. The ``strategy_kind`` field is replaced
+  by ``strategy_identity``; a ``strategy_kind`` value the manifest
+  builder accepts from the caller is no longer accepted by the
+  current publication path.
+
+- Historical T063 manifests remain readable through the dedicated
+  :mod:`robinhood_lp.reports.legacy` module, which loads them under an
+  explicit ``LEGACY_T063`` marker. A legacy manifest is never
+  re-published as current evidence.
 
 Field units are stated per field. The T063 acceptance clause binds
 the unit on every quantity the manifest records — interval, block
@@ -35,13 +53,15 @@ Design constraints (binding):
   manifest never stores ``float``.
 
 - **Layer purity.** This module imports the standard library, the
-  backtest layer (events / engine) and the in-package metrics layer
-  only. It does not import RPC, storage, configuration, signing,
-  execution, or presentation code.
+  backtest layer (events / engine), the in-package metrics layer, and
+  the registry binding (T105) only. It does not import RPC, storage,
+  configuration, signing, execution, or presentation code.
 
 References:
 
 - T063 — Add experiment manifests and reports.
+- T068 — strategy registry (the source of truth for the binding).
+- T105 — registry-bound manifest authority (this version).
 - ADR-014 §3 — numeraire hierarchy and the ``QUALIFIED`` /
   ``RELATIVE_ONLY`` qualification.
 - `docs/spec/research/DATASET_AND_EVALUATION.md` DS-001 /
@@ -79,10 +99,22 @@ from robinhood_lp.reports.metrics import (
     LedgerSnapshot,
     RunMetrics,
 )
+from robinhood_lp.reports.registry_binding import (
+    RegistryBindingError,
+    StrategyBinding,
+    assert_binding_matches_registry,
+    bind_strategy_to_registry,
+    binding_parameter_dict,
+)
 
 #: Module version. Bumping it is a breaking change for downstream
-#: consumers (the manifest, the validation layer, the report).
-MANIFEST_VERSION: Final[str] = "t063.experiment_manifest.v1"
+#: consumers (the validation layer, the report, the rerun).
+#:
+#: T105 cut the version to ``t105.experiment_manifest.v1`` when it
+#: replaced the T063 hard-coded strategy vocabulary with the registry
+#: binding. Legacy T063 manifests are loaded through
+#: :mod:`robinhood_lp.reports.legacy`, which pins the prior version.
+MANIFEST_VERSION: Final[str] = "t105.experiment_manifest.v1"
 
 #: Sentinel string used when the code revision is unknown (no git
 #: revision is available, e.g. an unpacked source tarball). The
@@ -109,12 +141,20 @@ VALID_FILL_ASSUMPTIONS: Final[frozenset[str]] = frozenset(
 #: class of gas model the manifest may declare.
 VALID_COST_ASSUMPTIONS: Final[frozenset[str]] = frozenset({"FLAT_GAS", "DYNAMIC_GAS"})
 
-#: Closed vocabulary for the quote-assumption kind. Each entry names
-#: a class of fee / quote model the manifest may declare.
+#: Closed vocabulary for the quote-assumption kind. Each entry names a
+#: class of fee / quote model the manifest may declare.
 VALID_QUOTE_ASSUMPTIONS: Final[frozenset[str]] = frozenset({"STATIC_FEE", "DYNAMIC_FEE"})
 
-#: Closed vocabulary for the strategy kind. Each entry names a
-#: published baseline or extension point the manifest may declare.
+#: DEPRECATED — the T063 hard-coded strategy-name vocabulary.
+#:
+#: Kept for the legacy reader (:mod:`robinhood_lp.reports.legacy`) and
+#: for tests that exercise the historical schema. The T105 current
+#: publication path does **not** consult this set: a manifest builder
+#: receives a :class:`StrategyBinding`, not a free-text strategy
+#: kind, and the binding's registry identity is the only authority.
+#: No production, CLI, Web, background, or test helper may publish a
+#: current manifest via this vocabulary; the constant exists only as
+#: a historical anchor and a legacy-reader input.
 VALID_STRATEGY_KINDS: Final[frozenset[str]] = frozenset(
     {
         "HOLD",
@@ -353,13 +393,13 @@ class ExperimentManifest:
 
     The manifest binds the result to its inputs: dataset / schema /
     code / dependency revisions, chain, ``PoolKey``, interval, block
-    bounds, strategy parameters, seed, clock / fill / cost / quote
-    assumptions, dataset version, reporting numeraire and its
-    valuation qualification, plus the four checksum slots the
-    reconciliation contract depends on (decisions, ledger, metrics,
-    report). The coverage checksum is carried separately so a
-    coverage gap cannot be hidden behind a passing manifest
-    checksum.
+    bounds, dataset version, reporting numeraire and its valuation
+    qualification, registry binding (T105: strategy identity, version,
+    parameter-schema checksum, code provenance), and the four
+    checksum slots the reconciliation contract depends on
+    (decisions, ledger, metrics, coverage, report). The coverage
+    checksum is carried separately so a coverage gap cannot be hidden
+    behind a passing manifest checksum.
 
     Every quantity carries an explicit unit (the field docstring
     states it). The validation layer rejects any manifest whose
@@ -390,9 +430,23 @@ class ExperimentManifest:
     - ``code_revision`` — git SHA, or :data:`UNKNOWN_CODE_REVISION`.
     - ``dependency_revisions`` — sorted mapping of package name to
       version string (or :data:`UNKNOWN_DEPENDENCY_REVISION`).
-    - ``strategy_kind`` — closed-vocabulary string.
-    - ``strategy_params`` — sorted mapping of parameter name to a
-      JSON-serializable scalar (``int``/``str``/``bool``).
+    - ``strategy_identity`` — registered strategy identity string
+      (T105 replaces the T063 ``strategy_kind`` vocabulary).
+    - ``strategy_version`` — per-identity version string the registry
+      captured at binding time.
+    - ``registry_version`` — registry schema version string.
+    - ``registry_checksum`` — registry canonical SHA-256 hex digest.
+    - ``parameter_schema_version`` — per-identity parameter-schema
+      version string.
+    - ``parameter_schema_checksum`` — per-identity schema canonical
+      SHA-256 hex digest.
+    - ``code_provenance_module`` — dotted module path of the
+      registered implementation.
+    - ``code_provenance_revision`` — git SHA, or ``"UNKNOWN"``.
+    - ``code_provenance_symbol`` — symbol name (empty when the entry
+      does not bind a symbol).
+    - ``strategy_params`` — sorted mapping of validated parameter
+      name to a JSON-serializable scalar (``int``/``str``/``bool``).
     - ``seed`` — non-negative integer.
     - ``clock_assumption`` — :data:`VALID_CLOCK_ASSUMPTIONS`.
     - ``fill_assumption`` — :data:`VALID_FILL_ASSUMPTIONS`.
@@ -434,7 +488,15 @@ class ExperimentManifest:
     valuation_qualification: str
     code_revision: str
     dependency_revisions: dict[str, str]
-    strategy_kind: str
+    strategy_identity: str
+    strategy_version: str
+    registry_version: str
+    registry_checksum: str
+    parameter_schema_version: str
+    parameter_schema_checksum: str
+    code_provenance_module: str
+    code_provenance_revision: str
+    code_provenance_symbol: str
     strategy_params: dict[str, int | str | bool]
     seed: int
     clock_assumption: str
@@ -516,11 +578,43 @@ class ExperimentManifest:
                 raise InvalidManifestFieldError(
                     "ExperimentManifest.dependency_revisions: every key/value must be str"
                 )
-        if self.strategy_kind not in VALID_STRATEGY_KINDS:
-            raise InvalidManifestFieldError(
-                f"ExperimentManifest.strategy_kind: must be one of "
-                f"{sorted(VALID_STRATEGY_KINDS)}, got {self.strategy_kind!r}"
-            )
+        # T105 — registry-bound strategy identity. The manifest does
+        # not consult the deprecated ``VALID_STRATEGY_KINDS`` set; the
+        # identity is bound at build time by :func:`bind_strategy_to_registry`
+        # and verified at validation time by
+        # :func:`assert_binding_matches_registry`.
+        _require_non_empty_str(
+            self.strategy_identity, field_name="ExperimentManifest.strategy_identity"
+        )
+        _require_non_empty_str(
+            self.strategy_version, field_name="ExperimentManifest.strategy_version"
+        )
+        _require_non_empty_str(
+            self.registry_version, field_name="ExperimentManifest.registry_version"
+        )
+        _require_non_empty_str(
+            self.registry_checksum, field_name="ExperimentManifest.registry_checksum"
+        )
+        _require_non_empty_str(
+            self.parameter_schema_version,
+            field_name="ExperimentManifest.parameter_schema_version",
+        )
+        _require_non_empty_str(
+            self.parameter_schema_checksum,
+            field_name="ExperimentManifest.parameter_schema_checksum",
+        )
+        _require_non_empty_str(
+            self.code_provenance_module,
+            field_name="ExperimentManifest.code_provenance_module",
+        )
+        _require_non_empty_str(
+            self.code_provenance_revision,
+            field_name="ExperimentManifest.code_provenance_revision",
+        )
+        _require_str(
+            self.code_provenance_symbol,
+            field_name="ExperimentManifest.code_provenance_symbol",
+        )
         if not isinstance(self.strategy_params, dict):
             raise InvalidManifestFieldError(
                 f"ExperimentManifest.strategy_params: must be "
@@ -639,7 +733,15 @@ class ExperimentManifest:
             "valuation_qualification": self.valuation_qualification,
             "code_revision": self.code_revision,
             "dependency_revisions": dict(sorted(self.dependency_revisions.items())),
-            "strategy_kind": self.strategy_kind,
+            "strategy_identity": self.strategy_identity,
+            "strategy_version": self.strategy_version,
+            "registry_version": self.registry_version,
+            "registry_checksum": self.registry_checksum,
+            "parameter_schema_version": self.parameter_schema_version,
+            "parameter_schema_checksum": self.parameter_schema_checksum,
+            "code_provenance_module": self.code_provenance_module,
+            "code_provenance_revision": self.code_provenance_revision,
+            "code_provenance_symbol": self.code_provenance_symbol,
             "strategy_params": dict(sorted(self.strategy_params.items())),
             "seed": self.seed,
             "clock_assumption": self.clock_assumption,
@@ -735,8 +837,7 @@ def build_experiment_manifest(
     valuation_qualification: str,
     code_revision: str,
     dependency_revisions: Mapping[str, str],
-    strategy_kind: str,
-    strategy_params: Mapping[str, int | str | bool],
+    strategy_binding: StrategyBinding,
     seed: int,
     clock_assumption: str,
     fill_assumption: str,
@@ -751,9 +852,10 @@ def build_experiment_manifest(
     """Construct an :class:`ExperimentManifest` from a completed run.
 
     The function is the canonical builder: the per-run ledger
-    snapshot, the run metrics, the coverage summary, and the
-    decision log all carry their own checksums; this builder binds
-    them onto the manifest and computes the report checksum.
+    snapshot, the run metrics, the coverage summary, the decision
+    log, and the registry binding (T105) all carry their own
+    deterministic metadata; this builder binds them onto the
+    manifest and computes the report checksum.
 
     The builder enforces the per-pool invariant: the metrics
     record's ``(chain_id, pool_key_id)`` and the ledger snapshot's
@@ -761,6 +863,19 @@ def build_experiment_manifest(
     ``(chain_id, pool_key_id)`` must all agree, and the embedded
     input event list is asserted to match the manifest's pool before
     the builder returns.
+
+    The builder requires a pre-built :class:`StrategyBinding`. The
+    binding captures the registry-derived fields
+    (``strategy_identity``, ``strategy_version``, ``registry_version``,
+    ``registry_checksum``, ``parameter_schema_version``,
+    ``parameter_schema_checksum``, ``code_provenance_*``, validated
+    parameters); the builder copies them verbatim onto the manifest
+    and refuses any binding whose identity is unregistered or whose
+    parameters violate the schema. A future revision may opt to
+    accept ``identity`` + ``parameters`` and call
+    :func:`bind_strategy_to_registry` internally, but the T105
+    contract makes the binding the call site's responsibility so a
+    caller cannot bypass the registry at the manifest layer.
     """
     pool_identity = (metrics.chain_id, metrics.pool_key_id)
     if pool_identity != (ledger_snapshot.chain_id, ledger_snapshot.pool_key_id):
@@ -794,8 +909,16 @@ def build_experiment_manifest(
         "valuation_qualification": valuation_qualification,
         "code_revision": code_revision,
         "dependency_revisions": dict(sorted(dependency_revisions.items())),
-        "strategy_kind": strategy_kind,
-        "strategy_params": dict(sorted(strategy_params.items())),
+        "strategy_identity": strategy_binding.strategy_identity,
+        "strategy_version": strategy_binding.strategy_version,
+        "registry_version": strategy_binding.registry_version,
+        "registry_checksum": strategy_binding.registry_checksum,
+        "parameter_schema_version": strategy_binding.parameter_schema_version,
+        "parameter_schema_checksum": strategy_binding.parameter_schema_checksum,
+        "code_provenance_module": strategy_binding.code_provenance_module,
+        "code_provenance_revision": strategy_binding.code_provenance_revision,
+        "code_provenance_symbol": strategy_binding.code_provenance_symbol,
+        "strategy_params": dict(sorted(binding_parameter_dict(strategy_binding).items())),
         "seed": seed,
         "clock_assumption": clock_assumption,
         "fill_assumption": fill_assumption,
@@ -831,8 +954,16 @@ def build_experiment_manifest(
         valuation_qualification=valuation_qualification,
         code_revision=code_revision,
         dependency_revisions=dict(sorted(dependency_revisions.items())),
-        strategy_kind=strategy_kind,
-        strategy_params=dict(sorted(strategy_params.items())),
+        strategy_identity=strategy_binding.strategy_identity,
+        strategy_version=strategy_binding.strategy_version,
+        registry_version=strategy_binding.registry_version,
+        registry_checksum=strategy_binding.registry_checksum,
+        parameter_schema_version=strategy_binding.parameter_schema_version,
+        parameter_schema_checksum=strategy_binding.parameter_schema_checksum,
+        code_provenance_module=strategy_binding.code_provenance_module,
+        code_provenance_revision=strategy_binding.code_provenance_revision,
+        code_provenance_symbol=strategy_binding.code_provenance_symbol,
+        strategy_params=dict(sorted(binding_parameter_dict(strategy_binding).items())),
         seed=seed,
         clock_assumption=clock_assumption,
         fill_assumption=fill_assumption,
@@ -921,7 +1052,15 @@ def experiment_manifest_from_dict(payload: Mapping[str, Any]) -> ExperimentManif
             valuation_qualification=str(payload["valuation_qualification"]),
             code_revision=str(payload["code_revision"]),
             dependency_revisions=dict(payload["dependency_revisions"]),
-            strategy_kind=str(payload["strategy_kind"]),
+            strategy_identity=str(payload["strategy_identity"]),
+            strategy_version=str(payload["strategy_version"]),
+            registry_version=str(payload["registry_version"]),
+            registry_checksum=str(payload["registry_checksum"]),
+            parameter_schema_version=str(payload["parameter_schema_version"]),
+            parameter_schema_checksum=str(payload["parameter_schema_checksum"]),
+            code_provenance_module=str(payload["code_provenance_module"]),
+            code_provenance_revision=str(payload["code_provenance_revision"]),
+            code_provenance_symbol=str(payload["code_provenance_symbol"]),
             strategy_params=dict(payload["strategy_params"]),
             seed=int(payload["seed"]),
             clock_assumption=str(payload["clock_assumption"]),
@@ -948,12 +1087,32 @@ def experiment_manifest_from_dict(payload: Mapping[str, Any]) -> ExperimentManif
 
 
 # ---------------------------------------------------------------------------
+# Convenience helpers
+# ---------------------------------------------------------------------------
+
+
+def build_strategy_binding(
+    identity: str,
+    parameters: Mapping[str, object],
+) -> StrategyBinding:
+    """Convenience wrapper around :func:`bind_strategy_to_registry`.
+
+    The helper exists so call sites that build manifests do not need
+    to import the registry-binding module directly; the manifest
+    module re-exports the binding surface for ergonomics.
+    """
+    return bind_strategy_to_registry(identity=identity, parameters=parameters)
+
+
+# ---------------------------------------------------------------------------
 # Public surface
 # ---------------------------------------------------------------------------
 
 
 __all__ = [
     "MANIFEST_VERSION",
+    "RegistryBindingError",
+    "StrategyBinding",
     "UNKNOWN_CODE_REVISION",
     "UNKNOWN_DEPENDENCY_REVISION",
     "VALID_CLOCK_ASSUMPTIONS",
@@ -968,7 +1127,10 @@ __all__ = [
     "SerialisedEvent",
     "VALUATION_QUALIFIED",
     "VALUATION_RELATIVE_ONLY",
+    "assert_binding_matches_registry",
+    "bind_strategy_to_registry",
     "build_experiment_manifest",
+    "build_strategy_binding",
     "compute_report_checksum",
     "experiment_manifest_from_dict",
     "manifest_checksum",

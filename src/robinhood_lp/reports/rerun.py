@@ -1,19 +1,39 @@
-"""One-command rerun of a saved manifest (T063).
+"""One-command rerun of a saved manifest (T063 + T105).
 
 The rerun module is the implementation of the T063 acceptance
-clause "one command reruns a saved manifest". The function
-:func:`rerun_manifest` loads a manifest from a path, reconstructs
-the input events, builds the engine from the recorded strategy
-parameters and model bundle parameters, runs the engine, computes
-the metrics, and compares the new metrics checksum to the recorded
-one. A match is a byte-identical rerun; a mismatch is a rerun
-failure (the manifest is no longer reproducible from the recorded
-parameters — the file has been tampered with, the code has drifted,
-or the inputs are stale).
+clause "one command reruns a saved manifest" extended by the T105
+registry-binding clause "verify and deterministically reproduce an
+already saved manifest as an artifact operation".
+
+The function :func:`rerun_manifest` loads a manifest from a path,
+reconstructs the input events, builds the engine from the recorded
+strategy parameters and model bundle parameters, runs the engine,
+computes the metrics, and compares the new metrics checksum to the
+recorded one. A match is a byte-identical rerun; a mismatch is a
+rerun failure (the manifest is no longer reproducible from the
+recorded parameters — the file has been tampered with, the code has
+drifted, or the inputs are stale).
+
+T105 binding (rerun path):
+
+- The strategy callback is reconstructed from the manifest's
+  ``strategy_identity`` through the registry's factory surface. A
+  manifest that names an unregistered identity, supplies parameters
+  the registered schema does not declare, or carries a registry /
+  schema / code binding that disagrees with the live registry is
+  rejected before any engine call.
+
+- The rerun is an artifact operation: it verifies and reproduces an
+  already saved manifest. A rerun that is requested through the
+  product path is the T069 product run record's responsibility
+  (run identity, queue / progress / status, failure, cancellation,
+  restart); the rerun module itself never creates T069 state, never
+  reads Web state, and never mutates the source manifest.
 
 The module is intentionally minimal: it depends only on the
 backtest engine, the manifest, the metrics layer, the validation
-layer, and the strategy baselines. It does not import RPC, storage,
+layer, the strategy layer's registry / baselines / adaptive, and
+the registry binding (T105). It does not import RPC, storage,
 configuration, signing, execution, or presentation code.
 """
 
@@ -49,27 +69,31 @@ from robinhood_lp.reports.metrics import (
     decisions_checksum,
     extract_decisions,
 )
+from robinhood_lp.reports.registry_binding import (
+    RegistryBindingError,
+    assert_binding_matches_registry,
+)
 from robinhood_lp.reports.validation import (
     DatasetQualificationRecord,
     ManifestValidationError,
     load_manifest_from_path,
 )
 
-#: Module version.
-RERUN_VERSION: Final[str] = "t063.manifest_rerun.v1"
+#: Module version. Bumping it is a breaking change for the
+#: ``rerun-manifest`` CLI subcommand and any consumer that
+#: reproduces a saved manifest. The T105 cutover bumped the
+#: version because the rerun now consults the registry to build
+#: the strategy callback.
+RERUN_VERSION: Final[str] = "t105.manifest_rerun.v1"
 
-#: Default strategy parameters the rerun uses for the canonical
-#: ``HOLD`` baseline when the manifest's ``strategy_kind`` is
-#: ``HOLD``. The values are non-binding defaults for the simplest
-#: reproduce path; an alternative strategy is reconstructed by
-#: :func:`_build_strategy_callback` from the manifest's
-#: ``strategy_params``.
-_RERUN_DEFAULT_SEED: Final[int] = 0
-_RERUN_DEFAULT_HALF_WIDTH: Final[int] = 60
-_RERUN_DEFAULT_VOLATILITY_MULTIPLIER: Final[int] = 2
-_RERUN_DEFAULT_VOLATILITY_WINDOW: Final[int] = 20
-_RERUN_DEFAULT_CAPITAL_Q64_64: Final[int] = Q64_SCALE
-_RERUN_DEFAULT_LIQUIDITY: Final[int] = 1_000
+#: Default model-bundle parameters the rerun uses when the manifest
+#: does not name a registered parameter for the model bundle. The
+#: values are non-binding defaults for the simplest reproduce path;
+#: a re-publication can override them by registering a new strategy
+#: entry that names a different bundle.
+_RERUN_DEFAULT_GAS_UNITS: Final[int] = 21_000
+_RERUN_DEFAULT_FEE_PIPS: Final[int] = 3_000
+_RERUN_DEFAULT_ACTIVE_LIQUIDITY: Final[int] = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,70 +144,88 @@ class RerunResult:
 
 
 def _build_strategy_callback(manifest: ExperimentManifest) -> StrategyCallback:
-    """Build a strategy callback from the manifest's strategy parameters.
+    """Build a strategy callback from the manifest's registry binding.
 
-    The function reconstructs a deterministic, parameter-driven
-    strategy that mirrors the recorded parameters. The mapping is
-    explicit on purpose: an unknown ``strategy_kind`` raises so a
-    drifted strategy never silently produces a passing rerun.
+    The function is the registry-bound replacement for the T063
+    hard-coded ``strategy_kind`` switch. It looks the registered
+    identity up through the registry, builds the registered factory
+    with the validated parameters the manifest carries, and returns
+    the constructed strategy. The factory is the registry's
+    :meth:`RegisteredStrategy.factory.build` method, so the registry
+    remains the only authority for the strategy a rerun can execute.
+
+    An unregistered identity, a parameter the schema does not
+    declare, or a registry / schema / code binding that disagrees
+    with the live registry is rejected before any engine call.
     """
     # Imported lazily so the strategy layer is not on the
-    # reports-module import path.
-    from robinhood_lp.strategy.baselines import (
-        BroadRangeStrategy,
-        FixedWidthStrategy,
-        HoldStrategy,
-        OutOfRangeRebalanceStrategy,
-        VolatilityWidthStrategy,
+    # reports-module import path at module-load time. The registry
+    # and the registry binding surface are the contract; the
+    # strategy implementations are loaded only when the factory
+    # actually instantiates them.
+    from robinhood_lp.reports.registry_binding import StrategyBinding
+    from robinhood_lp.strategy.registry import default_registry
+
+    reg = default_registry()
+    # Reconstruct the binding the manifest carries. The manifest
+    # stores the binding's fields as separate slots (T105); the
+    # dataclass view here is the call-time surface that
+    # ``assert_binding_matches_registry`` consults.
+    schema_params = tuple(sorted((name, value) for name, value in manifest.strategy_params.items()))
+    binding = StrategyBinding(
+        registry_version=manifest.registry_version,
+        registry_checksum=manifest.registry_checksum,
+        strategy_identity=manifest.strategy_identity,
+        strategy_version=manifest.strategy_version,
+        parameter_schema_version=manifest.parameter_schema_version,
+        parameter_schema_checksum=manifest.parameter_schema_checksum,
+        code_provenance_module=manifest.code_provenance_module,
+        code_provenance_revision=manifest.code_provenance_revision,
+        code_provenance_symbol=manifest.code_provenance_symbol,
+        validated_parameters=schema_params,
     )
+    # The registry-binding check rejects unregistered identities,
+    # binding mismatches, and (indirectly through the factory
+    # build) parameter violations. A failure here is a contract
+    # break the rerun surfaces as a :class:`RegistryBindingError`
+    # rather than as a passing rerun.
+    try:
+        assert_binding_matches_registry(binding, registry=reg)
+    except RegistryBindingError:
+        raise
 
-    pool_key_id = manifest.pool_key_id
-    chain_id = manifest.chain_id
-    params = manifest.strategy_params
-    kind = manifest.strategy_kind
+    entry = reg.lookup(manifest.strategy_identity)
+    # ``factory.build`` accepts the validated parameters as a
+    # mapping; the schema_params tuple is rebuilt into a dict for
+    # the factory call. The factory returns the strategy object the
+    # engine consumes. Strategies that are already callable (the
+    # T062 baselines implement ``StrategyCallback`` directly) are
+    # passed through; the T065 :class:`AdaptiveStrategy` exposes
+    # ``evaluate`` and must be wrapped in
+    # :class:`AdaptiveStrategyCallback` so the engine can invoke it
+    # through a single ``__call__`` surface.
+    factory_params: dict[str, int | bool | str] = dict(schema_params)
+    built = entry.factory.build(
+        parameters=factory_params,
+        pool_key_id=manifest.pool_key_id,
+        chain_id=manifest.chain_id,
+    )
+    if callable(built):
+        return built
+    # The T065 adaptive strategy exposes ``evaluate`` rather than
+    # ``__call__``; wrap it in the engine-callback adapter so the
+    # engine can invoke it through a single ``__call__`` surface.
+    from robinhood_lp.strategy.adapter import AdaptiveStrategyCallback
+    from robinhood_lp.strategy.adaptive import AdaptiveStrategy as _AdaptiveStrategy
 
-    if kind == "HOLD":
-        return HoldStrategy(pool_key_id=pool_key_id, chain_id=chain_id)
-
-    tick_spacing = int(params.get("tick_spacing", 60))
-    if kind == "BROAD_RANGE":
-        return BroadRangeStrategy(
-            pool_key_id=pool_key_id,
-            chain_id=chain_id,
-            tick_spacing=tick_spacing,
-        )
-    if kind == "FIXED_WIDTH":
-        half_width = int(params.get("half_width_ticks", _RERUN_DEFAULT_HALF_WIDTH))
-        capital = int(params.get("capital_q64_64", _RERUN_DEFAULT_CAPITAL_Q64_64))
-        liquidity = int(params.get("liquidity", _RERUN_DEFAULT_LIQUIDITY))
-        return FixedWidthStrategy(
-            pool_key_id=pool_key_id,
-            chain_id=chain_id,
-            tick_spacing=tick_spacing,
-            half_width_ticks=half_width,
-            capital_q64_64=capital,
-            liquidity=liquidity,
-        )
-    if kind == "VOLATILITY_WIDTH":
-        multiplier = int(params.get("volatility_multiplier", _RERUN_DEFAULT_VOLATILITY_MULTIPLIER))
-        window = int(params.get("volatility_window", _RERUN_DEFAULT_VOLATILITY_WINDOW))
-        return VolatilityWidthStrategy(
-            pool_key_id=pool_key_id,
-            chain_id=chain_id,
-            tick_spacing=tick_spacing,
-            volatility_multiplier=multiplier,
-            volatility_window=window,
-        )
-    if kind == "OUT_OF_RANGE_REBALANCE":
-        half_width = int(params.get("half_width_ticks", _RERUN_DEFAULT_HALF_WIDTH))
-        return OutOfRangeRebalanceStrategy(
-            pool_key_id=pool_key_id,
-            chain_id=chain_id,
-            tick_spacing=tick_spacing,
-            half_width_ticks=half_width,
+    if isinstance(built, _AdaptiveStrategy):
+        return AdaptiveStrategyCallback(
+            strategy=built, window_seconds=int(manifest.interval_seconds)
         )
     raise ManifestValidationError(
-        f"rerun_manifest: unknown strategy_kind={kind!r}; cannot reconstruct"
+        f"_build_strategy_callback: registered factory for "
+        f"{manifest.strategy_identity!r} returned an object the engine "
+        f"cannot consume ({type(built).__name__})"
     )
 
 
@@ -199,11 +241,16 @@ def _approve_risk_callback(decision: object) -> RiskDecision:
 def _build_model_bundle(manifest: ExperimentManifest) -> ModelBundle:
     """Build a :class:`ModelBundle` from the manifest's model-bundle parameters.
 
-    The function reconstructs the canonical ``t063`` model bundle —
+    The function reconstructs the canonical T105 model bundle —
     constant liquidity, static fee, flat gas, zero slippage,
     deterministic failure, fixed latency. The bundle version is
-    the manifest's own ``code_revision`` (so a re-publication after
-    a code change carries a different bundle version).
+    the manifest's own ``code_revision` (so a re-publication after
+    a code change carries a different bundle version). The model
+    bundle parameters live on the manifest's ``strategy_params``
+    slot under the model-bundle keys (``gas_units``, ``fee_pips``,
+    ``active_liquidity``); the rerun reads them only when the
+    registered identity declares them, falling back to the
+    canonical defaults otherwise.
     """
     from robinhood_lp.backtest.models import (
         ConstantLiquidityModel,
@@ -214,11 +261,11 @@ def _build_model_bundle(manifest: ExperimentManifest) -> ModelBundle:
     )
 
     params = manifest.strategy_params
-    gas_units = int(params.get("gas_units", 21_000))
-    fee_pips = int(params.get("fee_pips", 3_000))
-    active_liquidity = int(params.get("active_liquidity", 10_000))
+    gas_units = int(params.get("gas_units", _RERUN_DEFAULT_GAS_UNITS))
+    fee_pips = int(params.get("fee_pips", _RERUN_DEFAULT_FEE_PIPS))
+    active_liquidity = int(params.get("active_liquidity", _RERUN_DEFAULT_ACTIVE_LIQUIDITY))
     return ModelBundle(
-        bundle_version=f"t063.rerun.{manifest.code_revision}",
+        bundle_version=f"t105.rerun.{manifest.code_revision}",
         liquidity=ConstantLiquidityModel(active_liquidity_value=active_liquidity),
         fee=StaticFeeModel(fee_pips_value=fee_pips),
         gas=FlatGasModel(gas_units_value=gas_units),
@@ -254,10 +301,11 @@ def rerun_manifest(
 
     The function is the canonical "one command reruns a saved
     manifest" entry point. It loads the manifest (running every
-    validation gate), reconstructs the events, strategy, model
-    bundle and engine, runs the engine, computes the metrics, and
-    compares both the metrics checksum and the decisions checksum
-    to the recorded values.
+    validation gate, including the T105 registry-binding check),
+    reconstructs the events, strategy, model bundle and engine,
+    runs the engine, computes the metrics, and compares both the
+    metrics checksum and the decisions checksum to the recorded
+    values.
 
     Parameters
     ----------
@@ -281,6 +329,8 @@ def rerun_manifest(
     ------
     :class:`robinhood_lp.reports.validation.ManifestValidationError`
         On a structural / checksum / required-field failure.
+    :class:`RegistryBindingError`
+        On a registry-binding disagreement (T105).
     :class:`FileNotFoundError`
         When ``manifest_path`` does not exist.
     """

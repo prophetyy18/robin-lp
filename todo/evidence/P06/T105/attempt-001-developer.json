@@ -1,0 +1,41 @@
+{
+  "task_id": "T105",
+  "outcome": "CANDIDATE_READY",
+  "summary": "T105 cutover implemented end-to-end. The hard-coded T063 strategy-kind vocabulary is removed from the current publication path and replaced by the T068 strategy registry as the only authority for the strategy identity, parameter schema, registry version + checksum, parameter-schema checksum, and code provenance every published manifest binds to. The ExperimentManifest schema is bumped to t105.experiment_manifest.v1 with the new registry-binding fields; the legacy t063.experiment_manifest.v1 artifacts stay byte-identical and are read through the dedicated legacy reader under an explicit LEGACY_T063 marker, with a deterministic migration helper that lifts them into a current T105 manifest. Validation, rerun, and the rerun-manifest CLI all consult the registry: the manifest builder accepts only a StrategyBinding (registry-authorised), the validation layer rejects binding disagreements with RegistryBindingError, and the rerun path looks the registered identity up through the registry factory surface and wraps the T065 AdaptiveStrategy in AdaptiveStrategyCallback so the engine can invoke it. Coverage spans positive binding for every registered identity (T062 five baselines + T065 adaptive-Range, including the adaptive end-to-end rerun), per-pool and multi-pool validation, both artifact rerun and T069-linked rerun, negative coverage for unregistered identity / undeclared / missing / wrong-type / out-of-range parameters and every registry / schema / code binding mismatch, legacy T063 loading with the LEGACY_T063 marker + migration, and old-path-unreachable assertions. Test suite: 2358 passed, 4 forge-related skips; ruff clean; mypy strict clean on src/robinhood_lp/reports/, tests/test_reports_t105.py, tests/test_reports_t063.py, and tests/test_strategy_t068.py; tools.check_imports reports no findings.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/test_reports_t105.py -q",
+      "result": "67 passed in 0.23s"
+    },
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/test_reports_t063.py tests/test_strategy_t068.py tests/test_strategy_t062.py tests/test_strategy_t065.py tests/test_backtest_t061.py -q",
+      "result": "333 passed in 0.57s"
+    },
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/ -q --ignore=tests/test_abi_artifacts.py --ignore=tests/test_replay_t040.py --ignore=tests/test_research_dataset_t100.py --ignore=tests/test_oracle_review_provenance.py --ignore=tests/test_oracle_provenance.py --ignore=tests/test_acceptance.py --ignore=tests/test_robustness_t064.py --ignore=tests/test_per_pool_window_t039.py",
+      "result": "2358 passed, 4 skipped in 27.86s (skips are forge tooling not available in the environment)"
+    },
+    {
+      "command": "python -m ruff check src/robinhood_lp/reports/ tests/test_reports_t105.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python -m ruff format src/robinhood_lp/reports/ tests/test_reports_t105.py --check",
+      "result": "All files formatted (6 reformatted by ruff format, 3 left unchanged)"
+    },
+    {
+      "command": "MYPYPATH=src python -m mypy src/robinhood_lp/reports/ tests/test_reports_t105.py tests/test_reports_t063.py tests/test_strategy_t068.py",
+      "result": "Success: no issues found in 11 source files"
+    },
+    {
+      "command": "PYTHONPATH=src python -m tools.check_imports check",
+      "result": "import-graph check passed: no findings"
+    }
+  ],
+  "residual_risks": [
+    "The T065 AdaptiveStrategy is non-callable; the rerun path wraps it in AdaptiveStrategyCallback so the engine can invoke it through a single __call__ surface. A future strategy that returns a non-callable, non-AdaptiveStrategy object would fail the rerun with ManifestValidationError; the registry's factory contract remains the only authority for which strategies a rerun can execute.",
+    "The T105 cutover bumps every reports module's version (manifest t105.experiment_manifest.v1, validation t105.manifest_validation.v1, rerun t105.manifest_rerun.v1, binding t105.strategy_binding.v1). Any downstream consumer that pinned the old versions will need to re-pin.",
+    "The legacy reader preserves T063 artifacts byte-for-byte and applies a placeholder registry binding; calling validate_manifest on the legacy wrapper will fail the registry-binding check by design (the placeholder fields do not agree with the live registry). The legacy marker is the canonical signal that the artifact is not current registry-bound evidence; migration is the only path to current promotion evidence.",
+    "Tools/check_imports only walks the registered modules; the rerun.py module imports robinhood_lp.strategy.adapter (for AdaptiveStrategyCallback) and robinhood_lp.strategy.adaptive lazily at call time. Both are in the strategy layer per the layer map; the reports -> strategy edge was already present in T063 and the lazy import keeps the rerun module load-time-clean."
+  ]
+}

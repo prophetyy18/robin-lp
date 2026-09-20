@@ -1,8 +1,8 @@
-"""Manifest validation (T063).
+"""Manifest validation (T063 + T105).
 
 The validation layer is the gate every published manifest passes
-through before it counts as evidence. It binds four acceptance
-clauses of T063:
+through before it counts as evidence. It binds the acceptance clauses
+of T063 and the registry-binding clauses of T105:
 
 1. **Tampered inputs fail checksum validation.** Every field the
    manifest carries has a deterministic checksum slot; a
@@ -24,6 +24,13 @@ clauses of T063:
    The per-pool invariant (:meth:`ExperimentManifest.assert_events_match_pool`)
    and the cross-manifest gate (:func:`robinhood_lp.reports.run_identity.validate_run_identity`)
    together enforce this rule.
+
+5. **Registry-binding agreement (T105).** A manifest whose registry
+   version, registry checksum, strategy version, parameter-schema
+   checksum, or code provenance disagrees with the live registry is
+   rejected with :class:`RegistryBindingError`. The validation layer
+   refuses to accept a manifest whose recorded binding is no longer
+   the binding the registry authorises.
 
 The "no presenting a ``RELATIVE_ONLY`` run as USD-denominated"
 must-not is enforced by :func:`assert_presentation_numeraire_safe`,
@@ -59,13 +66,18 @@ from robinhood_lp.reports.metrics import (
     VALUATION_QUALIFIED,
     VALUATION_RELATIVE_ONLY,
 )
+from robinhood_lp.reports.registry_binding import (
+    RegistryBindingError,
+    assert_binding_matches_registry,
+)
 from robinhood_lp.reports.run_identity import (
     RunIdentity,
     validate_run_identity,
 )
 
-#: Module version.
-VALIDATION_VERSION: Final[str] = "t063.manifest_validation.v1"
+#: Module version. The T105 cutover bumped the version because the
+#: registry-binding clause is part of the validation surface.
+VALIDATION_VERSION: Final[str] = "t105.manifest_validation.v1"
 
 #: Substrings that, when present in the *presentation* numeraire of
 #: a ``RELATIVE_ONLY`` run, trigger the "do not present a relative
@@ -264,14 +276,15 @@ def validate_manifest(
     *,
     dataset_qualification: DatasetQualificationRecord | None = None,
 ) -> None:
-    """Validate a single manifest against the T063 acceptance clauses.
+    """Validate a single manifest against the T063 + T105 acceptance clauses.
 
     The function raises on the first failure; callers that want to
     surface every issue should call :func:`iter_validation_errors`
     instead. The check is exhaustive on the single-manifest clauses:
     required fields, report checksum, numeraire / qualification
     agreement (when a :class:`DatasetQualificationRecord` is
-    supplied), and the per-pool invariant.
+    supplied), the per-pool invariant, and (T105) the registry
+    binding agreement.
 
     Cross-manifest invariants (multi-pool run identity) are enforced
     by :func:`robinhood_lp.reports.run_identity.validate_run_identity`;
@@ -304,6 +317,54 @@ def validate_manifest(
             dataset_numeraire=dataset_qualification.reporting_numeraire,
             dataset_qual=dataset_qualification.valuation_qualification,
         )
+
+    # 5. Registry-binding agreement (T105). Every field the
+    #    manifest's binding carries must agree with the live
+    #    registry's recorded revision; a binding mismatch is a hard
+    #    fail because the manifest was authorised by a revision it
+    #    can no longer claim. ``assert_binding_matches_registry``
+    #    raises :class:`RegistryBindingError` on the first
+    #    disagreement with the slot, recorded and current values
+    #    attached for diagnosis.
+    _check_registry_binding(manifest)
+
+
+def _check_registry_binding(manifest: ExperimentManifest) -> None:
+    """Reconstruct the binding from the manifest's fields and verify it.
+
+    The manifest records the binding's registry-derived fields as
+    separate slots (T105). The validation layer reconstructs the
+    :class:`StrategyBinding` view from those slots and calls
+    :func:`assert_binding_matches_registry` to confirm the live
+    registry agrees with every recorded value. The reconstruction is
+    a thin projection because the manifest is the canonical store
+    of the binding fields; the binding dataclass is the
+    call-time view.
+    """
+    from robinhood_lp.reports.registry_binding import StrategyBinding
+
+    # Reconstruct the validated-parameters tuple in a stable order
+    # so equality and hashing on the binding dataclass are
+    # deterministic. The manifest stores ``strategy_params`` as a
+    # dict; the binding stores it as a tuple of ``(name, value)``
+    # pairs in schema order.
+    schema_params = tuple(sorted((name, value) for name, value in manifest.strategy_params.items()))
+    binding = StrategyBinding(
+        registry_version=manifest.registry_version,
+        registry_checksum=manifest.registry_checksum,
+        strategy_identity=manifest.strategy_identity,
+        strategy_version=manifest.strategy_version,
+        parameter_schema_version=manifest.parameter_schema_version,
+        parameter_schema_checksum=manifest.parameter_schema_checksum,
+        code_provenance_module=manifest.code_provenance_module,
+        code_provenance_revision=manifest.code_provenance_revision,
+        code_provenance_symbol=manifest.code_provenance_symbol,
+        validated_parameters=schema_params,
+    )
+    try:
+        assert_binding_matches_registry(binding)
+    except RegistryBindingError:
+        raise
 
 
 def iter_validation_errors(
@@ -350,6 +411,10 @@ def iter_validation_errors(
                 )
         except ManifestError as exc:
             errors.append(exc)
+    try:
+        _check_registry_binding(manifest)
+    except ManifestError as exc:
+        errors.append(exc)
     return errors
 
 
@@ -552,6 +617,7 @@ __all__ = [
     "MissingRequiredFieldError",
     "NumeraireQualificationDisagreementError",
     "PriorRunOverwriteError",
+    "RegistryBindingError",
     "RelativeOnlyUSDPresentationError",
     "RunIdentity",
     "VALUATION_QUALIFIED",
