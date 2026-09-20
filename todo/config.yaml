@@ -12,7 +12,7 @@
   },
   "active_phase": "P06",
   "active_task": "T067",
-  "workflow_state": "READY",
+  "workflow_state": "AWAITING_REVIEW",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -705,14 +705,14 @@
     },
     "T067": {
       "phase": "P06",
-      "status": "READY",
+      "status": "AWAITING_REVIEW",
       "depends_on": [
         "T060",
         "T061"
       ],
       "task_file": "todo/phases/P06-backtesting-and-strategy/T067.md",
-      "attempt": 0,
-      "base_commit": null,
+      "attempt": 1,
+      "base_commit": "47359928e94670b478e73608db72b6b2c2a6f2d4",
       "candidate_commit": null,
       "approved_commit": null,
       "latest_review": null
