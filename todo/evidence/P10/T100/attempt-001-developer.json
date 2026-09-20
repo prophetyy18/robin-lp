@@ -1,0 +1,37 @@
+{
+  "task_id": "T100",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the research dataset registry and per-dataset numeraire qualification in src/robinhood_lp/research/dataset.py, with the package re-exports in src/robinhood_lp/research/__init__.py and the seeded regression in tests/test_research_dataset_t100.py. The module sits at the storage tier per ARCHITECTURE.md §2.2 (T100 row) and the architecture module overrides in tools/check_imports/layer_map.py; ADR-006 forbids a lower-to-higher import from features, so the minimum numeraire vocabulary (NumeraireLevel, ConfidenceLevel, NumeraireQualification, QualificationBundle, USD_DENOMINATED_FORBIDDEN_FIELDS, assert_no_usd_fields) is re-declared here byte-for-byte compatible with the T053 vocabulary. The registry binds dataset_id + version + content_hash + member pools + each member's block range + partitions + ingestion/schema revision + a per-dataset numeraire provenance; publishing is append-only, refuses duplicate content hashes, refuses below-backtest members via the T027 gate, refuses a self-token numeraire, refuses inverted / exceeded / gapped block ranges, refuses pool lists that are empty / duplicated / not present in the supplied research universe, and reports RELATIVE_ONLY when no qualified USD route exists. The acceptance clause is verified by 53 seeded tests, including the byte-identical-two-runs case for heterogeneous datasets, the coverage-isolation case, the partition-reference (not copy) case, and the assert_no_usd_fields enforcement on RELATIVE_ONLY payloads.",
+  "commands": [
+    {
+      "command": "python -m pytest tests/test_research_dataset_t100.py --no-header",
+      "result": "53 passed in 0.16s"
+    },
+    {
+      "command": "python -m pytest tests/test_import_graph.py --no-header",
+      "result": "18 passed in 1.14s (including test_check_passes_on_real_repository which exercises the new research module's storage-tier classification)"
+    },
+    {
+      "command": "python -m pytest --no-header -q --ignore=tests/test_abi_artifacts.py",
+      "result": "2531 passed, 6 skipped in 27.10s (no regressions; the pre-existing forge-dependent test_abi_artifacts failure is unrelated)"
+    },
+    {
+      "command": "python -m ruff check src/robinhood_lp/research/ tests/test_research_dataset_t100.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python -m ruff format --check src/robinhood_lp/research/ tests/test_research_dataset_t100.py",
+      "result": "All files already formatted"
+    },
+    {
+      "command": "python -m mypy -p robinhood_lp",
+      "result": "Success: no issues found in 127 source files"
+    }
+  ],
+  "residual_risks": [
+    "The T053 ConfidenceLevel enum does not define EXPIRED; the contract's 'stablecoin whose qualification has expired' boundary case is therefore modelled as the combination of LOW confidence plus staleness_seconds exceeding the provenance's recorded budget. This is a documented derivation rather than a separate EXPIRED state. A future amendment that adds EXPIRED to T053 should switch this check to `selected.confidence is ConfidenceLevel.EXPIRED`.",
+    "The T053 numeraire vocabulary is re-declared in this module to honour ADR-006's lower-to-higher import prohibition; the string values match T053 byte-for-byte today. If a future T053 amendment renames a value or adds a new level, the dataset module's mirror must be updated in the same amendment or downstream consumers will see divergent types.",
+    "The in-memory DatasetRegistry never stores rejected snapshots (its `publish` is fail-closed on a refused verdict); the `include_rejected` flag is honoured by the long-lived store (a downstream T101 surface) but is a no-op for the in-memory registry today. The flag is preserved in the DatasetRegistryQuery contract for that downstream surface.",
+    "The contract's observed-at / available-at semantics for the numeraire provenance mirror T053's point-in-time discipline (observed_at <= available_at, confidence in the closed vocabulary, staleness_seconds non-negative). The contract did not require a strict equality / inequality comparison against decision_time; T101's point-in-time feature harness will enforce that on its own inputs."
+  ]
+}
