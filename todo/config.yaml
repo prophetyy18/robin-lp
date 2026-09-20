@@ -656,6 +656,7 @@
         "T062"
       ],
       "task_file": "todo/phases/P06-backtesting-and-strategy/T063.md",
+      "superseded_by": "T105",
       "attempt": 1,
       "base_commit": "4cfbdbbc2fd03aca5ed4100e9c009e690f78500e",
       "candidate_commit": "017a0271fa4c33199fec613c68d13dc89cafac65",
@@ -669,6 +670,7 @@
         "T063"
       ],
       "task_file": "todo/phases/P06-backtesting-and-strategy/T064.md",
+      "superseded_by": "T106",
       "attempt": 1,
       "base_commit": "41bda04ac0a8e4f59863f6e56fc651f88a6fd994",
       "candidate_commit": "137d496cbd8573ca8c281c561d6cf00bcfc37b80",
@@ -697,6 +699,7 @@
         "T065"
       ],
       "task_file": "todo/phases/P06-backtesting-and-strategy/T066.md",
+      "superseded_by": "T107",
       "attempt": 1,
       "base_commit": "2294da1efad702abc1d200fc46024fa1340911fc",
       "candidate_commit": "a254a1978bffa006aca930d8f94602ecbd4e2c96",
@@ -711,6 +714,7 @@
         "T061"
       ],
       "task_file": "todo/phases/P06-backtesting-and-strategy/T067.md",
+      "superseded_by": "T108",
       "attempt": 1,
       "base_commit": "47359928e94670b478e73608db72b6b2c2a6f2d4",
       "candidate_commit": "817bffcb80f61b55cea8a6bdf07fdb01c6dcabde",

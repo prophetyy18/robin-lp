@@ -1,0 +1,11 @@
+{
+  "amendment_id": "A0021",
+  "layer": "SUPERSEDE",
+  "raised": [],
+  "resolves": [
+    "A0013:T063:legacy",
+    "A0013:T064:legacy",
+    "A0013:T066:legacy",
+    "A0013:T067:legacy"
+  ]
+}

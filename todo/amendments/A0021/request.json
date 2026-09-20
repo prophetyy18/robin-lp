@@ -1,0 +1,13 @@
+{
+  "amendment_id": "A0021",
+  "task_ids": [
+    "T063",
+    "T064",
+    "T066",
+    "T067"
+  ],
+  "layer": "SUPERSEDE",
+  "target_status": "APPROVED",
+  "summary": "retire T063, T064, T066 and T067 in favour of T105, T106, T107 and T108",
+  "owner_direction": "Owner direction: retire the four approved P06 contracts that A0014 replaced, now that every ordinary planned consumer points at its successor and ARCHITECTURE section 2.2 already names each successor. Record T063 as superseded by T105, T064 by T106, T066 by T107 and T067 by T108, changing only each target superseded_by field: status, attempt, dependencies, contract text, commit identities, evidence pointers, review records and approval metadata stay byte-identical, so each approval still describes exactly what was reviewed. Each successor already declares replaces, depends on the work it replaces, and carries its Replacement and migration section; from retirement the predecessor is history and no live write or evaluation path may reach it, with the successor the current authority for its surface. Resolve exactly the four open legacy impacts these retirements close and leave every other impact open. Do not edit any contract, document or other config field in this amendment, and run the repository citation, import-graph and acceptance checks before returning to confirm that recording the four retirements leaves them green."
+}
