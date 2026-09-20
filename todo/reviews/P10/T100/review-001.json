@@ -1,0 +1,262 @@
+{
+  "task_id": "T100",
+  "base_commit": "34d877c074be71c3effa08acd4c23cf6d360bbe3",
+  "candidate_commit": "9ffe9166e610986501e0029ccdcc1a2bd15ed736",
+  "verdict": "PASS",
+  "checks": [
+    {
+      "id": "C1-dependencies-approved",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/todo/config.yaml: T026 status APPROVED (commit 374766ed), T034 status APPROVED (commit 9b35f035), T039 status APPROVED, T053 status APPROVED (commit b110c845). All four declared dependencies of T100 are APPROVED with non-null approved_commits."
+      ],
+      "finding": "All declared dependencies of T100 (T026, T034, T039, T053) are APPROVED."
+    },
+    {
+      "id": "C2-layer-assignment",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/docs/spec/architecture/ARCHITECTURE.md §2.2: row 10 'robinhood_lp.research.dataset' = 'storage'.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tools/check_imports/layer_map.py:194: 'robinhood_lp.research.dataset': 'storage'.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py imports only robinhood_lp.protocol.ids, robinhood_lp.protocol.run_mode, robinhood_lp.discovery.research_classification, robinhood_lp.discovery.research_universe. All imports are storage-tier or below (protocol/domain). No imports from execution, signer, config, features, or strategy."
+      ],
+      "finding": "Module placement and import graph match ADR-006 / ARCHITECTURE.md §2.2 storage tier."
+    },
+    {
+      "id": "C3-dataset-registry-deliverables",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:813 DatasetDeclaration (dataset_id, members, numeraire_level, numeraire_provenance, qualification_bundle, rationale, notes, schema_version, hash_algorithm).",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:706 DatasetMember (chain_id, pool_key, block_range, partitions, revision, classification, notes) with classification carrying the T027 level.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:454 DatasetRevision (schema_version, decode_version, manifest_checksum) carried per member.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:608 NumeraireProvenance (level, source, observed_at, available_at, staleness_seconds, confidence, stablecoin_per_usdg_q64_64, notes)."
+      ],
+      "finding": "Registry binds dataset identity, version, content hash, members with per-member block ranges, partitions and revisions, and per-dataset numeraire provenance with point-in-time discipline."
+    },
+    {
+      "id": "C4-immutability-versioning",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:1665-1667: publish hashes declaration and refuses content_hash already present in registry (DatasetAlreadyExistsError).",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:1682-1690: a new declaration under an existing DatasetId increments the version tag (max existing + 1).",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tests/test_research_dataset_t100.py: test_registry_publish_increments_version_for_same_id, test_registry_publish_keeps_prior_version_byte_identical, test_registry_rejects_duplicate_content_hash."
+      ],
+      "finding": "Publishing is additive; a duplicate content_hash is refused; adding a pool or extending a range produces a new version while prior versions remain queryable."
+    },
+    {
+      "id": "C5-byte-identical-across-runs",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:970-982: to_canonical_bytes uses json.dumps with sort_keys=True and separators=(',',':') over a _canonicalise tree that sorts dict keys and converts tuples/lists/frozensets deterministically.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:990-1025: DatasetContentHasher default is sha256-v1 (stdlib hashlib, deterministic across hosts and Python versions).",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py: inserted_at_ns is recorded on the snapshot only, never on the declaration, so the hash keys only on the deterministic fields.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tests/test_research_dataset_t100.py: test_hash_dataset_declaration_is_deterministic, test_hash_excludes_observational_fields, test_two_heterogeneous_datasets_resolve_byte_identically_across_runs (single-pool USDG + multi-pool mixed numeraire across two fresh registries)."
+      ],
+      "finding": "Two heterogeneous datasets (single-pool USDG, multi-pool mixed) produce byte-identical snapshots across fresh registries after excluding the declared observational field inserted_at_ns."
+    },
+    {
+      "id": "C6-relative-only-when-no-qualified-route",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:1069-1153: validate_numeraire_route returns one of the closed reason codes (no_usdg_pair, usdg_pair_qualification_expired, stablecoin_pair_qualification_expired, stale_valuation_source, conflicting_valuation_source) or None.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:1391-1399: build_dataset_acceptance_verdict returns DatasetAcceptanceVerdictCode.RELATIVE_ONLY when validate_numeraire_route returns a reason in RELATIVE_ONLY_REJECTED_REASONS.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tests/test_research_dataset_t100.py: test_validate_numeraire_route_returns_none_for_usdg, test_validate_numeraire_route_rejects_expired_usdg, test_validate_numeraire_route_rejects_expired_stablecoin, test_validate_numeraire_route_rejects_stale_source, test_validate_numeraire_route_rejects_conflicting_source, test_acceptance_verdict_reports_relative_only."
+      ],
+      "finding": "A dataset with no qualified route to USD is reported RELATIVE_ONLY with a named reason code from the closed vocabulary."
+    },
+    {
+      "id": "C7-no-usd-field-on-relative-only",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:292-312: assert_no_usd_fields rejects any key in USD_DENOMINATED_FORBIDDEN_FIELDS or any key ending in _usdg/_usd.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tests/test_research_dataset_t100.py: test_relative_only_dataset_carries_no_usd_field (asserts declaration payload of a RELATIVE_ONLY dataset passes assert_no_usd_fields), test_relative_only_verdict_blocks_usd_payload (asserts the verdict payload passes assert_no_usd_fields)."
+      ],
+      "finding": "No field of a RELATIVE_ONLY dataset payload may carry a USD-denominated value; the assert_no_usd_fields guard is the typed enforcement."
+    },
+    {
+      "id": "C8-below-backtest-rejected",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:334-336: SUPPORT_LEVEL_BACKTEST_OR_ABOVE = {BACKTEST, PAPER, LIVE}.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:1347-1360: build_dataset_acceptance_verdict invokes assert_research_member_backtest_eligible per member and records the named reason (ResearchSupportGateError) and pool id when the classification is below backtest.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tests/test_research_dataset_t100.py: test_acceptance_verdict_rejects_below_backtest (verdict code REJECTED_SUPPORT_LEVEL, pool id recorded), test_registry_rejects_below_backtest_member (registry.publish raises DatasetError on INGESTION-classified member)."
+      ],
+      "finding": "A dataset containing a pool below backtest is rejected with the classifier's named reason; the registry refuses to publish it."
+    },
+    {
+      "id": "C9-coverage-isolation",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:1766-1783: datasets_covering_partition returns every snapshot referencing the partition, keyed by content_hash, no helper conflates them.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tests/test_research_dataset_t100.py: test_two_datasets_covering_same_partitions_remain_isolated (two datasets share partition part-shared; both stored, both queryable, separate content_hashes, no merge helper)."
+      ],
+      "finding": "Two datasets covering the same partitions remain isolated; the registry has no merge or conflation helper."
+    },
+    {
+      "id": "C10-provenance-and-availability",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:608-697: NumeraireProvenance stores level, source, observed_at, available_at, staleness_seconds, confidence, stablecoin_per_usdg_q64_64, notes; observed_at <= available_at is enforced in __post_init__.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:684-697: to_dict serialises every provenance field including source, observed_at, available_at, staleness_seconds, confidence so the provenance survives the canonical hash."
+      ],
+      "finding": "Every dataset records the numeraire's source, observed_at, available_at, staleness_seconds and confidence; the provenance is included in the content hash."
+    },
+    {
+      "id": "C11-boundary-empty-duplicate-unknown-pool",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:849-866: empty members raises EmptyDatasetError; duplicate pool_id raises DatasetError.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:769-775: DatasetMember.classification.chain_id/pool_key must match the member.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:1347-1353: research_universe.get raises UnknownResearchMemberError -> rejected_members pool id is recorded and verdict code is REJECTED_NOT_RESEARCH_MEMBER.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tests/test_research_dataset_t100.py: test_dataset_declaration_rejects_empty_members, test_dataset_declaration_rejects_duplicate_pool_keys, test_declaration_rejects_unknown_pool_key_in_member, test_acceptance_verdict_rejects_pool_not_research_member."
+      ],
+      "finding": "Empty, duplicate and unknown PoolKey inputs are rejected with named reasons."
+    },
+    {
+      "id": "C12-boundary-block-range",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:510-541: RawBlockRange.__post_init__ raises InvertedBlockRangeError when end_block < start_block.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:562-593: DatasetBlockRange.__post_init__ raises InvertedBlockRangeError when requested.start_block < observed_life.start_block, requested.end_block > observed_life.end_block, or the requested range is disjoint from observed_life (spans a gap).",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tests/test_research_dataset_t100.py: test_raw_block_range_rejects_inverted, test_dataset_block_range_rejects_exceeds_observed_life, test_dataset_block_range_rejects_predates_observed_life, test_dataset_block_range_rejects_disjoint, test_acceptance_verdict_rejects_inverted_block_range, test_acceptance_verdict_rejects_block_range_predating_pool, test_acceptance_verdict_rejects_block_range_spanning_gap."
+      ],
+      "finding": "Inverted, predates-life, exceeds-life and disjoint (gap) block ranges are all rejected with InvertedBlockRangeError."
+    },
+    {
+      "id": "C13-boundary-self-token-numeraire",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:341: RELATIVE_ONLY_FORBIDDEN_NUMERAIRE_TOKEN = 'self'.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:1115-1119: validate_numeraire_route returns RELATIVE_ONLY_FORBIDDEN_NUMERAIRE_TOKEN when numeraire_level is RELATIVE_ONLY and provenance.source == 'self'.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:1379-1384: build_dataset_acceptance_verdict converts this into DatasetAcceptanceVerdictCode.REJECTED_SELF_TOKEN_NUMERAIRE.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tests/test_research_dataset_t100.py: test_validate_numeraire_route_rejects_self_token_numeraire, test_acceptance_verdict_rejects_self_token."
+      ],
+      "finding": "A numeraire that is the pool's own token (source = 'self') is rejected with REJECTED_SELF_TOKEN_NUMERAIRE."
+    },
+    {
+      "id": "C14-boundary-stablecoin-expired",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:1128-1135: validate_numeraire_route returns usdg_pair_qualification_expired / stablecoin_pair_qualification_expired when confidence is LOW and selected.staleness_seconds exceeds provenance.staleness_seconds (the documented derivation since T053's enum does not define EXPIRED).",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tests/test_research_dataset_t100.py: test_validate_numeraire_route_rejects_expired_usdg, test_validate_numeraire_route_rejects_expired_stablecoin."
+      ],
+      "finding": "An expired stablecoin / USDG qualification is refused with the named reason code from the closed vocabulary."
+    },
+    {
+      "id": "C15-boundary-stale-conflicting-source",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:1136-1139: validate_numeraire_route returns stale_valuation_source / conflicting_valuation_source for HIGH-confidence-but-over-budget and LOW-confidence combinations.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tests/test_research_dataset_t100.py: test_validate_numeraire_route_rejects_stale_source, test_validate_numeraire_route_rejects_conflicting_source."
+      ],
+      "finding": "Stale and conflicting valuation sources are refused with named reason codes."
+    },
+    {
+      "id": "C16-partitions-reference-not-copy",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:721: DatasetMember.partitions is a tuple[str, ...] of partition IDs (string references, no event payloads).",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tests/test_research_dataset_t100.py: test_dataset_references_partitions_by_id (partition id survives the canonical serialisation; the same partition id appears in two distinct datasets)."
+      ],
+      "finding": "Registry entries reference underlying partitions by ID; the same partition is reusable across datasets."
+    },
+    {
+      "id": "C17-query-surface",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:1733-1796: DatasetRegistry.query(dataset_id, pool_id, numeraire_level, include_rejected), datasets_covering_partition, datasets_covering_pool.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tests/test_research_dataset_t100.py: test_registry_query_by_dataset_id, test_registry_query_by_pool_id, test_registry_query_by_partition, test_registry_query_excludes_rejected_by_default, test_registry_query_includes_rejected_when_requested, test_registry_query_by_numeraire."
+      ],
+      "finding": "The query surface answers what datasets exist, what each covers, which pools / ranges / partitions it contains, and the qualification status (verdict + numeraire_level)."
+    },
+    {
+      "id": "C18-must-not-convert-internal-state",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py: import graph contains only robinhood_lp.protocol.* and robinhood_lp.discovery.* (research_classification, research_universe). The module never imports the conversion graph from robinhood_lp.features.quote. The dataset records the stablecoin_per_usdg_q64_64 ratio as an observation, never as a converted canonical value."
+      ],
+      "finding": "Internal simulation state is not converted into the numeraire inside this module; the storage layer only stores the provenance and the observed ratio."
+    },
+    {
+      "id": "C19-must-not-merge-pools",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:855-867: DatasetDeclaration rejects duplicate pool_ids in a single dataset.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py: Each snapshot is keyed by (dataset_id, version, content_hash). datasets_covering_partition returns separate snapshots; no merge helper exists."
+      ],
+      "finding": "Several pools are never merged into one ledger, position or coverage claim."
+    },
+    {
+      "id": "C20-must-not-acquire-execution-authority",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py imports only robinhood_lp.protocol.* and robinhood_lp.discovery.{research_classification,research_universe}. No imports from robinhood_lp.execution, robinhood_lp.config, robinhood_lp.signing, or robinhood_lp.features (the higher tiers per ADR-006). The Publish path never produces a PoolConfig, never touches the active pool config, and the docs and class docstrings state the registry is disjoint from the active execution pool."
+      ],
+      "finding": "A research dataset does not acquire execution authority, does not appear as an approved pool, and does not feed the active-pool path."
+    },
+    {
+      "id": "C21-must-not-assume-stablecoin-equals-one-dollar",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:185-194: NumeraireQualification.stablecoin_per_usdg_q64_64 is a strictly positive integer when present; None for RELATIVE_ONLY and ETH_DISPLAY_ONLY.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:1145-1151: validate_numeraire_route returns no_usdg_pair when the ratio is None for a USDG / stablecoin numeraire; the framework never assumes 1 USDG = 1 USD."
+      ],
+      "finding": "Stablecoin is never assumed equal to one dollar; the observed ratio is recorded and a missing ratio is a RELATIVE_ONLY boundary case."
+    },
+    {
+      "id": "C22-must-not-present-relative-only-as-usd",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py:292-312 assert_no_usd_fields rejects USD-denominated keys on any payload the dataset module surfaces.",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/tests/test_research_dataset_t100.py: test_relative_only_dataset_carries_no_usd_field, test_relative_only_verdict_blocks_usd_payload."
+      ],
+      "finding": "A RELATIVE_ONLY payload cannot carry a USD-denominated field."
+    },
+    {
+      "id": "C23-must-not-mutate-published-dataset",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/src/robinhood_lp/research/dataset.py: DatasetRegistrySnapshot is frozen slots=True; _snapshots is append-only; re-publishing with the same content_hash raises DatasetAlreadyExistsError; existing versions stay byte-identical (test_registry_publish_keeps_prior_version_byte_identical)."
+      ],
+      "finding": "Published dataset versions are never mutated."
+    },
+    {
+      "id": "C24-test-suite-passes",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_research_dataset_t100.py: 53 passed in 0.16s.",
+        "tests/test_import_graph.py: 18 passed in 0.48s.",
+        "Full suite excluding forge-dependent abi tests: 2531 passed, 6 skipped (3 foundry-skip and 3 oracle/vector-skips, all unrelated to T100).",
+        "ruff check on src/robinhood_lp/research/ + tests/test_research_dataset_t100.py: All checks passed.",
+        "ruff format --check on the same paths: 3 files already formatted.",
+        "mypy -p robinhood_lp: Success: no issues found in 127 source files."
+      ],
+      "finding": "All required verification commands execute and pass on this worktree."
+    },
+    {
+      "id": "C25-workflow-state-transition",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/todo/config.yaml: workflow_state READY -> AWAITING_REVIEW; T100.status READY -> AWAITING_REVIEW; attempt 0 -> 1; base_commit null -> 34d877c074be71c3effa08acd4c23cf6d360bbe3; candidate_commit still null (reviewer's role does not set it).",
+        "/home/lpdev/lp-worktrees/review-t100-attempt-001/todo/evidence/P10/T100/attempt-001-developer.json is recorded."
+      ],
+      "finding": "Workflow state and T100 record transition correctly into AWAITING_REVIEW."
+    },
+    {
+      "id": "C26-diff-scoped-to-T100",
+      "status": "PASS",
+      "evidence": [
+        "git diff 34d877c 9ffe9166 --stat: only src/robinhood_lp/research/__init__.py (new, 121 lines), src/robinhood_lp/research/dataset.py (new, 1864 lines), tests/test_research_dataset_t100.py (new, 1144 lines), todo/config.yaml (8 lines), todo/evidence/P10/T100/attempt-001-developer.json (new, 37 lines). No edits outside the T100 working surface, the workflow files, or the evidence folder."
+      ],
+      "finding": "Candidate commit changes only the T100 working surface, the workflow record and the developer evidence."
+    }
+  ],
+  "must_not_violations": [],
+  "unknowns": [],
+  "required_changes": [],
+  "residual_risks": [
+    "The re-declared USD_DENOMINATED_FORBIDDEN_FIELDS in src/robinhood_lp/research/dataset.py differs from src/robinhood_lp/features/quote.py: T100 omits 'risk_usdg' and 'pnl_usdg', substitutes 'fee_usdg' with 'fees_usdg', and adds 'pnl_usd'. The suffix check ('_usdg' / '_usd') in assert_no_usd_fields still rejects every T053 entry, so RELATIVE_ONLY enforcement is functionally equivalent; the developer's comment claims byte-for-byte identity of the string values, which holds for the enums (NumeraireLevel, ConfidenceLevel) but not for the forbidden-fields list. Future T053 amendments must update this mirror in lockstep, as the developer notes in attempt-001-developer.json.",
+    "The in-memory DatasetRegistry is fail-closed: rejected declarations raise and are never stored, so DatasetRegistryQuery.include_rejected has no observable effect on this implementation. The flag is preserved on the query surface for the T101 long-lived store. A test asserts the no-op behaviour; there is no positive test for include_rejected returning rejected snapshots because no such snapshots exist in this implementation.",
+    "The 'stablecoin_pair_depegged' reason code is declared in RELATIVE_ONLY_REJECTED_REASONS but validate_numeraire_route never returns it (depeg detection lives in the T053 quote layer / DEFAULT_DEPEG_THRESHOLD_Q64_64). The contract's acceptance clause names 'stablecoin whose qualification has expired', not depegging, so this is consistent with the contract; the depeg reason code is reserved vocabulary only."
+  ]
+}
