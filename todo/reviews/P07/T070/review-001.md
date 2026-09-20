@@ -1,0 +1,225 @@
+# T070 independent review
+
+- Base commit: `94589c9981ad68ce9c9041ec33e32dbbee24077b`
+- Candidate commit: `2472aa9af5b913667c9f72214509baccca7a7ca5`
+- Verdict: **FAIL**
+
+## Checks
+
+### centralized_gateway_per_intent — PASS
+
+Single entry point evaluate_risk / evaluate_risk_with_config is the only path; the AUTO_EXIT / NO_NEW_RISK / REJECTED builders do not consult intent_source for relaxation; the 5-minute circuit breaker overrides all intent sources.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1313-1505
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1153-1156 (approved=False for GLOBAL/emergency AUTO_EXIT)
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/tests/test_risk_t070.py:1362-1404 (parametrised intent-source tests)
+- tests/test_risk_t070.py:849-873 (complete-breach AUTO_EXIT)
+- tests/test_risk_t070.py:888-902 (emergency suppresses even REDUCE_ONLY)
+
+### frozen_audit_decision — PASS
+
+RiskDecision / RiskConfig / RiskContext / RiskIntent are frozen dataclasses with deterministic equality and hashing.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:828-936 (RiskDecision, frozen, hashing follows dataclass identity)
+- tests/test_risk_t070.py:497-538 (frozen + hashing tests)
+- tests/test_risk_t070.py:1548-1569 (audit/evidence-pointer tests)
+
+### versioned_configuration — PASS
+
+RiskConfig carries version_id; every RiskDecision records config_version; changing config does not retroactively alter prior decisions.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:415-549 (RiskConfig version_id)
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:977-1009 (decision carries config_version)
+- tests/test_risk_t070.py:1321-1354 (decision_records_config_version, future_config_change_does_not_affect_past_decision, config_pool_mismatch_rejected)
+
+### freshness_and_completeness — PASS
+
+Missing snapshots / candidate / NaN / overflow / future snapshot / stale snapshot all produce reason-coded REJECTED; pure-int market snapshot validator rejects NaN / float / non-positive sqrt_price_x96.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1200-1295 (validate_inputs_present / validate_snapshot_versions / validate_freshness / validate_market_snapshot)
+- tests/test_risk_t070.py:939-990 (TestRequiredInputs)
+- tests/test_risk_t070.py:1057-1109 (TestFreshnessAndNaN)
+
+### eligibility_and_deployment_hash — PASS
+
+Support level rejects REDUCE_ONLY at REJECTED run-mode; deployment_hash_match=False triggers REASON_DEPLOYMENT_HASH_MISMATCH.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1298-1310 (eligibility by RunMode)
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1404-1421 (deployment_hash_match rejection)
+- tests/test_risk_t070.py:998-1049 (TestEligibilityAndDeployment)
+
+### kill_switches_global_and_scoped — PASS
+
+GLOBAL active kill switch produces AUTO_EXIT (approved=False); scoped active kill switch produces NO_NEW_RISK (reduce-only approved, increase-risk rejected).
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1345-1367
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1130-1177 (_auto_exit vs scope)
+- tests/test_risk_t070.py:749-840 (TestKillSwitches)
+
+### five_minute_emergency_circuit_breaker — PASS
+
+is_complete=False returns False even when magnitude trips; complete bar with close-open >= 80% of open (i.e., open-close >= 0.8 * open) returns True; the pipeline routes any such breach to AUTO_EXIT scope=GLOBAL approved=False regardless of intent source or kind.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:587-617 (is_five_minute_emergency_breach)
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1368-1380 (pipeline integration)
+- tests/test_risk_t070.py:683-741 (TestFiveMinuteBreaker)
+- tests/test_risk_t070.py:848-931 (TestEmergencyBreakerIntegration)
+- tests/test_risk_t070.py:1458-1472 (emergency_takes_precedence_over_eligibility)
+
+### usdg_price_qualification — PASS
+
+RELATIVE_ONLY / MISSING / DEPEGGED QuoteBar produce reason-coded REJECTED via USDG_PRICE_RELATIVE_ONLY / USDG_PRICE_MISSING / USDG_PRICE_DEPEGGED.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1642-1676 (_evaluate_usdg_price)
+- tests/test_risk_t070.py:1637-1695 (TestUSDGPriceQualification)
+
+### fixed_range_sizing_pipeline — PASS
+
+Risk layer never alters tick_lower / tick_upper; compute_sizing (T049) is invoked and its NO_TRADE / SizingError results are mapped to REASON_SIZING_NO_TRADE; RANGE_DEGENERATE / TICK_NOT_ALIGNED propagate via sizer reason codes.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1759-1788 (_resolve_sizing)
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1471-1493 (sizer exception path + NO_TRADE path)
+- tests/test_risk_t070.py:1480-1540 (TestIncreaseRisk)
+
+### rebalance_cadence_and_cost — PASS
+
+Interval < min_rebalance_interval_seconds produces REASON_REBALANCE_TOO_SOON; cost-amortisation path guards integer overflow.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1609-1639 (_evaluate_rebalance_cadence)
+- tests/test_risk_t070.py:1184-1201 (TestRebalanceCadence.test_too_soon_rebalance_rejected)
+
+### episode_loss_and_drawdown_warning_no_new_risk_auto_exit — PASS
+
+WARNING / NO_NEW_RISK / AUTO_EXIT escalate from the same threshold ladder; AUTO_EXIT approves REDUCE_ONLY but rejects INCREASE_RISK.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1523-1606 (_evaluate_episode_loss, _evaluate_drawdown)
+- tests/test_risk_t070.py:1117-1176 (TestEpisodeThresholds)
+
+### gas_reserve_never_spent — PASS
+
+GasBudget constructor enforces reserve_wei <= budget_wei and used_wei + expected_wei + reserve_wei <= budget_wei; the risk layer forwards gas_reserve_wei=0 to the sizer so the reserve is preserved outside the LP envelope.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:308-342 (GasBudget invariants)
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1679-1700 (_evaluate_gas_budget)
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1759-1788 (gas_reserve_wei=0 forwarded to compute_sizing)
+- tests/test_risk_t070.py:1209-1241 (TestGasBudget)
+
+### hook_deltas_enforced — PASS
+
+Non-zero hook_delta0 / hook_delta1 with hook_verified=False triggers HOOK_DELTA_UNVERIFIED; evidence older than max_hook_evidence_age_seconds triggers HOOK_EVIDENCE_STALE; both are REJECTED at POOL scope.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1703-1735 (_evaluate_hook_evidence)
+- tests/test_risk_t070.py:1249-1313 (TestHookEvidence)
+
+### deny_by_default_simultaneous_breaches — PASS
+
+Kill-switch precedence over emergency, emergency over eligibility, and earlier checks over later ones are enforced; ordering is documented in the docstring.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1324-1505 (pipeline order: type-check, pool-key mismatch, kill switches, emergency breaker, required inputs, snapshot versions, eligibility, deployment, freshness, market NaN, episode loss, drawdown, cadence, USDG price, gas, hook, REDUCE_ONLY short-circuit, sizing, concentration, approve)
+- tests/test_risk_t070.py:1426-1472 (TestSimultaneousBreaches)
+
+### experimental_thresholds_propagated — PASS
+
+RiskConfig.default marks every threshold EXPERIMENTAL_NOT_LIVE_APPROVED; the tag is propagated onto every RiskDecision.experimental_thresholds; there is no implicit live-default override.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:108-115, 516-549, 939-1009 (EXPERIMENTAL_TAG default + propagation onto every decision)
+- tests/test_risk_t070.py:586-593 (test_default_config_has_experimental_tag)
+
+### no_float_protocol_path — PASS
+
+All numeric fields are validated as Python int (bool rejected); the market snapshot validator explicitly rejects float carrying NaN by structural int check; ADR-004 no-float discipline is preserved.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:214-250 (int-typing helpers)
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1272-1295 (market snapshot int / non-NaN validator)
+- tests/test_risk_t070.py:1102-1109
+
+### layer_purity_no_forbidden_imports — PASS
+
+The risk module imports only robinhood_lp.features.quote, robinhood_lp.protocol.*, robinhood_lp.strategy.base; the test scans all source files for forbidden modules (rpc, storage, execution, web, ingestion, presentation, etc.) and passes.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:85-104 (only protocol / features / strategy imports)
+- tests/test_risk_t070.py:411-489 (TestLayerPurity AST-based scan)
+
+### tests_lint_mypy_pass — PASS
+
+Full T070 test suite, combined workflow+T070 suite, and the rest of the project tests all pass; ruff check, ruff format check, and mypy all clean.
+
+Evidence:
+
+- tests/test_risk_t070.py: 91 passed in 0.25s
+- tests/test_workflow.py + tests/test_risk_t070.py: 145 passed in 4.14s
+- tests/ (excluding workflow / risk / abi_artifacts): 2329 passed, 6 skipped (all skips are foundry/PATH or gpg-provenance skips unrelated to T070)
+- ruff check src/robinhood_lp/risk/ tests/test_risk_t070.py: All checks passed
+- ruff format --check: 3 files already formatted
+- mypy src/robinhood_lp/risk/: Success: no issues found in 2 source files
+
+### capital_and_token_concentration_enforced — FAIL
+
+T070 explicitly lists 'capital/token concentration' as a deliverable, and RiskConfig carries max_single_currency_concentration_q64_64 with a default (80%), but _evaluate_concentration unconditionally returns None. The function body reads 'if sizing.worst_case_amount0 == 0 and sizing.worst_case_amount1 == 0: return None; if config.max_single_currency_concentration_q64_64 <= 0: return None; return None' — there is no USDG conversion of worst_case_amount0 / worst_case_amount1 and no comparison against the cap, contradicting the function docstring (which promises NO_NEW_RISK at TOKEN scope). No test exercises a breach path, so 91 passing tests give a false PASS.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1738-1756 (_evaluate_concentration body)
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1494-1496 (the no-op return value is ignored)
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:438, 464-467, 539 (RiskConfig.max_single_currency_concentration_q64_64 is wired through but never enforced)
+
+### rebalance_cost_amortisation_substantive — UNKNOWN
+
+The rebalance cost branch in _evaluate_rebalance_cadence is a partial stub: it only checks for integer-overflow on expected_cost * min_rebalance_interval_seconds, with no comparison against the candidate's expected benefit. The T070 deliverable phrase 'rebalance cadence/cost' implies the cost amortisation is substantive, but the implementation provides only the overflow guard. Marking UNKNOWN rather than FAIL because the contract acceptance list does not explicitly require a REBALANCE_COST_INEFFICIENT test and the overflow guard is at least fail-closed, but the deliverable language is not fully satisfied.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t070-attempt-001/src/robinhood_lp/risk/checks.py:1627-1638 (only verifies that the amortised product is non-overflow)
+- tests/test_risk_t070.py:1184-1201 (only cadence-too-soon path is exercised; no REBALANCE_COST_INEFFICIENT test)
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- rebalance cost amortisation is structurally guarded for overflow only — it does not compare expected benefit vs cost over the cadence interval; T070 acceptance list does not require this and no test exercises the path, so the substantive check remains unverified.
+
+## Required changes
+
+- Implement _evaluate_concentration so that the per-side USDG-denominated position (derived from sizing.worst_case_amount0 / worst_case_amount1 via the same conversion the sizer used) is compared against config.max_single_currency_concentration_q64_64, returning RiskVerdict.NO_NEW_RISK at RiskScope.TOKEN when either side exceeds the cap. The current implementation is a no-op stub and violates the 'capital/token concentration' deliverable.
+- Add a test that exercises a per-token concentration breach (worst_case_amount0 > max_single_currency_concentration_q64_64 * total) and asserts RiskVerdict.NO_NEW_RISK at RiskScope.TOKEN; add a sibling test that confirms NO breach when the cap is satisfied.
+- Either implement a substantive cost-amortisation check in _evaluate_rebalance_cadence (compare candidate expected benefit in USDG against expected_rebalance_cost_usdg_q64_64 * min_rebalance_interval_seconds) or restrict the T070 contract deliverable wording so 'rebalance cadence/cost' is unambiguously the cadence + overflow guard.
+
+## Residual risks
+
+- The risk layer forwards hook_delta0=0, hook_delta1=0, hook_verified=False to compute_sizing; the risk-layer hook evidence check has already run, so this is consistent, but T049's hook enforcement runs with zeros. If a future T049 contract change makes the sizer consult hook fields, the risk layer would silently bypass that check.
