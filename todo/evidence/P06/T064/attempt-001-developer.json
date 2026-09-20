@@ -1,0 +1,42 @@
+{
+  "task_id": "T064",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the T064 robustness and anti-overfitting analysis. Added a new `robinhood_lp.robustness` package (8 modules, ~4000 lines) plus 1474-line test suite covering every T064 acceptance clause: anchored/rolling walk-forward splits (`WalkForwardSplit`), untouched time holdout (`TimeHoldoutSplit`), pool holdout as primary generalisation (`PoolHoldoutSplit` + per-held-out-pool results in the report), single purge/embargo gap derived from a `LabelHorizon` (hand-chosen lengths rejected at construction), machine-recorded point-in-time `SplitBoundary` records with deterministic IDs, a scenario catalogue covering the six T064 stress/failure categories with halt-or-degrade outcomes declared before the run (DS-035), a degradation policy that rejects undefined behaviour and forced trades (DS-041), parameter surfaces with deterministic cross-product enumeration, pool/regime segmentation that refuses post-hoc drops, and a multiple-comparison disclosure that reports sensitivity spread beside the best metric. The `RobustnessReport` separates train/validation/test as disjoint segment-label sets and refuses to publish without non-empty pool-holdout results. The `RobustnessRunner` reads the catalogue before any data is touched and assembles the report via injected fold/pool evaluators. 82 pytest tests pass; ruff format/check clean; strict mypy clean on the 9 new/changed files.",
+  "commands": [
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_robustness_t064.py -q",
+      "result": "82 passed in 0.15s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/robustness/ tests/test_robustness_t064.py",
+      "result": "9 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/robustness/ tests/test_robustness_t064.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/robinhood_lp/robustness/ tests/test_robustness_t064.py --strict",
+      "result": "Success: no issues found in 9 source files"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_import_graph.py tests/test_layer_direction_t007.py tests/test_reports_t063.py tests/test_strategy_t062.py tests/test_backtest_t061.py -q",
+      "result": "246 passed in 0.89s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ --ignore=tests/test_oracle_drift.py --ignore=tests/test_oracle_review_provenance.py --ignore=tests/test_protocol_ids.py -q --tb=line",
+      "result": "2132 passed, 2 pre-existing failures unrelated to T064: (1) test_abi_artifacts.py requires the Foundry/Solidity submodule tools/oracle/lib/ which is not initialized in this worktree; (2) test_documentation_citations.py has two pre-existing doc references to non-existent modules (storage.schema in DOCUMENTATION_INTEGRITY_AUDIT.md:242 and robinhood_lp.backtest.manifest in ARCHITECTURE.md:119). Both files were untouched by T064; the failures were present at the base commit 41bda04."
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -c \"from robinhood_lp.robustness import LabelHorizon, WalkForwardSplit, TimeHoldoutSplit, PoolHoldoutSplit, ScenarioCatalogue, DegradationPolicy, ParameterSurface, RegimeSegmentation, SensitivitySummary, MultipleComparisonDisclosure, RobustnessReport, RobustnessRunner, PRIMARY_GENERALISATION_AXIS; print('PRIMARY_GENERALISATION_AXIS =', PRIMARY_GENERALISATION_AXIS)\"",
+      "result": "All robustness symbols importable; PRIMARY_GENERALISATION_AXIS = POOL_HOLDOUT"
+    }
+  ],
+  "residual_risks": [
+    "The robustness package is a self-contained analytical layer; it does not invoke the backtest engine or the strategy baselines itself. Integration with the research harness (T101) is out of scope here; a follow-up task will wire RobustnessRunner.run() to per-fold and per-pool engine invocations.",
+    "Two pre-existing test failures (test_abi_artifacts.py and test_documentation_citations.py) were observed in the full suite. They are unrelated to T064 and were present at base commit 41bda04; they should be addressed by their owning tasks.",
+    "The pool-holdout boundary records use the held-out pool's first block (block_range_start) as the anchor. Future revisions may want to also record the training pools' boundaries explicitly; the current shape leaves train-pool edges implicit via the fold_role=boundary record.",
+    "The default scenario catalogue (default_stress_scenario_catalogue) uses fixed severities (gas x10, latency +600, slippage +200bps, fee x0.5). These are reasonable first-cut defaults; a future task may want to drive them from a configurable profile per the run's actual cost / latency evidence.",
+    "The sensitivity summary currently reports the range (best - worst) as the spread. The acceptance clause allows range or stddev; stddev would be a larger refactor and is left for a future task."
+  ]
+}
