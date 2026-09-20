@@ -11,8 +11,11 @@ every intent, risk decision, simulation, signature, transaction, receipt, balanc
 reconciles; T096 maps every V1 goal to final evidence.
 
 **Phase prohibitions:** no key/password in Web/config/env/CLI args/logs/database; no arbitrary
-signing or call target; no mainnet broadcast before T094; no external asset transfer; no reuse
-of testnet economics as profitability evidence; no automatic expansion after canary success.
+signing or call target; no CLI path that raises a permission or an exposure limit, creates a new
+LP position or increases liquidity, bypasses the risk gateway or pre-execution, or writes a
+version the Web write path did not authorize; no mainnet broadcast before T094; no external
+asset transfer; no reuse of testnet economics as profitability evidence; no automatic expansion
+after canary success.
 
 ## Tasks
 
@@ -23,3 +26,4 @@ of testnet economics as profitability evidence; no automatic expansion after can
 - [T094 — Record explicit scoped mainnet promotion](T094.md)
 - [T095 — Execute and reconcile a capped mainnet canary lifecycle](T095.md)
 - [T096 — Produce final V1 acceptance and traceability dossier](T096.md)
+- [T097 — Add the read-only query and reduce-only CLI commands](T097.md)

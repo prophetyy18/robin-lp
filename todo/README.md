@@ -43,6 +43,9 @@ The current product is delivered only when all of these statements are true:
   tokens/decimals/fees/tick spacing/hooks; one must use native currency or a
   nonzero hook);
 - a saved experiment manifest reproduces the same decisions, ledger, and metrics;
+- a user can choose a registered strategy, its schema-constrained parameters and a data
+  range, trigger a reproducible backtest run, follow or cancel it, and read its result —
+  including its coverage gaps and its unexplained PnL residual — in the console;
 - preliminary paper mode restarts without gaps, duplicated decisions, or balance drift;
 - the Web console supports discovery, evidence review, pool selection, strategy comparison,
   paper operation, approvals, audit and emergency control without exposing secrets;
@@ -315,6 +318,11 @@ Do not guess these in an earlier task:
   values other than the confirmed 5-minute rules remain explicit experimental fixtures or
   provisional versions and do not become live defaults.
 - T082 proposes and measures preliminary-paper SLOs without granting live qualification.
+- T073 delivers the pre-paper authorization entry, and the Owner completes pool selection,
+  the two tokens' `HOLD`/`LP` approvals and the preliminary-paper authorization through it
+  before T071 or T072 operates paper. No CLI, background process or later console task
+  performs those three journeys in the Owner's place; T085 extends the same versioned write
+  path rather than creating a second one.
 - T084/T085 select the local Web authentication/session implementation while preserving
   `WEB_CONSOLE.md` behavior and security requirements.
 - T093 uses post-testnet paper/shadow evidence to finalize all deferred economic, loss,

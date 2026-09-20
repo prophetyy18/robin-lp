@@ -149,6 +149,12 @@ application / backtest orchestration
 | 3 | T037 | `robinhood_lp.storage.reconciliation` | storage |
 | 3 | T038 (retired; superseded by T039) | `robinhood_lp.qualification.{second_pool,two_pool,two_pool_window,two_pool_failure_paths,two_pool_runbook}` | presentation / reports |
 | 5 | T049 | `robinhood_lp.protocol.sizing` | protocol/domain |
+| 6 | T068 | `robinhood_lp.strategy.registry` (registered strategy identities, parameter schemas and code provenance) | strategy |
+| 6 | T069 | `robinhood_lp.application.backtest_runs` (product-level run entry point over stored data, replay, features, the engine and the manifest) | application / orchestration |
+| 7 | T073 | `robinhood_lp.web.prepaper` (the bounded pre-paper authorization entry: active PoolKey, `HOLD`/`LP` approvals, preliminary-paper authorization) | presentation / controls |
+| 8 | T087 | `robinhood_lp.web.runs` (strategy registry and backtest run surfaces: list, trigger, monitor, cancel) | presentation / controls |
+| 8 | T088 | `robinhood_lp.web.backtest_result` (the backtest result page and its layered result view) | presentation / controls |
+| 9 | T097 | `robinhood_lp.application.reduce_only`, `robinhood_lp.__main__` (read-only query commands and the reduce-only write commands) | application / orchestration |
 
 A row whose task is `APPROVED` names the module, module set or artifact that task
 delivered, and every path it names exists in this repository. A row whose task is
@@ -223,5 +229,5 @@ while formal live evidence requires post-testnet paper/shadow.
   evidence arrives);
 - qualified USDG quote source and availability-time semantics (T053);
 - quantitative paper-mode SLOs and soak duration (T082);
-- local Web authentication/session implementation (T084, T085);
+- local Web authentication/session implementation (T073, T084, T085);
 - final economic/risk thresholds, selected from post-testnet paper/shadow evidence in T093.

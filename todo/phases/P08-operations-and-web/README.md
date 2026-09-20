@@ -21,3 +21,5 @@ control endpoints, mutable audit history, or untested restore procedure.
 - [T084 — Build the authenticated read-model Web console](T084.md)
 - [T085 — Implement versioned Web approval and safety controls](T085.md)
 - [T086 — Validate complete owner journeys and Web security](T086.md)
+- [T087 — Build the strategy registry and backtest run page](T087.md)
+- [T088 — Build the backtest result page](T088.md)
