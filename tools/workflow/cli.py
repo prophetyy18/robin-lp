@@ -81,6 +81,14 @@ def _parser() -> argparse.ArgumentParser:
     ):
         command = subparsers.add_parser(name, help=help_text)
         command.add_argument("amendment_id")
+    # The Owner's exit for a change that will not land: the lane stays open, the
+    # record stays as a closed entry, and nothing from the candidate is applied.
+    withdraw = subparsers.add_parser(
+        "withdraw-amendment",
+        help="close an Owner amendment that will not land, keeping its record",
+    )
+    withdraw.add_argument("amendment_id")
+    withdraw.add_argument("--reason", required=True)
     maintenance = subparsers.add_parser(
         "prepare-maintenance",
         help="prepare a bounded low-risk repair outside the product task graph",
@@ -172,6 +180,8 @@ def main(argv: list[str] | None = None) -> None:
             output = {"status": state, "report": str(report)}
         elif args.command == "prepare-amendment-retry":
             output = manager.prepare_amendment_retry(args.amendment_id)
+        elif args.command == "withdraw-amendment":
+            output = manager.withdraw_amendment(args.amendment_id, reason=args.reason)
         elif args.command == "amendment-status":
             output = manager.amendment_status(args.amendment_id)
         elif args.command == "prepare-maintenance":

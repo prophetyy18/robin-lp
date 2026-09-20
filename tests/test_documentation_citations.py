@@ -82,6 +82,8 @@ def _make_repo(
 
 def _config_yaml(
     tasks: Iterable[tuple[str, str, str] | tuple[str, str, str, str | None]],
+    *,
+    replaces: dict[str, list[str]] | None = None,
 ) -> str:
     out: dict[str, dict[str, object]] = {}
     for entry in tasks:
@@ -90,11 +92,14 @@ def _config_yaml(
             superseded_by: str | None = None
         else:
             task_id, phase, status, superseded_by = entry
-        out[task_id] = {
+        record: dict[str, object] = {
             "phase": phase,
             "status": status,
             "superseded_by": superseded_by,
         }
+        if replaces and task_id in replaces:
+            record["replaces"] = list(replaces[task_id])
+        out[task_id] = record
     return json.dumps({"schema_version": 1, "tasks": out}) + "\n"
 
 
@@ -344,6 +349,116 @@ def test_unparsable_architecture_section22_fails_closed() -> None:
         findings = run(root)
         rules = {finding.rule for finding in findings}
         assert "architecture-section22" in rules, format_findings(findings, root)
+
+
+def test_a_replaced_task_must_name_its_successor_before_retirement() -> None:
+    """Creating the successor obliges the ownership row to name it.
+
+    The obligation cannot wait for the retirement: a SUPERSEDE change may touch
+    nothing but ``superseded_by``, so a table that only learned the successor's
+    name at retirement would force that layer to edit a document it may not
+    write. Firing at creation time is what keeps the two rules satisfiable.
+    """
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        _make_repo(root)
+        arch = root / "docs" / "spec" / "architecture" / "ARCHITECTURE.md"
+        arch.parent.mkdir(parents=True, exist_ok=True)
+        (root / "todo" / "config.yaml").write_text(
+            _config_yaml(
+                [
+                    ("T001", "P00", "APPROVED"),
+                    ("T063", "P06", "APPROVED"),
+                    ("T105", "P06", "PLANNED"),
+                ],
+                replaces={"T105": ["T063"]},
+            ),
+            encoding="utf-8",
+        )
+
+        def section22_findings(task_cell: str) -> list[Finding]:
+            arch.write_text(
+                textwrap.dedent(
+                    f"""\
+                    # Architecture
+
+                    ### 2.2
+
+                    | Phase | Task | Module | Layer |
+                    | --- | --- | --- | --- |
+                    | 6 | {task_cell} | none | backtest |
+                    """
+                ),
+                encoding="utf-8",
+            )
+            return [finding for finding in run(root) if finding.rule == "architecture-section22"]
+
+        unnamed = section22_findings("T063")
+        assert unnamed, "a replaced task whose row omits its successor must be flagged"
+
+        named = section22_findings("T063 (superseded by T105)")
+        assert named == [], format_findings(named, root)
+
+
+def test_a_relationship_parenthetical_is_not_a_reference() -> None:
+    """``T105 (successor to T063)`` annotates the row; it does not reference T063.
+
+    Reading it as a reference made the successor's own row carry the
+    predecessor's obligation, which no wording can satisfy: the phrase the rule
+    asks for names the successor, and the row already is the successor's.
+    """
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        _make_repo(root)
+        arch = root / "docs" / "spec" / "architecture" / "ARCHITECTURE.md"
+        arch.parent.mkdir(parents=True, exist_ok=True)
+        (root / "todo" / "config.yaml").write_text(
+            _config_yaml(
+                [
+                    ("T001", "P00", "APPROVED"),
+                    ("T063", "P06", "APPROVED"),
+                    ("T105", "P06", "PLANNED"),
+                ],
+                replaces={"T105": ["T063"]},
+            ),
+            encoding="utf-8",
+        )
+
+        def section22_findings(rows: str) -> list[Finding]:
+            arch.write_text(
+                textwrap.dedent(
+                    f"""\
+                    # Architecture
+
+                    ### 2.2
+
+                    | Phase | Task | Module | Layer |
+                    | --- | --- | --- | --- |
+                    {rows}
+                    """
+                ),
+                encoding="utf-8",
+            )
+            return [finding for finding in run(root) if finding.rule == "architecture-section22"]
+
+        annotated = section22_findings(
+            "| 6 | T063 (superseded by T105) | none | backtest |\n"
+            "| 6 | T105 (successor to T063) | none | backtest |"
+        )
+        assert annotated == [], format_findings(annotated, root)
+
+        # The masking is narrow: a cell that really does cover two tasks still
+        # expands to both, so the obligation is not silently dropped.
+        genuine_pair = section22_findings("| 6 | T063, T105 | none | backtest |")
+        assert [finding.token for finding in genuine_pair] == ["T063"], format_findings(
+            genuine_pair, root
+        )
 
 
 def test_empty_scan_fails_closed() -> None:

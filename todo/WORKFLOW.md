@@ -125,8 +125,31 @@ approval metadata. A PASS fast-forwards the reviewed amendment into the clean
 invoking checkout without changing any target's status. FAIL retains the amendment
 worktree and uses `prepare-amendment-retry <id>` on the same layer; resolved
 BLOCKED amendments use the same retry gate. One amendment may target at most eight
-tasks. Only one amendment may be active, and none may start while a product task
+tasks. Only one amendment may be *active*, and none may start while a product task
 is unfinished.
+
+A closed amendment keeps its record and its number. A change that will not land is
+closed with
+
+```bash
+python -m tools.workflow withdraw-amendment A0014 \
+  --reason "<why it will not land>"
+```
+
+which records the reason in `todo/amendments/<id>/` on the amendment's branch,
+applies nothing, and leaves the record as a terminal entry: the lane is free for
+the next change, and the ID is never handed out twice, so a re-issued change cannot
+collide with a branch or worktree path the closed one still owns. Deleting a record
+by hand is not the way to reopen the lane — it rewinds the ID counter onto names
+that are still in use.
+
+`finish-amendment` also runs the repository's deterministic gates — the citation,
+acceptance-criteria and import-graph checks — and refuses a candidate that *adds* a
+finding to any of them. The comparison is a delta against the attempt's base, never
+"no findings at all": an already-red repository must stay amendable, or the gate
+would be a dead end of its own. This is where a mechanical failure is caught, at the
+moment the candidate is sealed; the independent review stays the place where
+judgement is exercised, and it still re-runs every gate.
 
 #### Retiring approved work
 
@@ -153,6 +176,36 @@ downstream dependencies and verification. Every other `PLANNED` direct consumer
 must be re-pointed before retirement; `finish-amendment` rejects a retirement that
 would strand one, and `ready` refuses any task whose dependency closure contains an
 open impact. The reason for retirement lives in `todo/amendments/<id>/`.
+
+Because that layer may change nothing else, the ownership table has to name the
+successor *before* the retirement is recorded. The obligation therefore attaches
+where it can be met: creating a task that declares `replaces` obliges the same
+change to name it on the replaced task's row in `ARCHITECTURE.md` §2.2, in the form
+the citation resolver reads (`superseded by Txxx`). A successor created without that
+annotation cannot be sealed — the citation check reports it — so a retirement never
+has to edit a document its own layer may not write. Reading the row's relationship
+parenthetical (`T105 (successor to T063)`) as a reference is *not* required and is
+not done: the requirement lands on the row of the task being replaced, once.
+
+#### Two rules for changing these rules
+
+The workflow is enforced by `tools/`, which no role and no layer may edit — so a
+rule change is an explicit bootstrap act, made by the Owner's direction rather than
+by any agent's convenience. Two obligations apply to such a change:
+
+- **Name the layer that must satisfy a new rule, and prove that it can.** A rule
+  that requires work of a layer with no authority over what it requires is
+  unsatisfiable, and two such rules can deadlock a change between them: the rule
+  that a retirement name its successor in §2.2 and the rule that a retirement touch
+  only `todo/config.yaml` once blocked each other exactly so. When no layer can
+  satisfy a rule where it is written, it belongs as a check in the layer that *can*
+  do the work, not as an obligation on a layer that cannot.
+- **Keep derived state and evidence distinct.** Ownership maps, traceability tables
+  and phase summaries are derived: they must agree with `todo/config.yaml` and the
+  task contracts, and they may move when that authority moves. Approval evidence —
+  contract text, `status`, `attempt`, commit identities, evidence pointers, review
+  records — is immutable, and no rule may require it to move. A rule that makes a
+  derived document follow an evidence field, or the reverse, has confused the two.
 
 #### The PROPHET layer: goals, plan structure and collateral
 

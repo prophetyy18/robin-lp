@@ -411,10 +411,16 @@ def resolve_architecture_section22(
 
     Each row of the table binds a task to one or more module artefacts. The
     task must exist in ``config.yaml``. When the task is APPROVED, every
-    module token in the row must resolve. When the task has been retired
-    via ``superseded_by``, the row must name the successor in parentheses;
-    the module tokens must then resolve against the *successor's* phase.
-    PLANNED rows are recorded as planned and the module may be absent.
+    module token in the row must resolve. When the task is replaced -- either
+    because its retirement is recorded via ``superseded_by`` or because a task
+    declaring ``replaces`` for it already exists -- the row must name that
+    successor; the module tokens must then resolve against the *successor's*
+    phase. PLANNED rows are recorded as planned and the module may be absent.
+
+    The requirement attaches to the successor's *creation*, not only to the
+    retirement, because the SUPERSEDE layer may change nothing but
+    ``superseded_by``. A table that could only learn the successor's name from
+    the retirement would force that layer to edit a document it may not write.
     """
 
     path_for_finding = path_for_finding or (lambda p: p.name)
@@ -432,6 +438,11 @@ def resolve_architecture_section22(
 
     text = architecture_path.read_text(encoding="utf-8")
     tasks = _config_tasks(config_path)
+    #: predecessor -> the successor task that declares ``replaces`` for it.
+    replaced_by: dict[str, str] = {}
+    for successor_id, successor_record in tasks.items():
+        for predecessor in cast("list[str]", successor_record.get("replaces") or []):
+            replaced_by.setdefault(predecessor, successor_id)
     findings: list[Finding] = []
     in_section = False
     for line_number, raw_line in enumerate(text.splitlines(), start=1):
@@ -466,10 +477,14 @@ def resolve_architecture_section22(
                 continue
             status = record.get("status")
             superseded_by = record.get("superseded_by")
-            successor_named = bool(superseded_by) and (
-                f"superseded by {superseded_by}" in task_cell
-            )
-            if superseded_by and not successor_named:
+            successor = superseded_by or replaced_by.get(task_id)
+            successor_named = bool(successor) and f"superseded by {successor}" in task_cell
+            if successor and not successor_named:
+                described = (
+                    f"superseded task {task_id!r}"
+                    if superseded_by
+                    else f"task {task_id!r}, which a successor task replaces,"
+                )
                 findings.append(
                     Finding(
                         rule="architecture-section22",
@@ -477,8 +492,8 @@ def resolve_architecture_section22(
                         line=line_number,
                         token=task_id,
                         message=(
-                            f"§2.2 row references superseded task {task_id!r} "
-                            f"without naming its successor {superseded_by!r}"
+                            f"§2.2 row references {described} "
+                            f"without naming its successor {successor!r}"
                         ),
                     )
                 )
@@ -503,12 +518,28 @@ def resolve_architecture_section22(
     return findings
 
 
-def _expand_task_range(cell: str) -> list[str]:
-    """Expand ``T084-T086`` or ``T093-T094`` style ranges into single IDs."""
+#: A parenthetical that states how a row's task relates to another task. It is an
+#: annotation, not a reference: the row is about the task it leads with, so a token
+#: inside is not expanded as one this row also covers. Without this, the successor
+#: row ``T105 (successor to T063)`` would be read as also referencing T063, and
+#: would be asked to carry T063's successor phrase on T105's own row.
+_RELATIONSHIP_PARENTHETICAL = re.compile(
+    r"\((?:successor to|supersedes|superseded by|replaces|replacing)[^)]*\)",
+    re.IGNORECASE,
+)
 
-    match = re.search(r"(T[0-9]{3})\s*[–-]\s*(T[0-9]{3})", cell)
+
+def _expand_task_range(cell: str) -> list[str]:
+    """Expand ``T084-T086`` or ``T093-T094`` style ranges into single IDs.
+
+    Relationship parentheticals are masked first, so they neither contribute a
+    token nor turn a bare id into a range.
+    """
+
+    masked = _RELATIONSHIP_PARENTHETICAL.sub(" ", cell)
+    match = re.search(r"(T[0-9]{3})\s*[–-]\s*(T[0-9]{3})", masked)
     if not match:
-        return [token for token in re.findall(r"T[0-9]{3}", cell)]
+        return [token for token in re.findall(r"T[0-9]{3}", masked)]
     start = int(match.group(1)[1:])
     end = int(match.group(2)[1:])
     return [f"T{index:03d}" for index in range(start, end + 1)]

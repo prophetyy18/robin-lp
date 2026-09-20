@@ -363,10 +363,13 @@ def test_owner_amendment_updates_planned_contract_without_activating_task(tmp_pa
     assert config["tasks"]["T001"]["status"] == "PLANNED"
     assert config["tasks"]["T001"]["attempt"] == 0
     assert config["active_task"] == "T000"
-    assert manager.amendment_status("A0001") == {
-        "amendment_id": "A0001",
-        "status": "APPROVED",
-    }
+    # A closed change keeps its record: the ID stays consumed, so the next
+    # amendment cannot be handed a number whose branch and worktree path this
+    # one still used. The status therefore reports the closed record rather than
+    # the two-field shape a deleted record used to be reconstructed into.
+    closed = manager.amendment_status("A0001")
+    assert closed["amendment_id"] == "A0001"
+    assert closed["status"] == "APPROVED"
 
 
 def test_supersede_amendment_retires_an_approved_task(tmp_path: Path) -> None:
@@ -676,6 +679,129 @@ def test_owner_amendment_review_failure_starts_fresh_planner_retry(tmp_path: Pat
     assert retry["attempt"] == 2
     assert retry["worktree"] == prepared["worktree"]
     assert manager.amendment_status("A0001")["status"] == "PLANNING"
+
+
+def test_finish_amendment_refuses_a_candidate_that_adds_a_gate_finding(
+    tmp_path: Path,
+) -> None:
+    """A candidate that adds a finding to a repository gate is refused at seal time.
+
+    The comparison is a delta against the attempt's base, never "no findings at
+    all": an already-red repository must stay amendable. What it refuses is
+    sealing a candidate that *adds* a finding the independent review would
+    otherwise have to discover by hand.
+    """
+
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    # The citation gate reads its suppressions file from the repository and stops
+    # before scanning documents when ``src/robinhood_lp`` is absent, so the
+    # fixture has to provide both before the gate can be evaluated at all.
+    ci = repo / "docs" / "implement" / "ci"
+    ci.mkdir(parents=True, exist_ok=True)
+    (ci / "suppressions.toml").write_text("suppressions = []\n", encoding="utf-8")
+    package = repo / "src" / "robinhood_lp"
+    package.mkdir(parents=True, exist_ok=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "add the files the citation gate reads")
+    _make_future_task_planned(repo, manager)
+    prepared = manager.prepare_amendment(
+        task_ids=["T001"],
+        layer="CONTRACT",
+        summary="a change whose candidate breaks the citation gate",
+        owner_direction="Record exactly this change and nothing else.",
+    )
+    amendment = Path(str(prepared["worktree"]))
+    # The contract file is inside the amendment's own path scope and inside the
+    # citation checker's document set, so citing an undeclared task there is a
+    # finding the seal-time gate must catch.
+    contract = amendment / "todo" / "phases" / "P00" / "T001.md"
+    contract.write_text(
+        contract.read_text(encoding="utf-8") + "\nSee `T999` for the follow-up.\n",
+        encoding="utf-8",
+    )
+    _write_json(
+        amendment / ".workflow" / "amendment-result.json",
+        {
+            "amendment_id": "A0001",
+            "outcome": "AMENDMENT_READY",
+            "summary": "candidate that breaks a deterministic gate",
+            "rationale": "seeded regression for the seal-time gate",
+            "unresolved_questions": [],
+            "impact_assessment": _impact_assessment(),
+            "affected_existing_tasks": [],
+            "resolved_task_impacts": [],
+        },
+    )
+
+    with pytest.raises(WorkflowError) as error:
+        manager.finish_amendment("A0001")
+
+    assert "check_citations" in str(error.value)
+    assert "T999" in str(error.value)
+
+
+def test_withdrawing_a_stuck_amendment_frees_the_lane_without_rewinding_ids(
+    tmp_path: Path,
+) -> None:
+    """A change that cannot land must be closeable without deleting its record.
+
+    The reported defect: only a PASS cleared the record, so an amendment whose
+    own layer could not repair it blocked every later amendment -- and clearing
+    the record by hand rewound the ID counter onto a branch and worktree path
+    the failed attempt still occupied.
+    """
+
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    prepared = manager.prepare_amendment(
+        task_ids=["T001"],
+        layer="CONTRACT",
+        summary="a change that will not land",
+        owner_direction="An Owner direction this layer cannot satisfy.",
+    )
+    amendment = Path(str(prepared["worktree"]))
+
+    closed = manager.withdraw_amendment(
+        "A0001", reason="the recorded direction cannot be satisfied in this layer"
+    )
+
+    assert closed["status"] == "ABANDONED"
+    withdrawal = amendment / "todo" / "amendments" / "A0001" / "withdrawal.md"
+    assert withdrawal.is_file()
+    assert "cannot be satisfied in this layer" in withdrawal.read_text(encoding="utf-8")
+    assert manager.amendment_status("A0001")["status"] == "ABANDONED"
+
+    # The lane is free again, and the closed ID stays consumed: A0001 still owns
+    # its branch and worktree path, so the re-issued change must take a new one.
+    reopened = manager.prepare_amendment(
+        task_ids=["T001"],
+        layer="CONTRACT",
+        summary="the change, re-issued after the withdrawal",
+        owner_direction="An Owner direction this layer can satisfy.",
+    )
+    assert reopened["amendment_id"] == "A0002"
+
+
+def test_withdraw_requires_a_reason_and_refuses_a_closed_amendment(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    manager.prepare_amendment(
+        task_ids=["T001"],
+        layer="CONTRACT",
+        summary="a change that will not land",
+        owner_direction="An Owner direction this layer cannot satisfy.",
+    )
+
+    with pytest.raises(WorkflowError):
+        manager.withdraw_amendment("A0001", reason="   ")
+
+    manager.withdraw_amendment("A0001", reason="superseded by a re-issued change")
+    with pytest.raises(WorkflowError):
+        manager.withdraw_amendment("A0001", reason="withdrawn twice")
 
 
 def test_low_risk_maintenance_round_trip_does_not_add_product_task(tmp_path: Path) -> None:

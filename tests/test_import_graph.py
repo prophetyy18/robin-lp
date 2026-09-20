@@ -311,6 +311,46 @@ def test_architecture_disagreement_seeded_regression() -> None:
         assert "robinhood_lp.features.bars" in tokens
 
 
+def test_annotated_row_is_checked_exactly_as_its_bare_form() -> None:
+    """A relationship annotation must not take a row out of the agreement check.
+
+    Once a successor exists the citation checker *requires* the annotation, so a
+    check that skipped annotated rows would quietly trade this gate's coverage
+    for the other's: the row would stop being compared against the layer map
+    exactly when it starts carrying a retirement.
+    """
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        _make_repo(
+            root,
+            module_tree={"robinhood_lp.features.bars": "x = 1\n"},
+            tasks=[
+                ("T050", "P05", "APPROVED"),
+                ("T063", "P06", "APPROVED"),
+                ("T105", "P06", "PLANNED"),
+            ],
+            # The annotation is present and the layer still disagrees with the
+            # map; the finding must survive the annotation.
+            architecture=textwrap.dedent(
+                """\
+                # Architecture
+
+                ### 2.2
+
+                | Phase | Task | Module | Layer |
+                | --- | --- | --- | --- |
+                | 5 | T063 (superseded by T105) | `robinhood_lp.features.bars` | risk |
+                """
+            ),
+        )
+        findings = run(root)
+        rules = {finding.rule for finding in findings}
+        assert "architecture-disagreement" in rules, format_findings(findings, root)
+
+
 # ---------------------------------------------------------------------------
 # Fail-closed inputs
 # ---------------------------------------------------------------------------

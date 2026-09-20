@@ -37,6 +37,17 @@ _MODULE = re.compile(
 _TASK = re.compile(r"`?(T\d{3})`?")
 _LINE = re.compile(r"line\s+(?P<line>\d+)")
 
+# A task cell may carry a relationship annotation -- ``T063 (superseded by
+# T105)`` -- which the citation checker requires once a successor exists. The
+# annotation must not take the row out of the §2.2/layer-map agreement check:
+# stripping it (and only it) lets the row be compared exactly as its bare form
+# would be, so recording a retirement no longer trades this gate's coverage for
+# the citation gate's. Other parentheticals stay unparsed, as before.
+_RELATIONSHIP_PARENTHETICAL = re.compile(
+    r"\s*\((?:successor to|supersedes|superseded by|replaces|replacing)[^)]*\)",
+    re.IGNORECASE,
+)
+
 
 @dataclass(frozen=True)
 class ArchitectureRow:
@@ -99,7 +110,7 @@ def parse_section22(text: str) -> list[ArchitectureRow]:
         if cells[0] == "Phase" or cells[0].startswith("---"):
             continue
         phase = cells[0]
-        task_match = _TASK.fullmatch(cells[1])
+        task_match = _TASK.fullmatch(_RELATIONSHIP_PARENTHETICAL.sub("", cells[1]).strip())
         if task_match is None:
             continue
         task = task_match.group(1)

@@ -16,6 +16,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
+from tools import check_acceptance, check_citations, check_imports
+
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 TASK_PATTERN = re.compile(r"^T[0-9]{3}$")
 MAINTENANCE_PATTERN = re.compile(r"^M[0-9]{4}$")
@@ -35,6 +37,13 @@ PHASE_PATTERN = re.compile(r"^P[0-9]{2}$")
 #: translates a goal into task text, and on the triaged route it only transcribes
 #: an Owner decision the controller required before it would start.
 AMENDMENT_LAYERS = frozenset({"CONTRACT", "SPEC", "PROPHET", "SUPERSEDE"})
+
+#: Amendment states that close a change. A closed record is kept rather than
+#: deleted: the ID stays consumed (so it is never handed out twice) while the
+#: lane is free for the next change. Without this, a failed change whose own
+#: layer cannot repair it blocked every later amendment, and deleting the record
+#: to clear the block rewound the ID counter onto a name still in use.
+TERMINAL_AMENDMENT_STATES = frozenset({"APPROVED", "ABANDONED"})
 REQUIRED_AGENT_MODEL = "MiniMax-M3[1m]"
 MAX_DEVELOPMENT_CONTINUATIONS = 1
 
@@ -245,7 +254,14 @@ class AmendmentRecord:
         if not AMENDMENT_PATTERN.fullmatch(amendment_id):
             raise WorkflowError(f"invalid amendment ID {amendment_id!r}")
         status = _required_string(value, "status")
-        if status not in {"PLANNING", "AWAITING_REVIEW", "CHANGES_REQUESTED", "BLOCKED"}:
+        if status not in {
+            "PLANNING",
+            "AWAITING_REVIEW",
+            "CHANGES_REQUESTED",
+            "BLOCKED",
+            "APPROVED",
+            "ABANDONED",
+        }:
             raise WorkflowError(f"invalid amendment status {status!r}")
         layer = _required_string(value, "layer")
         if layer not in AMENDMENT_LAYERS:
@@ -442,6 +458,40 @@ def _protected_paths(root: Path) -> list[Path]:
         *pathspecs,
     ).stdout.splitlines()
     return sorted(root / relative for relative in relative_paths if (root / relative).is_file())
+
+
+#: The repository's deterministic gates, as ``(name, run)`` pairs. Each one is
+#: mechanical: a finding is a fact about the tree rather than a judgement, so a
+#: candidate that introduces one is refused at seal time instead of spending an
+#: independent review on a question a script already answered.
+_DETERMINISTIC_GATES = (
+    ("check_citations", check_citations.run),
+    ("check_acceptance", check_acceptance.run),
+    ("check_imports", check_imports.run),
+)
+
+
+def _deterministic_findings(root: Path) -> dict[str, set[tuple[str, str, str]] | None]:
+    """Run every deterministic gate over ``root``.
+
+    Findings are keyed by ``(rule, path, token)``. The line number is excluded on
+    purpose: an edit above a flagged row shifts every line below it, and a
+    line-based key would report the file as newly broken when nothing about the
+    finding changed.
+
+    ``None`` marks a gate that could not be evaluated over this tree at all --
+    a minimal checkout without the documents a gate reads, for example.
+    """
+
+    findings: dict[str, set[tuple[str, str, str]] | None] = {}
+    for name, gate in _DETERMINISTIC_GATES:
+        try:
+            findings[name] = {
+                (str(finding.rule), str(finding.path), str(finding.token)) for finding in gate(root)
+            }
+        except Exception:  # noqa: BLE001 - an unevaluable gate is reported, not raised
+            findings[name] = None
+    return findings
 
 
 def _working_tree_changes(root: Path) -> list[str]:
@@ -795,7 +845,7 @@ class WorkflowManager:
             for record in self._maintenance_records()
             if record.status in {"IN_DEVELOPMENT", "AWAITING_REVIEW", "CHANGES_REQUESTED"}
         ]
-        active_amendments = [record.to_dict() for record in self._amendment_records()]
+        active_amendments = [record.to_dict() for record in self._active_amendment_records()]
         open_impacts = []
         for task_id in config["tasks"]:
             for finding in self._unresolved_task_impacts(task_id):
@@ -885,7 +935,7 @@ class WorkflowManager:
 
     def ready(self, task_id: str) -> str:
         self._ensure_clean_main()
-        if self._amendment_records():
+        if self._active_amendment_records():
             raise WorkflowError("cannot activate a task while an owner amendment is unfinished")
         config = self.load_config()
         task = self._task(config, task_id)
@@ -1027,6 +1077,19 @@ class WorkflowManager:
         return [
             AmendmentRecord.from_dict(_load_json(path))
             for path in sorted(self.runtime_dir.glob("A[0-9][0-9][0-9][0-9].json"))
+        ]
+
+    def _active_amendment_records(self) -> list[AmendmentRecord]:
+        """The amendments that still occupy the lane.
+
+        A closed change (``APPROVED`` or ``ABANDONED``) keeps its record so its
+        ID stays consumed, but it must not block the next change: only a change
+        that could still move is a conflict.
+        """
+        return [
+            record
+            for record in self._amendment_records()
+            if record.status not in TERMINAL_AMENDMENT_STATES
         ]
 
     def load_amendment(self, amendment_id: str) -> AmendmentRecord | None:
@@ -1565,7 +1628,7 @@ class WorkflowManager:
         active_status = config["tasks"][active]["status"] if isinstance(active, str) else None
         if active_status not in {None, "APPROVED", "PLANNED"}:
             raise WorkflowError(f"cannot start an amendment while {active} is unfinished")
-        if self._amendment_records():
+        if self._active_amendment_records():
             raise WorkflowError("another owner amendment is already active")
         active_repairs = [
             record.maintenance_id
@@ -1733,6 +1796,13 @@ class WorkflowManager:
                     "planner changed workflow state, evidence, model, SHA, or a non-target "
                     "config field"
                 )
+        if outcome == "AMENDMENT_READY":
+            self._assert_no_new_deterministic_findings(
+                worktree=worktree,
+                amendment_id=amendment_id,
+                attempt=record.attempt,
+                base_commit=record.base_commit,
+            )
         if record.layer == "SUPERSEDE" and outcome == "AMENDMENT_READY":
             self._validate_supersede_candidate(
                 base_config=base_config,
@@ -2066,7 +2136,10 @@ class WorkflowManager:
             _git(self.repo, "merge", "--ff-only", record.branch)
             _git(self.repo, "worktree", "remove", record.worktree)
             _git(self.repo, "branch", "-d", record.branch)
-            self._amendment_path(amendment_id).unlink(missing_ok=True)
+            # The record is kept as a closed entry instead of being deleted: the
+            # ID stays consumed, so the next amendment cannot be handed a number
+            # whose branch and worktree path this one still used.
+            self.save_amendment(replace(record, status="APPROVED"))
             self._amendment_request_path(amendment_id).unlink(missing_ok=True)
             return state, self.repo / relative_root / f"{review_name}.md"
         updated = replace(record, status=state)
@@ -2153,6 +2226,103 @@ class WorkflowManager:
         )
         return {**updated.to_dict(), "agent": author, "prompt": prompt}
 
+    def withdraw_amendment(self, amendment_id: str, *, reason: str) -> dict[str, object]:
+        """Close an amendment that will not land, without deleting its record.
+
+        A failed change whose own layer cannot repair it used to block every
+        later amendment: only a PASS cleared the record, and the lane refuses
+        while any record exists. Withdrawal is the Owner's exit. It records the
+        reason in the amendment's own directory on its branch, lands nothing,
+        and leaves a terminal record behind so the ID stays consumed.
+        """
+        record = self.load_amendment(amendment_id)
+        if record is None:
+            raise WorkflowError(f"unknown owner amendment {amendment_id}")
+        if record.status in TERMINAL_AMENDMENT_STATES:
+            raise WorkflowError(f"amendment {amendment_id} is already closed ({record.status})")
+        if not reason.strip():
+            raise WorkflowError("withdraw-amendment requires a non-empty reason")
+        worktree = Path(record.worktree)
+        relative_path = Path("todo") / "amendments" / amendment_id / "withdrawal.md"
+        target = worktree / relative_path
+        withdrawal = "\n".join(
+            [
+                f"# {amendment_id} withdrawal",
+                "",
+                f"- Layer: `{record.layer}`",
+                f"- Targets: {', '.join(record.task_ids) or 'none'}",
+                f"- Status at withdrawal: `{record.status}`",
+                f"- Attempt: {record.attempt}",
+                f"- Base commit: `{record.base_commit}`",
+                f"- Candidate commit: `{record.candidate_commit or 'none'}`",
+                "",
+                "## Reason",
+                "",
+                reason.strip(),
+                "",
+                "Nothing from this amendment landed. The worktree and branch are kept as",
+                "the record of what was attempted, and the change must be re-issued as a",
+                "new amendment if it is still wanted.",
+                "",
+            ]
+        )
+        if worktree.is_dir():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(withdrawal, encoding="utf-8")
+            _git(worktree, "add", str(relative_path))
+            _git(worktree, "commit", "-m", f"chore(amendment): withdraw {amendment_id}")
+        closed = replace(record, status="ABANDONED")
+        self.save_amendment(closed)
+        self._amendment_request_path(amendment_id).unlink(missing_ok=True)
+        return {**closed.to_dict(), "withdrawal": str(target)}
+
+    def _assert_no_new_deterministic_findings(
+        self,
+        *,
+        worktree: Path,
+        amendment_id: str,
+        attempt: int,
+        base_commit: str,
+    ) -> None:
+        """Refuse a candidate that adds a finding to a deterministic gate.
+
+        The comparison is a *delta* against the attempt's base, never "no
+        findings at all": a repository that is already red must stay amendable,
+        or the gate would be a dead end of its own. A gate that cannot be
+        evaluated on either side is skipped, except when the base could be
+        evaluated and the candidate could not -- that is the candidate breaking
+        the gate, not an environment limitation.
+        """
+
+        base_tree = self.worktree_root / f"amendment-base-{amendment_id.lower()}-{attempt:03d}"
+        if base_tree.exists():
+            raise WorkflowError(f"base comparison worktree already exists: {base_tree}")
+        _git(self.repo, "worktree", "add", "--detach", str(base_tree), base_commit)
+        try:
+            base_findings = _deterministic_findings(base_tree)
+            candidate_findings = _deterministic_findings(worktree)
+        finally:
+            _git(self.repo, "worktree", "remove", str(base_tree), check=False)
+        for gate, candidate in sorted(candidate_findings.items()):
+            baseline = base_findings.get(gate)
+            if baseline is None:
+                # Nothing to compare against: the base itself could not be
+                # evaluated, so the gate cannot judge this candidate either.
+                continue
+            if candidate is None:
+                raise WorkflowError(
+                    f"{amendment_id} candidate cannot be evaluated by {gate}, "
+                    "which the base could be: the gate fails on this candidate"
+                )
+            added = candidate - baseline
+            if added:
+                rendered = ", ".join(
+                    f"{path} ({token or rule})" for rule, path, token in sorted(added)
+                )
+                raise WorkflowError(
+                    f"{amendment_id} candidate adds {len(added)} finding(s) to {gate}: {rendered}"
+                )
+
     def amendment_status(self, amendment_id: str) -> dict[str, object]:
         record = self.load_amendment(amendment_id)
         if record is not None:
@@ -2174,7 +2344,7 @@ class WorkflowManager:
     ) -> dict[str, object]:
         """Prepare a low-risk repair without adding a numbered product task."""
         self._ensure_clean_main()
-        if self._amendment_records():
+        if self._active_amendment_records():
             raise WorkflowError("cannot start maintenance while an owner amendment is unfinished")
         config = self.load_config()
         active = config.get("active_task")
