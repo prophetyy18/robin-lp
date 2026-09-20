@@ -1,0 +1,11 @@
+{
+  "amendment_id": "A0017",
+  "layer": "CONTRACT",
+  "raised": [],
+  "resolves": [
+    "A0014:T087:read-current-manifest-coverage",
+    "A0014:T088:reconcile-current-result-checksums",
+    "A0013:T102:legacy",
+    "A0014:T102:consume-schema-bound-robustness"
+  ]
+}

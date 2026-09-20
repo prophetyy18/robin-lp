@@ -1094,7 +1094,8 @@
       "status": "PLANNED",
       "depends_on": [
         "T061",
-        "T101"
+        "T101",
+        "T106"
       ],
       "task_file": "todo/phases/P10-research-and-models/T102.md",
       "attempt": 0,
