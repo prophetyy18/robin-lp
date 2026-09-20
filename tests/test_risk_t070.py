@@ -1541,6 +1541,227 @@ class TestIncreaseRisk:
 
 
 # ---------------------------------------------------------------------------
+# Token concentration
+# ---------------------------------------------------------------------------
+
+
+class TestConcentration:
+    def test_token_concentration_breach_triggers_no_new_risk(self) -> None:
+        """A per-token concentration breach triggers NO_NEW_RISK at TOKEN scope.
+
+        The pool's ``currency0`` is USDG itself (price = Q64_SCALE);
+        ``currency1`` is the target token with USDG price =
+        ``market.quote_q64_64``. When the target-token USDG value
+        exceeds the configured ``max_single_currency_concentration_q64_64``
+        share of the total worst-case inventory, the risk gateway
+        returns NO_NEW_RISK at TOKEN scope (REDUCE_ONLY approved,
+        INCREASE_RISK rejected). The test relies on the
+        ``min_economic_liquidity_usdg_q64_64=None`` config override
+        so the sizer clears the insufficient-economic-size gate and
+        records the asymmetric worst-case single-sided inventory.
+        """
+        from robinhood_lp.protocol.math import get_sqrt_price_at_tick
+
+        config = dataclasses.replace(
+            RiskConfig.default(version_id="t070.concentration.breach"),
+            min_economic_liquidity_usdg_q64_64=1,  # bypass INSUFFICIENT_ECONOMIC_SIZE
+        )
+        # Build a market with the current price at tick 0 (pa) and
+        # quote_q64_64 = 100x USDG per token1: a high currency1 USDG
+        # value relative to the symmetric currency0 (USDG itself).
+        sqrt_price_at_pa = get_sqrt_price_at_tick(0)
+        market = MarketSnapshot(
+            version=MARKET_SNAPSHOT_VERSION,
+            pool_key_id=_pool_key_id(_POOLKEY_NATIVE_NO_HOOK),
+            chain_id=_CHAIN_A,
+            sqrt_price_x96=sqrt_price_at_pa,
+            liquidity=1,
+            realized_volatility_q64_64=0,
+            freshness_seconds=0,
+            quote_q64_64=100 * Q64_SCALE,  # currency1 USDG price is 100
+            is_relative_only=False,
+            data_time=900,
+            availability_time=900,
+        )
+        candidate = _candidate(
+            pool_key=_POOLKEY_NATIVE_NO_HOOK,
+            kind=CANDIDATE_KIND_PROPOSE,
+            tick_lower=0,
+            tick_upper=60,
+        )
+        intent = _build_intent(
+            kind=IntentKind.INCREASE_RISK,
+            source=RiskIntentSource.STRATEGY,
+            candidate=candidate,
+            decision_time=1000,
+            admission=_admission(
+                pool_key=_POOLKEY_NATIVE_NO_HOOK, data_time=900, availability_time=900
+            ),
+            market=market,
+            portfolio=_portfolio(
+                pool_key=_POOLKEY_NATIVE_NO_HOOK, data_time=900, availability_time=900
+            ),
+            tick_lower=candidate.tick_lower,
+            tick_upper=candidate.tick_upper,
+        )
+        decision = evaluate_risk_with_config(
+            intent=intent,
+            context=_build_context(last_rebalance_decision_time=0),
+            config=config,
+        )
+        assert decision.verdict is RiskVerdict.NO_NEW_RISK
+        assert decision.scope is RiskScope.TOKEN
+        assert decision.reason_code == "TOKEN_CONCENTRATION_EXCEEDED"
+        assert decision.approved is False  # INCREASE_RISK is rejected
+
+    def test_token_concentration_within_cap_approved(self) -> None:
+        """A position with both sides well within the configured cap is approved.
+
+        The pool's symmetric case: both worst-case raw amounts are
+        ~equal and the per-side USDG price is identical, so each
+        side is exactly 50% of the total — well below the default
+        80% cap.
+        """
+        from robinhood_lp.protocol.math import get_sqrt_price_at_tick
+
+        config = dataclasses.replace(
+            RiskConfig.default(version_id="t070.concentration.ok"),
+            min_economic_liquidity_usdg_q64_64=1,  # bypass INSUFFICIENT_ECONOMIC_SIZE
+        )
+        sqrt_price_at_tick_60 = get_sqrt_price_at_tick(60)
+        market = MarketSnapshot(
+            version=MARKET_SNAPSHOT_VERSION,
+            pool_key_id=_pool_key_id(_POOLKEY_NATIVE_NO_HOOK),
+            chain_id=_CHAIN_A,
+            sqrt_price_x96=sqrt_price_at_tick_60,
+            liquidity=1,
+            realized_volatility_q64_64=0,
+            freshness_seconds=0,
+            quote_q64_64=Q64_SCALE,  # 1:1 USDG price (symmetric)
+            is_relative_only=False,
+            data_time=900,
+            availability_time=900,
+        )
+        candidate = _candidate(
+            pool_key=_POOLKEY_NATIVE_NO_HOOK,
+            kind=CANDIDATE_KIND_PROPOSE,
+            tick_lower=-60,
+            tick_upper=60,
+        )
+        intent = _build_intent(
+            kind=IntentKind.INCREASE_RISK,
+            source=RiskIntentSource.STRATEGY,
+            candidate=candidate,
+            decision_time=1000,
+            admission=_admission(
+                pool_key=_POOLKEY_NATIVE_NO_HOOK, data_time=900, availability_time=900
+            ),
+            market=market,
+            portfolio=_portfolio(
+                pool_key=_POOLKEY_NATIVE_NO_HOOK, data_time=900, availability_time=900
+            ),
+            tick_lower=candidate.tick_lower,
+            tick_upper=candidate.tick_upper,
+        )
+        decision = evaluate_risk_with_config(
+            intent=intent,
+            context=_build_context(last_rebalance_decision_time=0),
+            config=config,
+        )
+        assert decision.verdict is RiskVerdict.APPROVED
+        assert decision.reason_code == "OK"
+
+
+# ---------------------------------------------------------------------------
+# Rebalance cost amortisation (substantive check)
+# ---------------------------------------------------------------------------
+
+
+class TestRebalanceCostAmortisation:
+    def test_cost_exceeds_capital_envelope_rejected(self) -> None:
+        """When the amortised rebalance cost exceeds the candidate capital, reject.
+
+        The per-cadence cost (cost × min_rebalance_interval_seconds)
+        must not dominate the candidate's projected USDG capital
+        envelope. The test sets the expected cost high enough that
+        the amortised product exceeds the candidate's capital.
+        """
+        config = RiskConfig.default(version_id="t070.amortisation.breach")
+        candidate = _candidate(
+            pool_key=_POOLKEY_NATIVE_NO_HOOK,
+            kind=CANDIDATE_KIND_PROPOSE,
+            capital_q64_64=Q64_SCALE,  # 1 USDG
+        )
+        intent = _build_intent(
+            kind=IntentKind.INCREASE_RISK,
+            candidate=candidate,
+            decision_time=1000,
+            admission=_admission(
+                pool_key=_POOLKEY_NATIVE_NO_HOOK, data_time=900, availability_time=900
+            ),
+            market=_market(pool_key=_POOLKEY_NATIVE_NO_HOOK, data_time=900, availability_time=900),
+            portfolio=_portfolio(
+                pool_key=_POOLKEY_NATIVE_NO_HOOK, data_time=900, availability_time=900
+            ),
+            tick_lower=candidate.tick_lower,
+            tick_upper=candidate.tick_upper,
+        )
+        decision = evaluate_risk_with_config(
+            intent=intent,
+            context=_build_context(
+                last_rebalance_decision_time=0,
+                # 2 USDG × 300s interval = 600 USDG >> candidate capital of 1 USDG.
+                expected_rebalance_cost_usdg_q64_64=2 * Q64_SCALE,
+            ),
+            config=config,
+        )
+        assert decision.verdict is RiskVerdict.REJECTED
+        assert decision.reason_code == "REBALANCE_COST_INEFFICIENT"
+
+    def test_cost_within_capital_envelope_advances(self) -> None:
+        """When the amortised rebalance cost is within the capital envelope, advance.
+
+        The downstream check (sizing / concentration / eligibility)
+        produces its own verdict; what this test asserts is that the
+        rebalance-cost amortisation check does not block.
+        """
+        config = RiskConfig.default(version_id="t070.amortisation.ok")
+        candidate = _candidate(
+            pool_key=_POOLKEY_NATIVE_NO_HOOK,
+            kind=CANDIDATE_KIND_PROPOSE,
+            capital_q64_64=10**18 * Q64_SCALE,  # huge capital
+        )
+        intent = _build_intent(
+            kind=IntentKind.INCREASE_RISK,
+            candidate=candidate,
+            decision_time=1000,
+            admission=_admission(
+                pool_key=_POOLKEY_NATIVE_NO_HOOK, data_time=900, availability_time=900
+            ),
+            market=_market(pool_key=_POOLKEY_NATIVE_NO_HOOK, data_time=900, availability_time=900),
+            portfolio=_portfolio(
+                pool_key=_POOLKEY_NATIVE_NO_HOOK, data_time=900, availability_time=900
+            ),
+            tick_lower=candidate.tick_lower,
+            tick_upper=candidate.tick_upper,
+        )
+        decision = evaluate_risk_with_config(
+            intent=intent,
+            context=_build_context(
+                last_rebalance_decision_time=0,
+                expected_rebalance_cost_usdg_q64_64=Q64_SCALE // 10**6,  # tiny
+            ),
+            config=config,
+        )
+        # The rebalance-cost check should NOT be the cause of
+        # rejection — the verdict may still be REJECTED downstream
+        # (sizing / concentration / etc.) but the reason code must
+        # not be REBALANCE_COST_INEFFICIENT.
+        if decision.verdict is RiskVerdict.REJECTED:
+            assert decision.reason_code != "REBALANCE_COST_INEFFICIENT"
+
+
+# ---------------------------------------------------------------------------
 # Evidence pointers / audit trail
 # ---------------------------------------------------------------------------
 

@@ -33,7 +33,15 @@ The check pipeline (one function, no early-return side effects):
    ``decision_time`` is future data and is rejected.
 3. **Capital & token concentration.** Per-pool and per-token USDG
    exposure limits are respected; the existing position + the
-   candidate size cannot exceed either cap.
+   candidate size cannot exceed either cap. The per-token
+   concentration check uses the sizer's
+   ``worst_case_amount0`` / ``worst_case_amount1`` and the
+   per-side USDG price (the pool's ``currency1`` is the target
+   token with price ``market.quote_q64_64``; ``currency0`` is
+   USDG with price ``Q64_SCALE``); either side exceeding
+   ``max_single_currency_concentration_q64_64`` of the total
+   USDG-denominated worst-case inventory produces a
+   :attr:`RiskVerdict.NO_NEW_RISK` at ``TOKEN`` scope.
 4. **Qualified USDG price.** The 5-minute circuit breaker requires
    a non-``RELATIVE_ONLY`` USDG price; the strategy and risk layers
    require one for any USDG-denominated sizing. ``None`` / missing
@@ -47,8 +55,12 @@ The check pipeline (one function, no early-return side effects):
    to fit a cap.
 6. **Rebalance cadence / cost.** The interval since the last
    rebalance must be at least the configured minimum, and the
-   candidate transaction must amortise at least one configured
-   cost-equivalent.
+   per-cadence cost (``expected_rebalance_cost_usdg_q64_64 *
+   min_rebalance_interval_seconds``) must not exceed the
+   candidate's projected USDG-denominated capital envelope
+   (``CandidateAction.capital_q64_64``). The cost check is
+   preceded by an integer-overflow guard so a malicious
+   ``expected_cost`` cannot wrap the comparison.
 7. **Episode loss & high-watermark drawdown.**
    :attr:`RiskVerdict.NO_NEW_RISK` /
    :attr:`RiskVerdict.AUTO_EXIT` thresholds from the user's
@@ -952,6 +964,7 @@ REASON_USDG_PRICE_MISSING: Final[str] = "USDG_PRICE_MISSING"
 REASON_USDG_PRICE_DEPEGGED: Final[str] = "USDG_PRICE_DEPEGGED"
 REASON_USDG_PRICE_RELATIVE_ONLY: Final[str] = "USDG_PRICE_RELATIVE_ONLY"
 REASON_CAP_EXCEEDED: Final[str] = "CAP_EXCEEDED"
+REASON_TOKEN_CONCENTRATION_EXCEEDED: Final[str] = "TOKEN_CONCENTRATION_EXCEEDED"
 REASON_SIZING_NO_TRADE: Final[str] = "SIZING_NO_TRADE"
 REASON_RANGE_DEGENERATE: Final[str] = "RANGE_DEGENERATE"
 REASON_TICK_OUT_OF_BOUNDS: Final[str] = "TICK_OUT_OF_BOUNDS"
@@ -1491,7 +1504,9 @@ def evaluate_risk_with_config(
             scope=RiskScope.POOL,
             sizing=sizing,
         )
-    concentration = _evaluate_concentration(config=config, intent=intent, sizing=sizing)
+    concentration = _evaluate_concentration(
+        config=config, intent=intent, context=context, sizing=sizing
+    )
     if concentration is not None:
         return concentration
     return _approved(
@@ -1609,7 +1624,26 @@ def _evaluate_drawdown(
 def _evaluate_rebalance_cadence(
     config: RiskConfig, intent: RiskIntent, context: RiskContext
 ) -> RiskDecision | None:
-    """Evaluate the rebalance cadence / cost efficiency."""
+    """Evaluate the rebalance cadence / cost amortisation.
+
+    Two independent structural checks:
+
+    1. **Cadence.** The interval since the last rebalance must be
+       at least ``min_rebalance_interval_seconds``; otherwise the
+       candidate is rejected with :data:`REASON_REBALANCE_TOO_SOON`.
+    2. **Cost amortisation.** The candidate's
+       :attr:`CandidateAction.capital_q64_64` is the USDG-denominated
+       capital the strategy plans to deploy over the next
+       ``min_rebalance_interval_seconds`` window. The expected
+       rebalance cost (sized in USDG) multiplied by the cadence
+       interval must not exceed the candidate's projected capital
+       envelope; otherwise the candidate is rejected with
+       :data:`REASON_REBALANCE_COST_INEFFICIENT`. The comparison
+       uses Q64.64 fixed-point arithmetic exclusively; an
+       integer-overflow guard precedes the comparison so the
+       multiplication itself cannot blow up the audit-trail
+       arithmetic.
+    """
     if intent.kind is not IntentKind.INCREASE_RISK:
         return None
     if not _candidate_is_propose(intent):
@@ -1625,15 +1659,44 @@ def _evaluate_rebalance_cadence(
             scope=RiskScope.POOL,
         )
     expected_cost = context.expected_rebalance_cost_usdg_q64_64
-    if expected_cost > 0:
+    if expected_cost > 0 and intent.candidate is not None:
+        # Integer-overflow guard: bound the per-interval cost to
+        # uint128. The candidate's capital envelope is Q64.64, so a
+        # successful candidate is bounded by ``2^64 * Q64_SCALE``;
+        # we cap the cost × interval product at the same width so
+        # an honest computation cannot silently wrap.
+        amortised_cap = (1 << 128) - 1
         amortised = expected_cost * config.min_rebalance_interval_seconds
-        if amortised <= 0:
+        if amortised <= 0 or amortised > amortised_cap:
             return _rejected(
                 context=context,
                 config=config,
                 intent=intent,
                 reason_code=REASON_REBALANCE_COST_INEFFICIENT,
-                reason_detail=f"amortised rebalance cost={amortised} does not justify the action",
+                reason_detail=(
+                    f"amortised rebalance cost={amortised} exceeds uint128 width or is non-positive "
+                    f"(expected_cost={expected_cost}, min_rebalance_interval_seconds={config.min_rebalance_interval_seconds})"
+                ),
+                scope=RiskScope.POOL,
+            )
+        # The substantive check: the candidate's projected capital
+        # envelope must dominate the per-cadence cost. The candidate
+        # carries ``capital_q64_64``; the cost is in Q64.64 USDG
+        # already, so the comparison is direct. (A zero candidate
+        # capital is a degenerate PROPOSE; the strategy-layer
+        # CandidateAction constructor rejects it, but the risk layer
+        # tolerates it as a no-op amortisation outcome.)
+        candidate_capital_q64_64 = intent.candidate.capital_q64_64
+        if candidate_capital_q64_64 > 0 and amortised > candidate_capital_q64_64:
+            return _rejected(
+                context=context,
+                config=config,
+                intent=intent,
+                reason_code=REASON_REBALANCE_COST_INEFFICIENT,
+                reason_detail=(
+                    f"amortised rebalance cost={amortised} exceeds candidate capital envelope={candidate_capital_q64_64} "
+                    f"(expected_cost={expected_cost}, min_rebalance_interval_seconds={config.min_rebalance_interval_seconds})"
+                ),
                 scope=RiskScope.POOL,
             )
     return None
@@ -1736,7 +1799,11 @@ def _evaluate_hook_evidence(
 
 
 def _evaluate_concentration(
-    *, config: RiskConfig, intent: RiskIntent, sizing: SizingDecision
+    *,
+    config: RiskConfig,
+    intent: RiskIntent,
+    context: RiskContext,
+    sizing: SizingDecision,
 ) -> RiskDecision | None:
     """Validate per-token concentration against the configured cap.
 
@@ -1744,16 +1811,95 @@ def _evaluate_concentration(
     sizer recorded (:attr:`SizingDecision.worst_case_amount0` /
     ``worst_case_amount1``) and the configured per-pool USDG
     envelope. The two per-side raw-token amounts are converted to
-    Q64.64 USDG by the caller's USDG conversion (kept outside
-    this module by ADR-014); when the per-side concentration
-    exceeds the configured cap the verdict is
-    :attr:`RiskVerdict.NO_NEW_RISK` for the ``TOKEN`` scope.
+    Q64.64 USDG by the integer USDG conversion the sizer itself
+    uses (see :func:`robinhood_lp.protocol.sizing.usdg_amount_to_token_amount`):
+    the conversion's price is the ``price_q64_64`` from which
+    ``raw_amount_usdg_q64_64 = (raw_amount * price_q64_64) >> 64``.
+
+    The pool's :attr:`PoolKey.currency0` is the lower-address
+    currency (USDG itself, in the canonical ZZZ/USDG pool); its
+    USDG price is trivially ``Q64_SCALE``. The pool's
+    :attr:`PoolKey.currency1` is the higher-address target
+    token; its USDG price is the ``market.quote_q64_64`` the
+    strategy layer (T060) carries. When either side exceeds the
+    configured cap, the verdict is
+    :attr:`RiskVerdict.NO_NEW_RISK` at ``TOKEN`` scope; the
+    REDUCE_ONLY path remains approved (this is the NO_NEW_RISK
+    semantics), and the ``INCREASE_RISK`` path is rejected.
     """
-    if sizing.worst_case_amount0 == 0 and sizing.worst_case_amount1 == 0:
+    worst_case_amount0 = sizing.worst_case_amount0
+    worst_case_amount1 = sizing.worst_case_amount1
+    if worst_case_amount0 == 0 and worst_case_amount1 == 0:
         return None
-    if config.max_single_currency_concentration_q64_64 <= 0:
+    cap_q64_64 = config.max_single_currency_concentration_q64_64
+    if cap_q64_64 <= 0:
+        # The configured cap is the deny-by-default fallback (the
+        # constructor enforces positive Q64.64); the check below
+        # would always trip, so return ``None`` to honour the
+        # configured value of zero / negative.
         return None
-    return None
+
+    # Resolve the per-side USDG price. ``currency0`` is USDG itself
+    # in the canonical ZZZ/USDG pool (lower address), so its USDG
+    # price is ``Q64_SCALE``. ``currency1`` is the target token; its
+    # USDG price is the ``market.quote_q64_64`` the strategy layer
+    # carries (T060). When the snapshot is RELATIVE_ONLY or the
+    # quote is missing, the comparison cannot be performed and the
+    # check is a structural no-op (the upstream USDG price check
+    # already rejects RELATIVE_ONLY when a USDG-denominated bar is
+    # required; here we are tolerant of the absence of any bar).
+    assert intent.market is not None
+    price_token0_q64_64 = Q64_SCALE  # currency0 = USDG
+    if intent.market.is_relative_only or intent.market.quote_q64_64 is None:
+        # The candidate's USDG valuation cannot be computed; the
+        # upstream USDG price check will reject if a USDG-denominated
+        # bar is required for sizing. We follow that with a no-op
+        # here so the concentration check does not pretend to know a
+        # price it does not.
+        return None
+    price_token1_q64_64 = intent.market.quote_q64_64
+    if price_token1_q64_64 <= 0:
+        return None
+
+    # Q64.64 USDG value of each side. The arithmetic is the
+    # integer reverse of ``usdg_amount_to_token_amount``: with
+    # ``price_q64_64 = usdg_per_token << 64``,
+    # ``token_amount = (usdg_amount << 64) // price`` ⇒
+    # ``usdg_amount = (token_amount * price) >> 64``.
+    worst_case_usdg_q64_64_token0 = (worst_case_amount0 * price_token0_q64_64) >> 64
+    worst_case_usdg_q64_64_token1 = (worst_case_amount1 * price_token1_q64_64) >> 64
+    total_usdg_q64_64 = worst_case_usdg_q64_64_token0 + worst_case_usdg_q64_64_token1
+    if total_usdg_q64_64 <= 0:
+        return None
+    # The cap is "per-token share of the total position must be
+    # <= cap_q64_64", so:
+    #   worst_case_usdg_q64_64_tokenN * Q64_SCALE
+    #       > total_usdg_q64_64 * cap_q64_64   ⇒   breach.
+    threshold_q64_64 = (total_usdg_q64_64 * cap_q64_64) // Q64_SCALE
+    breach_side: str | None = None
+    if worst_case_usdg_q64_64_token0 > threshold_q64_64:
+        breach_side = "currency0"
+    elif worst_case_usdg_q64_64_token1 > threshold_q64_64:
+        breach_side = "currency1"
+    if breach_side is None:
+        return None
+    return _no_new_risk(
+        context=context,
+        config=config,
+        intent=intent,
+        reason_code=REASON_TOKEN_CONCENTRATION_EXCEEDED,
+        reason_detail=(
+            f"per-token concentration breach: {breach_side} worst_case_usdg_q64_64="
+            f"{worst_case_usdg_q64_64_token0 if breach_side == 'currency0' else worst_case_usdg_q64_64_token1} "
+            f"exceeds cap share of total_usdg_q64_64={total_usdg_q64_64} at cap_q64_64={cap_q64_64}"
+        ),
+        scope=RiskScope.TOKEN,
+        notes=(
+            "check=token_concentration",
+            f"breach_side={breach_side}",
+            f"max_single_currency_concentration_q64_64={cap_q64_64}",
+        ),
+    )
 
 
 def _resolve_sizing(*, config: RiskConfig, intent: RiskIntent) -> SizingDecision:

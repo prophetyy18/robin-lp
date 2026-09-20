@@ -1,0 +1,28 @@
+{
+  "task_id": "T070",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Attempt 3 of T070 is verification-only. The two review required_changes from attempt 1 were implemented in attempt 2 (`_evaluate_concentration` is now a substantive implementation and `_evaluate_rebalance_cadence` carries cost-amortisation; 4 new tests added to tests/test_risk_t070.py). No new edits were made on this attempt. git status confirms only the expected tracked modifications (`src/robinhood_lp/risk/checks.py`, `tests/test_risk_t070.py`) are present alongside the workflow-controller state transition in `todo/config.yaml` (status/attempt/workflow_state), which is the expected mechanical update, not a Developer edit. All required verification commands pass.",
+  "commands": [
+    {
+      "command": "git -C /home/lpdev/lp-worktrees/dev-t070-attempt-001 status",
+      "result": "Working tree shows only the expected files: modified src/robinhood_lp/risk/checks.py and tests/test_risk_t070.py (the two implementation+test files from attempt 2), plus mechanical workflow state transitions in todo/config.yaml (status/attempt/workflow_state). Untracked entries are the .workflow/ handoff files from prior attempts."
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t070-attempt-001 && python -m pytest tests/test_risk_t070.py -q",
+      "result": "95 passed in 0.20s (executed via /home/lpdev/miniconda3/envs/robinhood-lp/bin/python because `python` is not on PATH; the project's pinned 3.12 interpreter is in that env)."
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t070-attempt-001 && python -m ruff check src/robinhood_lp/risk/ tests/test_risk_t070.py",
+      "result": "All checks passed! (executed via /home/lpdev/miniconda3/envs/robinhood-lp/bin/python)."
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t070-attempt-001 && python -m mypy src/robinhood_lp/risk/",
+      "result": "Success: no issues found in 2 source files (executed via /home/lpdev/miniconda3/envs/robinhood-lp/bin/python)."
+    },
+    {
+      "command": "cd /home/lpdev/lp-worktrees/dev-t070-attempt-001 && python -m tools.check_imports check",
+      "result": "import-graph check passed: no findings (executed via /home/lpdev/miniconda3/envs/robinhood-lp/bin/python; the robinhood-lp conda env exposes tomllib, ruff, mypy, and pytest on 3.12; system python3.10 lacks tomllib)."
+    }
+  ],
+  "residual_risks": []
+}

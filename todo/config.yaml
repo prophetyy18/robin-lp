@@ -12,7 +12,7 @@
   },
   "active_phase": "P07",
   "active_task": "T070",
-  "workflow_state": "CHANGES_REQUESTED",
+  "workflow_state": "AWAITING_REVIEW",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -755,7 +755,7 @@
     },
     "T070": {
       "phase": "P07",
-      "status": "CHANGES_REQUESTED",
+      "status": "AWAITING_REVIEW",
       "depends_on": [
         "T025",
         "T049",
@@ -763,7 +763,7 @@
         "T060"
       ],
       "task_file": "todo/phases/P07-risk-and-paper/T070.md",
-      "attempt": 1,
+      "attempt": 3,
       "base_commit": "94589c9981ad68ce9c9041ec33e32dbbee24077b",
       "candidate_commit": "2472aa9af5b913667c9f72214509baccca7a7ca5",
       "approved_commit": null,

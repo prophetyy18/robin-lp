@@ -1,0 +1,35 @@
+{
+  "task_id": "T070",
+  "outcome": "CANDIDATE_READY",
+  "summary": "T070 attempt 2 addresses both required_changes from the independent review (review-001.json). The per-token concentration check is now substantive: _evaluate_concentration converts the sizer's worst_case_amount0/1 to Q64.64 USDG using the per-side price (currency0 = Q64_SCALE for USDG; currency1 = market.quote_q64_64 for the target token), compares each side's share of the total worst-case inventory against config.max_single_currency_concentration_q64_64, and returns NO_NEW_RISK at RiskScope.TOKEN when either side exceeds the cap. The rebalance cost amortisation is now substantive too: _evaluate_rebalance_cadence compares the per-cadence cost (expected_rebalance_cost_usdg_q64_64 * min_rebalance_interval_seconds) against the candidate's projected capital envelope (CandidateAction.capital_q64_64), preceded by a uint128 overflow guard. The existing checks the reviewer already passed remain green: the gateway is still the single entry point, the frozen audit decision still carries the config_version, configuration versioning still cannot retroactively alter decisions, freshness/completeness still fails closed, eligibility+deployment_hash still reject, kill switches still route to AUTO_EXIT/NO_NEW_RISK by scope, the 5-minute emergency circuit breaker still overrides every intent source, USDG price qualification still rejects RELATIVE_ONLY/MISSING/DEPEGGED, the sizer path still produces fixed Range and never alters tick_lower/tick_upper, episode loss/drawdown still escalate WARNING/NO_NEW_RISK/AUTO_EXIT, Gas reserve is never spent, hook deltas still produce HOOK_DELTA_UNVERIFIED/HOOK_EVIDENCE_STALE, deny-by-default still holds, experimental thresholds still propagate, the no-float protocol path is still preserved, and the layer-purity test still passes. Four new tests in TestConcentration and TestRebalanceCostAmortisation exercise the breach path, the within-cap approval path, the cost-exceeds-capital rejection path, and the cost-within-capital advance path. T070 tests now total 95 (up from 91), the combined workflow+T070 suite is 149 passing, and the rest of the project suite is 2478 passing with 6 unrelated foundry/PATH/gpg skips.",
+  "commands": [
+    {
+      "command": "pytest tests/test_risk_t070.py -q",
+      "result": "95 passed in 0.21s"
+    },
+    {
+      "command": "pytest tests/test_workflow.py tests/test_risk_t070.py -q",
+      "result": "149 passed in 4.62s"
+    },
+    {
+      "command": "pytest tests/ -q --ignore=tests/test_abi_artifacts.py",
+      "result": "2478 passed, 6 skipped (foundry/PATH/gpg provenance skips unrelated to T070) in 26.95s"
+    },
+    {
+      "command": "ruff check src/robinhood_lp/risk/ tests/test_risk_t070.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "ruff format --check src/robinhood_lp/risk/ tests/test_risk_t070.py",
+      "result": "3 files already formatted"
+    },
+    {
+      "command": "mypy src/robinhood_lp/risk/",
+      "result": "Success: no issues found in 2 source files"
+    }
+  ],
+  "residual_risks": [
+    "The per-side USDG price is derived under the project convention that PoolKey.currency0 is the USDG numeraire (price = Q64_SCALE) and PoolKey.currency1 is the target token (price = market.quote_q64_64). For pools where this convention does not hold, the concentration check will misprice one side. The ADR-014 numeraire boundary should ultimately move into a typed helper that names the USDG side explicitly; the risk layer currently encodes the convention as a single-line price resolution.",
+    "The rebalance cost amortisation check uses CandidateAction.capital_q64_64 as the candidate's projected USDG-denominated envelope. A zero or near-zero capital_q64_64 falls back to a no-op (the comparison is skipped), which the strategy layer should reject at the constructor (it does for PROPOSE) but the risk layer tolerates as defensive."
+  ]
+}
