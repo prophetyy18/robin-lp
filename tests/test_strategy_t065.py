@@ -295,8 +295,13 @@ def _held_position(
     tick_upper: int,
     liquidity: int = 1_000,
     last_accrual_time: int = 0,
+    in_range: bool = True,
 ) -> PositionState:
-    """A held, in-Range position with the supplied Range and liquidity."""
+    """A held position with the supplied Range, liquidity and
+    recorded ``in_range`` flag. ``in_range=True`` is the steady
+    state; ``in_range=False`` signals that the engine's ledger had
+    the position marked out-of-Range on the previous step (used to
+    exercise the RETURN transition)."""
     return PositionState(
         version=LEDGER_VERSION,
         pool_key_id=_POOL_KEY_ID,
@@ -309,7 +314,7 @@ def _held_position(
         principal_token1=0,
         tokens_owed0=0,
         tokens_owed1=0,
-        in_range=True,
+        in_range=in_range,
         last_accrual_time=last_accrual_time,
     )
 
@@ -987,6 +992,44 @@ class TestGoldenOutOfRangeLifecycle:
         assert candidate.tick_lower % _TICK_SPACING == 0
         assert candidate.tick_upper % _TICK_SPACING == 0
         assert candidate.position_reassessment is True
+
+    def test_return_to_range_after_out_of_range_emits_return(self) -> None:
+        # The price leaves the Range, then re-enters it. The engine
+        # has the ledger ``in_range=False`` (the previous out-of-Range
+        # step recorded it that way); the current tick is inside the
+        # Range, so the strategy must detect the transition and emit
+        # the RETURN lifecycle action — not a plain WAIT.
+        strategy = _default_strategy(max_rebuild_wait_seconds=1_800)
+        # The visible price walk classifies as RANGE (stable oscillation
+        # around the in-Range tick). The transition itself is carried
+        # by the portfolio snapshot's ``in_range=False`` flag, which
+        # mirrors the engine's recorded ledger state on the previous
+        # step.
+        events = _stable_events(n=20, tick=0, active_liquidity=10_000)
+        position = _held_position(
+            tick_lower=-600,
+            tick_upper=600,
+            last_accrual_time=5 * 60,  # was out of range recently
+            in_range=False,
+        )
+        admission = _build_admission_snapshot(decision_time=20 * 60)
+        market = _build_market_snapshot(decision_time=20 * 60)
+        portfolio = _build_portfolio_snapshot(decision_time=20 * 60, position=position)
+        candidate = strategy.evaluate(
+            admission=admission,
+            market=market,
+            portfolio=portfolio,
+            visible_events=events,
+            decision_time=20 * 60,
+        )
+        assert candidate.kind == AdaptiveCandidateKind.RETURN
+        assert "RETURN_TO_RANGE" in candidate.notes
+        assert candidate.regime_state == "RANGE"
+        # RETURN carries no new Range, no liquidity, no capital.
+        assert candidate.tick_lower == 0
+        assert candidate.tick_upper == 0
+        assert candidate.liquidity == 0
+        assert candidate.capital_q64_64 == 0
 
 
 # ---------------------------------------------------------------------------

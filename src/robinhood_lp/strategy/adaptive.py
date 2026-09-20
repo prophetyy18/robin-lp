@@ -762,9 +762,8 @@ class AdaptiveMarketSnapshot:
                 f"AdaptiveMarketSnapshot.five_minute_return_complete: must be "
                 f"bool, got {type(self.five_minute_return_complete).__name__}"
             )
-        if (
-            self.five_minute_return_complete
-            and (self.is_relative_only or self.quote_q64_64 is None)
+        if self.five_minute_return_complete and (
+            self.is_relative_only or self.quote_q64_64 is None
         ):
             raise InvalidAdaptiveSnapshotError(
                 "AdaptiveMarketSnapshot: five_minute_return_complete=True "
@@ -2334,6 +2333,24 @@ class AdaptiveStrategy:
 
         in_range = _is_in_range(portfolio, current_tick)
         if in_range:
+            # The portfolio snapshot carries the ledger's recorded
+            # ``in_range`` flag from the engine. ``portfolio.in_range=False``
+            # with the current tick inside the Range is the RETURN
+            # transition — the price has re-entered after an
+            # out-of-Range episode. ``portfolio.in_range=True`` is the
+            # steady-state "already in Range" case (a plain WAIT).
+            if not portfolio.in_range:
+                return self._return(
+                    admission=admission,
+                    market=market,
+                    portfolio=portfolio,
+                    decision_time=decision_time,
+                    regime_state=regime_state,
+                    regime_outcome=regime_outcome,
+                    fee_outcome=fee_outcome,
+                    component_versions=component_versions,
+                    snapshot_versions=snapshot_versions,
+                )
             return self._wait(
                 admission=admission,
                 market=market,
