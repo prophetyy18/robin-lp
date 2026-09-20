@@ -1,173 +1,150 @@
-# 项目执行规则
+# Repository policy for coding agents
 
-这些规则适用于本仓库中的所有编码代理。
+This file is the canonical repository-wide policy for every coding agent working
+on robinhood-lp. Product intent, specifications, workflow mechanics, and task
+state remain authoritative in their own documents; this file defines the shared
+boundaries agents must respect.
 
-## 1. 目标和依据
+## 1. Authority and conflict handling
 
-- 只交付 V1。不要自行增加 V2、多链、多活动池、多用户或策略市场。
-- V1 最终目标包括 Robinhood Chain mainnet 自动执行。回测、testnet 和 paper 是
-  证据门槛，不是最终交付的替代品。
-- 文档分为 Intent → Spec → Implement 三层，定义见 `docs/README.md`。
-- 文档冲突时按以下顺序处理：
-  1. `docs/intent/PROJECT_GOALS.md`
-  2. `docs/spec/product/`、`docs/spec/strategy/`、`docs/spec/operations/`、
-     `docs/spec/security/`
-  3. `todo/` 中当前任务合同
-  4. `docs/spec/architecture/` 和 `docs/spec/protocol/`
-  5. `docs/implement/`、代码和测试
-- 低优先级内容与高优先级内容冲突时，以高优先级内容为准并报告冲突。不要悄悄
-  选择对实现更方便的版本。
-- 不要把尚未确认的想法写成需求。产品选择不明确且会改变行为时，停止并提问。
+The documentation model is Intent → Spec → Implement; see `docs/README.md`.
+When sources conflict, use this order:
 
-## 2. 执行 TODO
+1. `docs/intent/PROJECT_GOALS.md`;
+2. `docs/spec/product/`, `docs/spec/strategy/`, `docs/spec/operations/`, and
+   `docs/spec/security/`;
+3. the selected task contract under `todo/`;
+4. `docs/spec/architecture/` and `docs/spec/protocol/`;
+5. `docs/implement/`, code, and tests.
 
-- 一次只执行一个编号任务。
-- `todo/config.yaml` 是任务进度的唯一机器可读来源；任务 Markdown 不保存 checkbox。
-- 开始前阅读本文件、`CLAUDE.md`、项目目标、`todo/README.md`、该任务全文、任务引用
-  和所有将修改的文件。
-- 开始前确认所有依赖任务已经完成，且阶段 Entry 条件满足。没有满足就不要编码。
-- 开始前用简短文字列出：Outcome、Dependencies、Deliverables、Acceptance、Must not。
-- 只实现当前任务。不要顺手实现后续任务，不要做无关重构。
-- 当前任务中的 Outcome、Deliverables、Acceptance 和 Must not 都是任务合同，
-  不能只完成其中一部分。
-- 只有独立审查全部通过后，工作流控制器才能把任务改为 `APPROVED`。缺少凭据而
-  跳过的集成测试不算通过。
-- 不要因为代码已经提交、测试数量增加或主要路径能运行就宣称任务完成。
+Report a conflict instead of silently choosing the easier lower-authority
+interpretation. Do not turn an unconfirmed idea into a requirement. If an
+unresolved product choice changes behavior, stop and request an Owner decision.
 
-### 2.1 角色和交接边界
+Canonical ownership is:
 
-- Planner 只澄清 Intent、Spec 和任务合同，并执行只写 `superseded_by` 的退休标注；
-  不实现业务代码，也不伪造验收证据。
-- Owner 可以通过独立 amendment 通道要求 Planner 一次修订一个或多个仍为
-  `PLANNED` 的任务。该通道不需要制造 Developer 失败，不激活任务、不增加实现
-  attempt，且必须由独立 Plan Reviewer 审查后才能合并。
-- 已 `APPROVED` 的任务由同一通道的 `SUPERSEDE` 层退役：只在 `superseded_by` 记录
-  继任者，状态、attempt、commit、证据和审查记录逐字节不变。继任者可以依赖它取代的
-  任务；任何其他任务依赖已退役任务都会被 `ready` 拒绝。
-- 后继任务必须用 `replaces` 声明被替代任务、依赖它所替代的工作，并在合同的
-  `Replacement and migration` 部分写清旧代码入口、历史数据与 artifact、运行切换、
-  下游依赖和验证的处置。退休前，其他仍为 `PLANNED` 的直接消费者必须全部改指后继；
-  `SUPERSEDE` 不得修改旧合同或旧任务的 `depends_on`。
-- 目标、计划结构和附属文档由 `PROPHET` 层负责：`prophet` 起草，`prophet-reviewer`
-  独立审查。该层可以新建任务合同，但**永不修改已存在的合同**；`todo/config.yaml`
-  中已存在的任务必须逐字节不变。它不接受 `--task`，因为新建的任务此刻还不存在。
-- `tools/workflow/`、`.claude/`、`todo/schemas/` 不在任何角色或任何层的范围内，只能由
-  显式 bootstrap 动作变更；依赖清单（`pyproject.toml`、`requirements.in`、
-  `requirements.lock.txt`）不在任何修正层或维护通道的范围内，只有任务合同明确要求时才能
-  由该任务的 Developer 修改。`src/`、`tests/` 和 `.github/` 是普通开发任务的工作面：
-  Developer 在任务合同范围内修改，经独立 Reviewer 审查后才算完成；维护通道只能改它在
-  维护记录里预先声明的具体路径，且不得触碰 `.github/` 或 execution、risk、signer 代码。
-  一个能改写自己门禁的角色等于没有门禁。
-- Issue Triager 只读核对异常证据并区分实现缺陷、任务合同偏差、Spec 缺陷、Owner
-  决策和外部阻塞；发现者提出的分类不是最终分类。
-- Developer 每次以全新上下文在独立 worktree 中只实现一个 `READY` 任务。不得修改
-  Intent、Spec、任务合同、审查记录、审查 Agent 或批准状态；规格不足时返回
-  `TRIAGE_REQUIRED` 和证据，不自行决定分类。
-- Developer 单会话预算不足但任务本身未阻塞时，可以返回
-  `CONTINUATION_REQUIRED`。控制器保持同一 task、attempt、branch、worktree 和
-  `IN_DEVELOPMENT` 状态，再启动一个全新上下文续跑；这不是重试、triage 或审批。
-- Reviewer 每次以全新上下文在 candidate commit 的 detached worktree 中审查。它可以
-  运行验证命令，但不得修改、修复、提交或推送任何内容。
-- Plan Reviewer 在 exact planning base/candidate 上独立检查合同或 Spec 修正；允许有证据
-  的 `NO_CHANGE_REQUIRED`，不得为了制造 diff 要求无意义改文档。
-- Manager 可以解释状态、选择合法的下一步和处理歧义，但不能替代独立 Reviewer
-  批准任务。
-- Agent 之间只以任务合同、base commit、candidate commit 和结构化报告交接。未提交
-  工作区、聊天结论和“已经完成”的自述不是交接证据。
-- `tools.workflow` 只执行 worktree、SHA、路径保护、结构化输出和状态转换等机械门禁；
-  它不判断产品需求或代码语义，也不得启动 Claude。Manager 使用 Claude Code 原生
-  Agent 工具启动、展示和恢复角色，再调用对应的 `prepare-*`/`finish-*` 门禁。
-- 新需求或需求修改必须评估 Intent、Spec、合同、直接与传递依赖、实现与测试、持久化
-  数据和 artifact、运行进程、权限与安全边界以及验证策略。每一条冲突使用稳定 impact
-  ID 单独登记和关闭；`ready` 检查目标任务的完整依赖闭包，不允许依赖仍有未解决冲突
-  的工作继续执行。历史证据保留，但冲突实现不得继续作为当前权威路径。
-- 审查失败后必须启动新的 Developer；修复产生新的 candidate commit 后，再启动新的
-  Reviewer。不得复用导致结论偏置的旧上下文。
-- 正常任务只走开发和审查。只有结构化报告明确要求时才进入 triage；不要把普通实现
-  问题升级成规划阻塞。涉及 Intent 的选择必须停下等待 Owner 决定。
-- 已稳定复现、不会改变 Intent/Spec/公开接口/依赖/安全或交易行为的局部实现缺陷，
-  可以走 `Mxxxx` 维护通道。维护记录不加入产品任务图，但仍必须使用隔离 Developer、
-  exact candidate commit 和独立 Reviewer。维护需要扩大路径或改变行为时必须停止并转入
-  triage 或正式编号任务，不能借“小修”绕过合同。
+- product intent: `docs/intent/PROJECT_GOALS.md`;
+- product, strategy, operations, security, architecture, and protocol
+  requirements: `docs/spec/`;
+- workflow state machine and controller operations: `todo/WORKFLOW.md`;
+- machine-readable task state: `todo/config.yaml`;
+- numbered-task contracts and phase gates: `todo/`;
+- implementation and engineering evidence: `docs/implement/`, code, and tests.
 
-## 3. V1 固定边界
+## 2. Scope, contracts, and trust boundaries
 
-- 只支持 Robinhood Chain，并校验实际 chain ID、部署地址和 runtime code hash。
-- 用户用 contract address 人工选择一个目标 token。系统不得自动选择或切换。
-- 可以发现一个目标 token 的多个候选 PoolKey，但同一时间只能有一个人工选择的
-  活动 PoolKey。
-- Token、配对 Token、PoolKey 和 Hook 分别审批。symbol/name 只用于显示。
-- 不理解 Token 或 Hook 的实际结算行为时，禁止把它用于策略、paper 或 live。
-- 策略只处理正常市场和仓位生命周期；中央风险层执行不可绕过的资金、权限、
-  估值、Gas、损失和回撤限制。
-- 价格、交易量和流动性分布是 V1 策略市场信号边界。涉及 USDG 的价格特征和 5 分钟
-  极端涨跌规则必须使用 T053 合格、按时间点可复现的 USDG 换算；不得用活动池原始
-  相对价格冒充。
-- `NO_NEW_RISK` 是带作用域和 reason code 的风险结果，不是全局运行状态，也不
-  自动退出已有仓位。
-- 价格离开 Range 不等于退出。策略必须明确选择等待、重建、减仓或退出并计算成本。
-- 所有主要资金、风险和绩效以 USDG 等值表达，同时保留原始 token/ETH 整数数量。
-- 除已确认的 5 分钟规则外，不要在进入 paper trading 前自行确定其他经济或风险数值。
-  当前任务实现可配置 schema、版本、校验、测试、证据和审批绑定；临时值标记为
-  `EXPERIMENTAL_NOT_LIVE_APPROVED`。
-- testnet 前可运行 preliminary paper 验证实现，但它不是 live 证据。正式顺序是
-  backtest → testnet → post-testnet paper/shadow → 安全复核 → 人工晋级。
+- Work on one numbered task at a time. Before implementation, confirm its
+  dependencies, phase entry conditions, contract, references, and affected files.
+  Restate its Outcome, Dependencies, Deliverables, Acceptance, and Must not
+  clauses, then implement all and only that contract.
+- `todo/config.yaml` is the only machine-readable progress source. Existing task
+  contracts and approval evidence are immutable history except through the
+  reviewed routes defined in `todo/WORKFLOW.md`. Never edit task state or claim
+  that existing code retroactively satisfies a task.
+- Planner clarifies specifications and eligible contracts but does not implement;
+  Developer implements one authorized task without changing Intent, Spec,
+  contracts, review records, or task state; Reviewer verifies an exact candidate
+  commit without fixing it; Issue Triager classifies exceptions read-only; Manager
+  selects legal workflow actions but cannot substitute for a specialist or approve
+  work. Planning changes also require an independent Plan Reviewer. Detailed role,
+  amendment, maintenance, continuation, and state-transition semantics belong to
+  `todo/WORKFLOW.md` and the role definitions.
+- A task is complete only after an independent Reviewer has checked the recorded
+  candidate commit and the controller records `APPROVED`. Uncommitted files,
+  conversation text, self-review, skipped evidence, or a completion claim are not
+  approval evidence. Handoffs bind the contract, base commit, candidate commit,
+  and structured report. A repaired candidate requires a fresh independent review.
+- Amendments preserve status, attempts, candidate/approval commits, evidence, and
+  review history. Approved work is retired only through the annotation-only
+  `SUPERSEDE` route; its historical contract and evidence are never rewritten.
+- `tools/workflow/`, `.claude/`, and `todo/schemas/` are protected governance
+  surfaces changed only by an explicit bootstrap action. Dependency manifests may
+  change only when a numbered task contract expressly requires it. No role may
+  rewrite the gate that governs its own work.
 
-## 4. Live 和密钥
+## 3. V1 product boundary
 
-- Phase 0–8 不得加入签名、广播、私钥或明文 Keystore 解密能力。
-- Phase 9 中能够签名或广播的任务仍需要该任务写明的用户授权。完成前序任务不等于
-  获得 live 权限。
-- mainnet 交易只能在 T094 的明确、带范围人工晋级之后执行。
-- 主应用、Web、策略和风险进程不得读取私钥或 Keystore 密码。
-- 私钥只保存在标准加密 Web3 Keystore 中。密码只通过不回显的交互式终端输入，
-  不得来自环境变量、配置、CLI 参数、Web、文件、日志或数据库。
-- 明文私钥只允许存在于隔离 signer 的内存中。进程重启后 signer 必须保持锁定。
-- 不得连接或控制用户主钱包，不得自动把退出资产转到外部地址。
-- 不得打印环境变量、凭据 URL、Webhook、私钥、密码、签名原文或授权头。
+- Deliver V1 only: one Owner, Robinhood Chain only, one manually selected target
+  token contract, and one manually selected active `PoolKey` at a time. The system
+  may discover multiple candidates but must not auto-select or switch tokens or
+  pools. Do not add V2, multi-chain, simultaneous active pools, multi-user, or
+  strategy-market behavior.
+- Verify the actual chain ID, deployment addresses, runtime code hashes, Token,
+  paired Token, `PoolKey`, and Hook independently. Names and symbols are display
+  metadata. Unknown Token or Hook settlement behavior is ineligible for strategy,
+  paper, and live use.
+- Strategy handles normal-market signals and position lifecycle. Central risk is
+  mandatory and owns capital, permission, valuation, gas, loss, and drawdown
+  limits. `NO_NEW_RISK` is a scoped result with a reason code, not a global state or
+  an automatic exit. Leaving a range is not itself an exit decision.
+- V1 strategy market signals are price, volume, and liquidity distribution. USDG
+  features and the confirmed five-minute extreme-move rule use T053-qualified,
+  point-in-time reproducible USDG conversion. Primary capital, risk, and
+  performance reporting is in USDG equivalent while retaining original integer
+  token/ETH amounts.
+- Do not invent additional economic or risk thresholds before paper trading.
+  Temporary values must remain configurable, versioned, validated, evidence-bound,
+  and marked `EXPERIMENTAL_NOT_LIVE_APPROVED`.
+- V1 ends in gated Robinhood Chain mainnet execution. Backtest, testnet, and paper
+  are evidence gates, not substitutes: backtest → testnet → post-testnet
+  paper/shadow → security review → explicit human promotion.
 
-## 5. 外部事实
+## 4. Live execution and secrets
 
-- Robinhood Chain、Uniswap 部署、ABI、Hook、Token 和 RPC 能力都会变化。不要凭
-  记忆或从其他链复制。
-- 优先使用官方源码、官方文档和链上读取。第三方页面只能作为交叉验证。
-- 对可变事实记录来源 URL、获取时间、chain ID、区块号/区块哈希和 code hash，
-  适用什么就记录什么。
-- 无法验证时返回 UNKNOWN、暂停或阻止晋级。不要猜默认值。
+- Phases 0–8 may not add signing, broadcast, private-key loading, or plaintext
+  Keystore decryption. Phase 9 permits only the explicitly contracted surfaces;
+  completing earlier work never grants live authority. Mainnet execution requires
+  the scoped human promotion defined by T094.
+- The main application, Web, strategy, and risk processes must never read a private
+  key or Keystore password. Private keys remain encrypted in a standard Web3
+  Keystore and plaintext exists only in isolated signer memory.
+- The signer accepts its password only from a non-echoing interactive terminal.
+  Passwords and plaintext keys must never come from environment variables,
+  configuration, CLI arguments, Web input, files, logs, or databases. A restarted
+  signer is locked.
+- Do not control the Owner's primary wallet or automatically transfer exit assets
+  to an external address. Never print or commit secrets, environment contents,
+  credential-bearing URLs, webhooks, keys, passwords, signing payloads, or
+  authorization headers.
 
-## 6. 代码边界
+## 5. External facts and architecture
 
-- 保持 protocol、RPC、storage、reconstruction、features、strategy、risk、execution、
-  presentation 分层。依赖方向以 `docs/spec/architecture/ARCHITECTURE.md` 为准。
-- strategy 不访问 RPC、数据库、signer 或执行器，不修改账本，也不批准自己的风险。
-- execution 不决定策略，不能绕过中央风险检查。
-- 链上数量、tick、价格编码、liquidity 和会计路径使用整数。只在明确的展示或统计
-  边界转换为 Decimal；协议和会计路径禁止 float。
-- replay、feature、backtest 使用事件时间和当时已可获得的数据。禁止 future data、
-  wall clock 和未固定随机数。
-- 原始数据和审计事件追加写入。不得覆盖、删除或用插值填补缺口。
-- 错误必须带足以定位的 chain、PoolKey、block/range、endpoint、attempt 和原因，
-  同时完成秘密脱敏。
+- Robinhood Chain, Uniswap deployments, ABIs, Hooks, Tokens, and RPC capabilities
+  are mutable facts. Verify them from official source, official documentation, and
+  block-pinned chain reads; third-party pages are cross-checks only. Record the
+  source URL, retrieval time, chain ID, block number/hash, and code hash when
+  applicable. If verification fails, return `UNKNOWN` or block promotion—never
+  guess or copy another chain's values.
+- Preserve the dependency direction in
+  `docs/spec/architecture/ARCHITECTURE.md` across protocol, RPC, storage,
+  reconstruction, features, strategy, risk, execution, and presentation.
+  Strategy must not access RPC, storage, signer, or execution, mutate ledgers, or
+  approve its own risk. Execution must not choose strategy or bypass central risk.
+- Use integers for on-chain quantities, ticks, encoded prices, liquidity, and
+  accounting. Convert to Decimal only at an explicit presentation or statistical
+  boundary; protocol and accounting paths may not use float.
+- Replay, features, and backtests use event time and only information available at
+  the decision timestamp. No future data, wall clock, or unseeded randomness may
+  influence deterministic results.
+- Raw data and audit events are append-only. Never overwrite or delete them or fill
+  gaps by interpolation. Errors must retain applicable chain, `PoolKey`,
+  block/range, endpoint, attempt, and cause while redacting secrets.
 
-## 7. 修改和验证
+## 6. Changes, verification, and reporting
 
-- 先读现有实现，再修改。不要猜代码行为。
-- 使用最小改动完成任务。保留用户已有和无关的工作区改动。
-- 新行为必须有正常、边界、无效输入和失败路径测试。需要两个异质 fixture 时不要
-  用同一个 fixture 改名代替。
-- 完成前运行任务要求的测试，以及 `pytest`、Ruff format/check 和严格 mypy。普通测试
-  输出只要求结果和退出码稳定；只有 fixture、artifact、序列化等确定性产物才要求
-  byte-for-byte 一致。Developer 与独立 Reviewer 各运行一次已经是两次独立验证，不得
-  无理由要求每个普通门禁在同一角色内重复两遍。
-- 测试失败时查明是本次引入还是已有问题。不要删除测试、放宽容差、增加无理由
-  ignore 或降低风险门槛来让 CI 通过。
-- 检查 `git diff` 和 `git diff --check`。不要提交 `.env`、Keystore、密钥、凭据、
-  运行数据或包含秘密的截图。
-- 不要自行 commit、push、merge、部署或发送外部消息。只有用户明确要求时才执行。
-
-## 8. 交付报告
-
-- 说明完成了什么、修改了哪些文件、运行了哪些命令及结果。
-- 列出未满足的验收、跳过的测试、假设、外部事实版本和残余风险。
-- 如果任务没有完成，保持非 `APPROVED` 状态，并准确说明阻塞项。
-- 不使用“应该没问题”“基本完成”或“理论上通过”代替证据。
+- Inspect the current implementation before describing or changing it. Make the
+  smallest contract-complete change and preserve unrelated user work.
+- New behavior needs normal, boundary, invalid-input, and failure-path coverage;
+  use genuinely heterogeneous fixtures when two are required. Run every
+  task-specific check plus `pytest`, Ruff format/check, and strict mypy. Missing
+  credentials or unavailable integration evidence is not a pass.
+- Diagnose failures. Never delete tests, relax acceptance criteria, tolerances,
+  types, safety gates, or risk limits, or add unjustified ignores merely to obtain
+  PASS.
+- Inspect `git diff` and run `git diff --check`. Do not commit, push, merge, deploy,
+  sign, broadcast, or send external messages unless the applicable workflow and
+  explicit Owner authority permit that action.
+- Report changed files, exact commands and results, unmet acceptance items, skipped
+  checks, assumptions, external-fact versions, and residual risks. If work is not
+  approved, say so and preserve its non-`APPROVED` state. Do not replace evidence
+  with “should work”, “mostly complete”, or equivalent language.
