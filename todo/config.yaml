@@ -770,7 +770,8 @@
       "status": "PLANNED",
       "depends_on": [
         "T061",
-        "T070"
+        "T070",
+        "T073"
       ],
       "task_file": "todo/phases/P07-risk-and-paper/T071.md",
       "attempt": 0,
@@ -784,7 +785,8 @@
       "status": "PLANNED",
       "depends_on": [
         "T033",
-        "T071"
+        "T071",
+        "T073"
       ],
       "task_file": "todo/phases/P07-risk-and-paper/T072.md",
       "attempt": 0,
@@ -841,6 +843,7 @@
       "status": "PLANNED",
       "depends_on": [
         "T072",
+        "T073",
         "T080",
         "T081"
       ],
@@ -901,7 +904,9 @@
       "status": "PLANNED",
       "depends_on": [
         "T083",
-        "T085"
+        "T085",
+        "T087",
+        "T088"
       ],
       "task_file": "todo/phases/P08-operations-and-web/T086.md",
       "attempt": 0,

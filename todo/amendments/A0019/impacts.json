@@ -1,0 +1,15 @@
+{
+  "amendment_id": "A0019",
+  "layer": "CONTRACT",
+  "raised": [],
+  "resolves": [
+    "A0013:T071:legacy",
+    "A0013:T072:legacy",
+    "A0013:T082:legacy",
+    "A0013:T085:legacy",
+    "A0013:T086:legacy",
+    "A0013:T091:legacy",
+    "A0013:T103:legacy",
+    "A0013:T104:legacy"
+  ]
+}

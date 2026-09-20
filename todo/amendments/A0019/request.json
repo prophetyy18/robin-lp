@@ -1,0 +1,17 @@
+{
+  "amendment_id": "A0019",
+  "task_ids": [
+    "T071",
+    "T072",
+    "T082",
+    "T085",
+    "T086",
+    "T091",
+    "T103",
+    "T104"
+  ],
+  "layer": "CONTRACT",
+  "target_status": "PLANNED",
+  "summary": "close the eight remaining A0013 contract findings on paper authorization, the write path, journeys, caller classes and page ownership",
+  "owner_direction": "Owner direction: close the eight remaining A0013 contract findings as one homogeneous batch, without changing any other task, document or revision. T071, T072 and T082: state the G-PAPER-AUTHORIZE-01 prerequisite explicitly, namely that pool selection, both tokens HOLD and LP approvals, and the preliminary paper authorization must be completed through the Web entry point before this task operates paper, and add the dependency that makes the prerequisite real, T073, whose versioned write path delivers those authorizations, rather than leaving the constraint only in the phase documents. T085: state that it extends the same versioned write path T073 delivered rather than creating a second mechanism, and narrow its CLI prohibition so it matches CTRL-CLI-001 exactly: CLI writes may only reduce risk, and any increase must fail closed and point at the Web entry instead of being refused wholesale or routed through Web approval on every decrease. T086: extend the owner journey list and the Web safety and accessibility scope to cover the two console pages WEB-PAGE-012 and WEB-PAGE-013, and add T087 and T088 to its dependencies. T091: declare that the planner accepts more than one intent class, naming the CLI reduce, collect and exit intents T097 sends as a declared planning path through the same pre-execution checks, while every risk increase still goes through the Web write entry. T103: state explicitly that its results view is not the specification named backtest result page, which T088 owns with WEB-PAGE-013, and that any training or evaluation trigger it offers carries T069 run identity and lifecycle semantics instead of implying a second run surface. T104: acknowledge the second console consumer, namely the T088 backtest result page, and require every range or liquidity value it renders to declare the window, dataset version and reconstruction revision it came from, exactly as this task already requires of its own view. Preserve every still-valid obligation, acceptance criterion and Must-not clause; change only these eight contracts and their dependency fields; resolve exactly the open A0013 impacts this amendment genuinely closes, leaving every other impact open and naming it."
+}
