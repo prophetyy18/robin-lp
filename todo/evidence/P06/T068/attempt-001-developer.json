@@ -1,0 +1,39 @@
+{
+  "task_id": "T068",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Completed T068 attempt 1: implemented src/robinhood_lp/strategy/registry.py as the closed strategy-identity vocabulary the T105 manifest authority binds to. The registry enumerates six identities (the five T062 baselines plus the T065 adaptive-Range strategy), each carrying its parameter schema, version and CodeProvenance (module + revision + symbol). The registry exposes deterministic validation surface (is_registered / lookup / validate_parameters / checksum) and a layer-purity check (assert_registry_layer_is_pure) that walks the live module graph and rejects imports of RPC, storage, signer, web, presentation, backtest, replay, risk, execution, features, ingestion, discovery, qualification, quality, config and the registered strategy implementation modules at lookup time. Re-exports added to src/robinhood_lp/strategy/__init__.py. tests/test_strategy_t068.py covers every acceptance clause (94 tests) and all pass. Import-graph check (`python -m tools.check_imports check`) reports no finding for the registry. The registry never publishes or validates a manifest; that surface remains T105's exclusive responsibility. The single full-suite failure (tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output) is a pre-existing Foundry/V4-core submodule path issue unrelated to T068 and unaffected by these changes.",
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/test_strategy_t068.py -x --tb=short",
+      "result": "94 passed in 0.15s"
+    },
+    {
+      "command": "python3 -m pytest tests/test_strategy_t060.py tests/test_strategy_t062.py tests/test_strategy_t065.py tests/test_strategy_t068.py --tb=short",
+      "result": "261 passed in 0.37s"
+    },
+    {
+      "command": "python3 -m pytest tests/ --tb=short",
+      "result": "2417 passed, 6 skipped, 1 failed (test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output; pre-existing Foundry/V4-core submodule path issue, unrelated to T068)"
+    },
+    {
+      "command": "python3 -m tools.check_imports check",
+      "result": "import-graph check passed: no findings"
+    },
+    {
+      "command": "python3 -m ruff check src/robinhood_lp/strategy/registry.py src/robinhood_lp/strategy/__init__.py tests/test_strategy_t068.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python3 -m mypy src/robinhood_lp/strategy/registry.py",
+      "result": "Success: no issues found in 1 source file"
+    },
+    {
+      "command": "python3 -c 'from robinhood_lp.strategy.registry import assert_registry_layer_is_pure, resolve_module_revision, registry_checksum, registered_identities; assert_registry_layer_is_pure(); print(repr(resolve_module_revision(module_name=\"robinhood_lp.strategy.baselines\"))); print(repr(resolve_module_revision(module_name=\"robinhood_lp.strategy.adaptive\"))); print(registry_checksum()); print(registered_identities())'",
+      "result": "layer_purity: ok; revision bas='027824ef37cdaf9fe8fee68e4afd1063ed8b6237'; revision adapt='027824ef37cdaf9fe8fee68e4afd1063ed8b6237'; checksum=b92593989885b742fe2f3edc8c8e1d18139f2a877b996642d2d24b0419ed8607; identities=('t062.broad_range.v1','t062.fixed_width.v1','t062.hold.v1','t062.out_of_range_rebalance.v1','t062.volatility_width.v1','t065.adaptive_range.v1')"
+    }
+  ],
+  "residual_risks": [
+    "test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails on this machine because the tools/oracle/lib/v4-core git submodule is not initialised in the worktree; this is a pre-existing environment issue independent of T068 and unrelated to the registry / strategy layer.",
+    "The registry does not include a `__init_subclass__` or `runtime_checkable` rejection of concrete factory classes that do not implement `build` (it relies on the registered object satisfying the runtime-checkable Protocol). A factory class that returns a non-strategy object from build() will pass the registry but fail downstream; this is intentional — the registry's contract is structural, not semantic, and the manifest layer's responsibility."
+  ]
+}
