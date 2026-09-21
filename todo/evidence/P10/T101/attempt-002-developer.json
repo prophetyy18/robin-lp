@@ -1,0 +1,56 @@
+{
+  "task_id": "T101",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Repaired T101 per review-001.json required_changes. (1) build_panel_provenance now cross-checks every member against the panel-level registry_revision; declared_schema_version and declared_decode_version parameters (optional) tighten the gate further and PanelProvenance carries them forward in the content hash and to_dict() payload. A disagreement raises PanelRegistryRevisionError, with positive (matching) and negative (registry/schema/decode mismatch, invalid value) tests added. (2) FeatureRegistrySnapshot now exposes a get() that resolves a column name against the bound declarations; run_fold_evaluation replaced the synthetic index-rotation placeholder with a real lookup through that snapshot, so both an off-snapshot column and a future-derived decision_time surface FoldVerdictCode.FORWARD_FEATURE_REJECTED through the fold-level path. (3) apply_split_to_panel accepts sample_features: Mapping[str, PanelFeatureRow] and threads the real populated rows into the per-fold (train, eval) tuples; the test pins the populated path and rejects a non-PanelFeatureRow mapping. All existing T101 tests (60) continue to pass; 14 new tests cover the repair. The repository-wide static gates (import-graph, ruff lint, ruff format, mypy) are green on the T101 surface; the two pre-existing base-commit failures (forge oracle + architecture-section22) reproduce on the unchanged base and are not introduced by T101.",
+  "commands": [
+    {
+      "command": "python -m pytest tests/test_panel_t101.py --tb=short -q",
+      "result": "74 passed in 0.16s"
+    },
+    {
+      "command": "python -m pytest tests/test_panel_t101.py tests/ -k 't100 or research or dataset or panel_t101' --tb=short -q",
+      "result": "256 passed, 2544 deselected in 5.72s"
+    },
+    {
+      "command": "python -m pytest tests/ -q --tb=line",
+      "result": "2792 passed, 6 skipped, 2 failed (test_abi_artifacts forge-oracle source-path; test_documentation_citations architecture-section22 T069 finding — both reproduce on the unchanged base commit a414ab7 and are not introduced by T101)"
+    },
+    {
+      "command": "python -m tools.check_imports check",
+      "result": "import-graph check passed: no findings"
+    },
+    {
+      "command": "python -m ruff check src/ tests/ tools/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python -m ruff format --check src/robinhood_lp/research/ tests/test_panel_t101.py",
+      "result": "10 files already formatted"
+    },
+    {
+      "command": "python -m mypy src/robinhood_lp/research/",
+      "result": "Success: no issues found in 9 source files"
+    },
+    {
+      "command": "python -m mypy src/",
+      "result": "Success: no issues found in 138 source files"
+    },
+    {
+      "command": "verify the registry-revision gate by running the matching + 3 mismatch tests + 2 invalid-declared tests by name",
+      "result": "test_build_panel_provenance_accepts_matching_member_registry_revision, test_build_panel_provenance_refuses_member_registry_revision_mismatch, test_build_panel_provenance_refuses_member_schema_version_mismatch, test_build_panel_provenance_refuses_member_decode_version_mismatch, test_build_panel_provenance_accepts_match_when_no_revisions_declared, test_build_panel_provenance_rejects_invalid_declared_schema_version, test_build_panel_provenance_rejects_invalid_declared_decode_version, test_panel_provenance_to_dict_includes_declared_revisions — all PASSED"
+    },
+    {
+      "command": "verify the fold-level forward-feature gate by running the two new tests",
+      "result": "test_run_fold_evaluation_returns_forward_feature_rejected_for_off_snapshot_column, test_run_fold_evaluation_returns_forward_feature_rejected_for_future_derived_column — both PASSED"
+    },
+    {
+      "command": "verify the apply_split_to_panel threading by running the populated-path + rejection tests + snapshot.get tests",
+      "result": "test_apply_split_to_panel_threads_feature_rows_into_train_eval, test_apply_split_to_panel_rejects_non_feature_row_mapping, test_feature_registry_snapshot_get_returns_declared_column, test_feature_registry_snapshot_get_rejects_unknown_column — all PASSED"
+    }
+  ],
+  "residual_risks": [
+    "Two pre-existing repository-wide failures (test_abi_artifacts forge oracle; test_documentation_citations architecture-section22 T069 finding) reproduce on the unchanged base commit a414ab7 and are not introduced by T101; both still surface in the full pytest output and the reviewer should verify them out-of-band before approving.",
+    "The fold-level forward-feature gate now uses the bound registry snapshot to resolve each feature_columns entry by name; a fold whose feature_columns carries a column the snapshot does not declare yields FORWARD_FEATURE_REJECTED. This is the conservative path T102's real feature matrix must populate consistently; absent that, the rejection guard triggers more often than a live consumer would prefer. A future task wiring the panel feature matrix through the fold configuration will keep the gate on while allowing the real names.",
+    "The PanelRegistryRevisionError gate fires on every member whose registry_revision differs from the panel-level bound revision. The T100/T069 callers are expected to declare members from a single registry revision; if a future revisioned dataset ever needs to ride alongside an older one, the partition must happen at the dataset layer (separate PanelProvenance per revision) rather than by relaxing this gate."
+  ]
+}

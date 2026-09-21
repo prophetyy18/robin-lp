@@ -511,17 +511,31 @@ def apply_split_to_panel(
     sample_pool_ids: Mapping[str, str],
     feature_registry: FeatureRegistry,
     label_schema: LabelSchema,
+    sample_features: Mapping[str, PanelFeatureRow] | None = None,
 ) -> tuple[tuple[tuple[PanelFeatureRow, ...], tuple[PanelFeatureRow, ...]], ...]:
     """Partition the panel into per-fold (training, evaluation) tuples.
 
-    The function consumes the sample ids the harness supplies,
-    applies the split mode's stratification (time for
-    ``TIME_HOLDOUT`` and ``WALK_FORWARD``; pool for
-    ``POOL_HOLDOUT``), enforces the purge + embargo gap and
-    returns one (training, evaluation) pair per fold.
+    The function consumes the sample ids and (optionally) the
+    per-sample :class:`PanelFeatureRow` objects the panel
+    builder populated, applies the split mode's stratification
+    (time for ``TIME_HOLDOUT`` and ``WALK_FORWARD``; pool for
+    ``POOL_HOLDOUT``), enforces the purge + embargo gap, and
+    returns one ``(training, evaluation)`` pair per fold.
 
-    Note: ``feature_registry`` and ``label_schema`` are accepted
-    so the call site documents the cross-references; the split
+    The per-fold ``(train, eval)`` entries are tuples of
+    :class:`PanelFeatureRow` instances carrying the actual
+    integer column values the panel assembled for each
+    sample. A sample id without a matching
+    :class:`PanelFeatureRow` (the caller passed
+    ``sample_features=None`` or omitted a sample) yields an
+    empty ``PanelFeatureRow(columns={})`` placeholder so the
+    fold shape remains regular; the harness then surfaces that
+    absence downstream via
+    :class:`HarnessSplitPopulationError` rather than silently
+    publishing an unpopulated fold.
+
+    ``feature_registry`` and ``label_schema`` are accepted so
+    the call site documents the cross-references; the split
     population does not consult either of them (the panel rows
     are already registry-validated at ``assemble_panel_dataset``
     time).
@@ -552,7 +566,20 @@ def apply_split_to_panel(
             f"apply_split_to_panel: label_schema must be LabelSchema, "
             f"got {type(label_schema).__name__}"
         )
+    if sample_features is not None and not isinstance(sample_features, Mapping):
+        raise HarnessError(
+            f"apply_split_to_panel: sample_features must be Mapping "
+            f"or None, got {type(sample_features).__name__}"
+        )
+    if sample_features is not None:
+        for sample_id, row in sample_features.items():
+            if not isinstance(row, PanelFeatureRow):
+                raise HarnessError(
+                    f"apply_split_to_panel: sample_features[{sample_id!r}] "
+                    f"must be PanelFeatureRow, got {type(row).__name__}"
+                )
 
+    features: Mapping[str, PanelFeatureRow] = sample_features if sample_features is not None else {}
     folds = _intervals_from_split(split_definition)
     results: list[tuple[tuple[PanelFeatureRow, ...], tuple[PanelFeatureRow, ...]]] = []
     for fold in folds:
@@ -561,11 +588,11 @@ def apply_split_to_panel(
             fold=fold,
             sample_decision_times=sample_decision_times,
             sample_pool_ids=sample_pool_ids,
-            sample_features={},
+            sample_features=features,
         )
-        train_ids = [row for _, row in train_pairs]
-        eval_ids = [row for _, row in eval_pairs]
-        results.append((tuple(train_ids), tuple(eval_ids)))
+        train_rows = [row for _, row in train_pairs]
+        eval_rows = [row for _, row in eval_pairs]
+        results.append((tuple(train_rows), tuple(eval_rows)))
     return tuple(results)
 
 
@@ -935,23 +962,33 @@ def run_fold_evaluation(
     # Honour the forward-feature gate the registry enforces
     # (``DS-010``). The harness re-checks the registry at fit
     # time so a misconfigured config surfaces here rather than
-    # silently producing a forward-aware model. We re-build the
-    # registry from the snapshot's declarations so the gate is
-    # checked against the same content hash the split and panel
-    # bound to.
+    # silently producing a forward-aware model. We resolve each
+    # ``feature_columns`` entry through the bound snapshot so the
+    # gate runs against the same content hash the split and
+    # panel are pinned to. A column absent from the snapshot
+    # is itself a forward-feature refusal: the fold cannot
+    # consume a column the panel did not bind to.
     try:
-        # The forward-feature gate runs against every column the
-        # evaluation fold references. We don't know the eval
-        # columns' declarations except through the registry
-        # snapshot; passing them by name here is a placeholder
-        # so the validation step runs once at fit time.
+        try:
+            declarations = [
+                config.registry_snapshot.get(column_name) for column_name in feature_columns
+            ]
+        except UnknownFeatureError:
+            return FoldEvaluation(
+                fold_index=fold_index,
+                config_content_hash=config.content_hash,
+                feature_importance=FeatureImportance(column_names=(), importances=()),
+                trivial_baseline=compare_against_trivial_baseline(
+                    model_predictions=[0.0] * max(len(eval_targets), 1),
+                    trivial_predictions=[0.0] * max(len(eval_targets), 1),
+                    higher_is_better=True,
+                ),
+                model_artifact=None,
+                sample_size_disclosure=sample_size_disclosure,
+                verdict=FoldVerdictCode.FORWARD_FEATURE_REJECTED,
+            )
         validate_panel_against_decision_time(
-            [
-                config.registry_snapshot.declarations[
-                    i % len(config.registry_snapshot.declarations)
-                ]
-                for i in range(len(feature_columns))
-            ],
+            declarations,
             decision_time=eval_decision_time,
             decision_time_kind=config.decision_time_kind,
         )

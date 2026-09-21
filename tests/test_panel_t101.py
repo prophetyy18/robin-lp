@@ -77,12 +77,14 @@ from robinhood_lp.research.features import (
     FeatureFamily,
     FeatureRegistry,
     ForwardFeatureError,
+    UnknownFeatureError,
     default_panel_feature_registry,
     validate_panel_against_decision_time,
 )
 from robinhood_lp.research.harness import (
     HARNESS_VERSION,
     FoldVerdictCode,
+    HarnessError,
     TrainingHarnessConfig,
     apply_split_to_panel,
     assemble_panel_dataset,
@@ -117,11 +119,13 @@ from robinhood_lp.research.models import (
 from robinhood_lp.research.panel import (
     LEGACY_MANIFEST_MARKER,
     PanelCancelledRunError,
+    PanelError,
     PanelFailedRunError,
     PanelFeatureRow,
     PanelLabelRow,
     PanelLegacyManifestError,
     PanelMemberIdentity,
+    PanelRegistryRevisionError,
     PanelRunIdentity,
     PanelUnknownMemberError,
     RunLifecycleState,
@@ -204,7 +208,7 @@ def _make_member_identity(
     chain_id: int = CHAIN_ID,
     schema_version: int = 3,
     decode_version: int = 2,
-    registry_revision: str = "rev-1",
+    registry_revision: str = "reg-hash",
     source_checksum: str | None = None,
 ) -> PanelMemberIdentity:
     return PanelMemberIdentity(
@@ -1274,3 +1278,296 @@ def test_boundary_q64_to_int_large_value() -> None:
     boundary = Q64_64_FloatBoundary()
     f_value = boundary.from_int(BOUNDARY_Q64 << 4)
     assert boundary.to_int(f_value) == (BOUNDARY_Q64 << 4)
+
+
+# ---------------------------------------------------------------------------
+# Registry / schema revision cross-check tests (T101 acceptance)
+# ---------------------------------------------------------------------------
+
+
+def test_build_panel_provenance_accepts_matching_member_registry_revision() -> None:
+    """All members sharing the panel-level ``registry_revision`` is admitted.
+
+    The acceptance clause's "members whose registry or schema
+    revisions are incompatible" must remain silent when every
+    member's record does agree with the declared panel binding.
+    """
+    provenance = build_panel_provenance(
+        run_identity=_make_succeeded_run_identity(),
+        member_identities=[
+            _make_member_identity(PK_A, registry_revision="reg-hash"),
+            _make_member_identity(PK_B, registry_revision="reg-hash"),
+        ],
+        registry_revision="reg-hash",
+        label_schema_digest="label-hash",
+        declared_label_horizons=[300, 3600],
+    )
+    assert provenance.registry_revision == "reg-hash"
+    for member in provenance.member_identities:
+        assert member.registry_revision == "reg-hash"
+
+
+def test_build_panel_provenance_refuses_member_registry_revision_mismatch() -> None:
+    """A member whose ``registry_revision`` disagrees with the panel-level
+    ``registry_revision`` raises :class:`PanelRegistryRevisionError`.
+
+    The acceptance clause explicitly bans "merge or backfill
+    samples from incompatible registry or schema revisions";
+    this test pins the refusal.
+    """
+    mismatched_member = _make_member_identity(PK_A, registry_revision="other-rev")
+    with pytest.raises(PanelRegistryRevisionError):
+        build_panel_provenance(
+            run_identity=_make_succeeded_run_identity(),
+            member_identities=[mismatched_member],
+            registry_revision="reg-hash",
+            label_schema_digest="label-hash",
+            declared_label_horizons=[300, 3600],
+        )
+
+
+def test_build_panel_provenance_refuses_member_schema_version_mismatch() -> None:
+    """A member whose ``schema_version`` disagrees with the declared
+    ``schema_version`` raises :class:`PanelRegistryRevisionError`."""
+    mismatched_member = _make_member_identity(PK_A, schema_version=7)
+    with pytest.raises(PanelRegistryRevisionError):
+        build_panel_provenance(
+            run_identity=_make_succeeded_run_identity(),
+            member_identities=[mismatched_member],
+            registry_revision="reg-hash",
+            label_schema_digest="label-hash",
+            declared_label_horizons=[300, 3600],
+            declared_schema_version=3,
+        )
+
+
+def test_build_panel_provenance_refuses_member_decode_version_mismatch() -> None:
+    """A member whose ``decode_version`` disagrees with the declared
+    ``decode_version`` raises :class:`PanelRegistryRevisionError`."""
+    mismatched_member = _make_member_identity(PK_A, decode_version=9)
+    with pytest.raises(PanelRegistryRevisionError):
+        build_panel_provenance(
+            run_identity=_make_succeeded_run_identity(),
+            member_identities=[mismatched_member],
+            registry_revision="reg-hash",
+            label_schema_digest="label-hash",
+            declared_label_horizons=[300, 3600],
+            declared_decode_version=2,
+        )
+
+
+def test_build_panel_provenance_accepts_match_when_no_revisions_declared() -> None:
+    """A panel built without declared schema/decode versions admits
+    members of any consistent values; only the registry
+    ``registry_revision`` is enforced in that regime."""
+    provenance = build_panel_provenance(
+        run_identity=_make_succeeded_run_identity(),
+        member_identities=[_make_member_identity(PK_A, schema_version=5, decode_version=4)],
+        registry_revision="reg-hash",
+        label_schema_digest="label-hash",
+        declared_label_horizons=[300, 3600],
+    )
+    assert provenance.declared_schema_version is None
+    assert provenance.declared_decode_version is None
+
+
+def test_build_panel_provenance_rejects_invalid_declared_schema_version() -> None:
+    """A non-positive ``declared_schema_version`` is rejected."""
+    with pytest.raises(PanelError):
+        build_panel_provenance(
+            run_identity=_make_succeeded_run_identity(),
+            member_identities=[_make_member_identity(PK_A)],
+            registry_revision="reg-hash",
+            label_schema_digest="label-hash",
+            declared_label_horizons=[300, 3600],
+            declared_schema_version=0,
+        )
+
+
+def test_build_panel_provenance_rejects_invalid_declared_decode_version() -> None:
+    """A non-positive ``declared_decode_version`` is rejected."""
+    with pytest.raises(PanelError):
+        build_panel_provenance(
+            run_identity=_make_succeeded_run_identity(),
+            member_identities=[_make_member_identity(PK_A)],
+            registry_revision="reg-hash",
+            label_schema_digest="label-hash",
+            declared_label_horizons=[300, 3600],
+            declared_decode_version=0,
+        )
+
+
+def test_panel_provenance_to_dict_includes_declared_revisions() -> None:
+    """The :meth:`PanelProvenance.to_dict` payload carries the declared
+    schema and decode revisions so a re-run validates them."""
+    provenance = build_panel_provenance(
+        run_identity=_make_succeeded_run_identity(),
+        member_identities=[_make_member_identity(PK_A)],
+        registry_revision="reg-hash",
+        label_schema_digest="label-hash",
+        declared_label_horizons=[300, 3600],
+        declared_schema_version=3,
+        declared_decode_version=2,
+    )
+    payload = provenance.to_dict()
+    assert payload["declared_schema_version"] == 3
+    assert payload["declared_decode_version"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Fold-level forward-feature gate (T101 acceptance)
+# ---------------------------------------------------------------------------
+
+
+def test_run_fold_evaluation_returns_forward_feature_rejected_for_off_snapshot_column() -> None:
+    """A column the registry snapshot does not bind triggers
+    :class:`FoldVerdictCode.FORWARD_FEATURE_REJECTED`.
+
+    The previous attempt relied on a synthetic index-rotation
+    placeholder; this test pins the real registry-snapshot
+    lookup the harness now performs for every entry of
+    ``feature_columns``.
+    """
+    cfg = _make_harness()
+    res = run_fold_evaluation(
+        config=cfg,
+        fold_index=0,
+        feature_columns=("panel_volume_token0", "off_snapshot_column"),
+        train_features=[[1.0, 2.0]] * 10,
+        train_targets=[3.0] * 10,
+        eval_features=[[1.0, 2.0]] * 10,
+        eval_targets=[3.0] * 10,
+        eval_decision_time=11_000,
+    )
+    assert res.verdict is FoldVerdictCode.FORWARD_FEATURE_REJECTED
+
+
+def test_run_fold_evaluation_returns_forward_feature_rejected_for_future_derived_column() -> None:
+    """A column whose ``availability_time`` exceeds ``eval_decision_time``
+    triggers :class:`FoldVerdictCode.FORWARD_FEATURE_REJECTED`.
+
+    The test forces the forward-feature condition through the
+    real registry-snapshot lookup the harness performs (not
+    the deprecated index rotation).
+    """
+    cfg = _make_harness()
+    # ``panel_volume_token0`` is declared with
+    # ``availability_time=310`` in the default harness; any
+    # ``eval_decision_time`` below 310 is forward-derived.
+    res = run_fold_evaluation(
+        config=cfg,
+        fold_index=0,
+        feature_columns=("panel_volume_token0", "panel_realized_variance_q64_64"),
+        train_features=[[1.0, 2.0]] * 10,
+        train_targets=[3.0] * 10,
+        eval_features=[[1.0, 2.0]] * 10,
+        eval_targets=[3.0] * 10,
+        eval_decision_time=100,
+    )
+    assert res.verdict is FoldVerdictCode.FORWARD_FEATURE_REJECTED
+
+
+# ---------------------------------------------------------------------------
+# apply_split_to_panel threading of feature rows (T101 acceptance)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_split_to_panel_threads_feature_rows_into_train_eval() -> None:
+    """The per-fold ``(train, eval)`` tuples carry the actual
+    :class:`PanelFeatureRow` objects the caller supplied.
+
+    The previous attempt emitted empty
+    :class:`PanelFeatureRow(columns={})` placeholders; this
+    test pins the populated path so downstream model consumers
+    receive the real integer column values.
+    """
+    split = _make_pool_split(["P0", "P1", "P2"])
+    pairs = apply_split_to_panel(
+        split_definition=split,
+        sample_decision_times={"a": 0, "b": 0, "c": 0, "d": 0},
+        sample_pool_ids={
+            "a": "P0",
+            "b": "P1",
+            "c": "P1",
+            "d": "P0",
+        },
+        feature_registry=_make_feature_registry(),
+        label_schema=_make_label_schema(),
+        sample_features={
+            "a": PanelFeatureRow(
+                sample_id="a",
+                columns={"panel_volume_token0": 11, "panel_realized_variance_q64_64": 21},
+            ),
+            "b": PanelFeatureRow(
+                sample_id="b",
+                columns={"panel_volume_token0": 12, "panel_realized_variance_q64_64": 22},
+            ),
+            "c": PanelFeatureRow(
+                sample_id="c",
+                columns={"panel_volume_token0": 13, "panel_realized_variance_q64_64": 23},
+            ),
+            "d": PanelFeatureRow(
+                sample_id="d",
+                columns={"panel_volume_token0": 14, "panel_realized_variance_q64_64": 24},
+            ),
+        },
+    )
+    train_rows = pairs[0][0]
+    eval_rows = pairs[0][1]
+    rows_by_id = {r.sample_id: r for r in (*train_rows, *eval_rows)}
+    # ``a`` and ``d`` are eval, ``b`` and ``c`` are train
+    # (POOL_HOLDOUT holds out the alphabetically first pool).
+    assert rows_by_id["a"].columns == {
+        "panel_volume_token0": 11,
+        "panel_realized_variance_q64_64": 21,
+    }
+    assert rows_by_id["b"].columns == {
+        "panel_volume_token0": 12,
+        "panel_realized_variance_q64_64": 22,
+    }
+    assert rows_by_id["c"].columns == {
+        "panel_volume_token0": 13,
+        "panel_realized_variance_q64_64": 23,
+    }
+    assert rows_by_id["d"].columns == {
+        "panel_volume_token0": 14,
+        "panel_realized_variance_q64_64": 24,
+    }
+    # No row should have been collapsed to an empty mapping
+    # (the previous attempt's defect).
+    for row in (*train_rows, *eval_rows):
+        assert row.columns != {}
+
+
+def test_apply_split_to_panel_rejects_non_feature_row_mapping() -> None:
+    """A ``sample_features`` mapping carrying a non-``PanelFeatureRow``
+    entry is refused with :class:`HarnessError`."""
+    split = _make_pool_split(["P0", "P1"])
+    with pytest.raises(HarnessError):
+        apply_split_to_panel(
+            split_definition=split,
+            sample_decision_times={"a": 0},
+            sample_pool_ids={"a": "P0"},
+            feature_registry=_make_feature_registry(),
+            label_schema=_make_label_schema(),
+            sample_features={"a": {"panel_volume_token0": 1}},  # type: ignore[dict-item]
+        )
+
+
+# ---------------------------------------------------------------------------
+# Feature registry snapshot lookup (T101 acceptance)
+# ---------------------------------------------------------------------------
+
+
+def test_feature_registry_snapshot_get_returns_declared_column() -> None:
+    """The snapshot exposes a ``get`` that resolves a column by name,
+    raising :class:`UnknownFeatureError` for an absent one."""
+    snapshot = _make_feature_registry().snapshot(declared_at_unix_seconds=0)
+    declaration = snapshot.get("panel_volume_token0")
+    assert declaration.column_name == "panel_volume_token0"
+
+
+def test_feature_registry_snapshot_get_rejects_unknown_column() -> None:
+    snapshot = _make_feature_registry().snapshot(declared_at_unix_seconds=0)
+    with pytest.raises(UnknownFeatureError):
+        snapshot.get("off_snapshot_column")

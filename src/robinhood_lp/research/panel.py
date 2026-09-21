@@ -579,14 +579,22 @@ class PanelProvenance:
     - ``member_identities`` — the bound ``(chain_id, PoolKey)``
       identities; every panel row's :attr:`PanelSampleProvenance.member_identity`
       must be present here;
-    - ``registry_revision`` — the feature registry content hash;
+    - ``registry_revision`` — the feature registry content hash
+      that bound every member;
+    - ``declared_schema_version`` / ``declared_decode_version`` —
+      the dataset-decode revisions every member must carry
+      (``None`` when the caller did not declare a level);
     - ``label_schema_digest`` — the label-schema digest;
     - ``content_hash`` — SHA-256 hex digest of the canonical
       representation of the panel's binding.
 
     A :class:`PanelProvenance` admits only a run whose lifecycle
     is ``SUCCEEDED``. Building a panel from a legacy
-    pre-registry manifest raises :class:`PanelLegacyManifestError`.
+    pre-registry manifest raises :class:`PanelLegacyManifestError`;
+    a member whose ``registry_revision``,
+    ``schema_version`` or ``decode_version`` disagrees with the
+    panel-level declarations raises
+    :class:`PanelRegistryRevisionError`.
     """
 
     #: Schema version. Bumping is a breaking change.
@@ -599,6 +607,8 @@ class PanelProvenance:
     declared_label_horizons: tuple[int, ...]
     content_hash: str
     version: str = VERSION
+    declared_schema_version: int | None = None
+    declared_decode_version: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.version, str) or not self.version:
@@ -659,6 +669,34 @@ class PanelProvenance:
                     f"PanelProvenance.declared_label_horizons: every "
                     f"entry must be > 0, got {horizon}"
                 )
+        if self.declared_schema_version is not None and (
+            not isinstance(self.declared_schema_version, int)
+            or isinstance(self.declared_schema_version, bool)
+        ):
+            raise PanelError(
+                f"PanelProvenance.declared_schema_version: must be int "
+                f"or None, got "
+                f"{type(self.declared_schema_version).__name__}"
+            )
+        if self.declared_schema_version is not None and self.declared_schema_version < 1:
+            raise PanelError(
+                f"PanelProvenance.declared_schema_version: must be >= 1 "
+                f"when provided, got {self.declared_schema_version}"
+            )
+        if self.declared_decode_version is not None and (
+            not isinstance(self.declared_decode_version, int)
+            or isinstance(self.declared_decode_version, bool)
+        ):
+            raise PanelError(
+                f"PanelProvenance.declared_decode_version: must be int "
+                f"or None, got "
+                f"{type(self.declared_decode_version).__name__}"
+            )
+        if self.declared_decode_version is not None and self.declared_decode_version < 1:
+            raise PanelError(
+                f"PanelProvenance.declared_decode_version: must be >= 1 "
+                f"when provided, got {self.declared_decode_version}"
+            )
         if not isinstance(self.content_hash, str) or not self.content_hash:
             raise PanelError(
                 f"PanelProvenance.content_hash: must be non-empty str, got {self.content_hash!r}"
@@ -690,6 +728,8 @@ class PanelProvenance:
             "registry_revision": self.registry_revision,
             "label_schema_digest": self.label_schema_digest,
             "declared_label_horizons": list(self.declared_label_horizons),
+            "declared_schema_version": self.declared_schema_version,
+            "declared_decode_version": self.declared_decode_version,
             "content_hash": self.content_hash,
         }
 
@@ -722,13 +762,26 @@ def build_panel_provenance(
     registry_revision: str,
     label_schema_digest: str,
     declared_label_horizons: Iterable[int],
+    declared_schema_version: int | None = None,
+    declared_decode_version: int | None = None,
 ) -> PanelProvenance:
     """Build the :class:`PanelProvenance` for one run.
 
-    The function refuses a non-``SUCCEEDED`` run identity,
-    refuses a legacy pre-registry manifest, and produces a
-    content hash from the canonical representation so a
-    re-derivation validates.
+    The function refuses:
+
+    - a non-``SUCCEEDED`` run identity (:class:`PanelFailedRunError`,
+      :class:`PanelCancelledRunError`,
+      :class:`PanelRunIdentityError`);
+    - a legacy pre-registry manifest marker (caller-side, via
+      :func:`assert_not_legacy_manifest_marker`);
+    - any member whose ``registry_revision`` disagrees with the
+      panel-level ``registry_revision``, or whose
+      ``schema_version`` / ``decode_version`` disagrees with the
+      declared revisions when those are supplied
+      (:class:`PanelRegistryRevisionError`).
+
+    Otherwise the function produces a content hash from the
+    canonical representation so a re-derivation validates.
     """
     if not isinstance(run_identity, PanelRunIdentity):
         raise PanelError(
@@ -755,11 +808,79 @@ def build_panel_provenance(
             f"build_panel_provenance: declared_label_horizons must be "
             f"Iterable, got {type(declared_label_horizons).__name__}"
         )
+    if declared_schema_version is not None and (
+        not isinstance(declared_schema_version, int) or isinstance(declared_schema_version, bool)
+    ):
+        raise PanelError(
+            f"build_panel_provenance: declared_schema_version must be "
+            f"int or None, got "
+            f"{type(declared_schema_version).__name__}"
+        )
+    if declared_schema_version is not None and declared_schema_version < 1:
+        raise PanelError(
+            f"build_panel_provenance: declared_schema_version must be "
+            f">= 1 when provided, got {declared_schema_version}"
+        )
+    if declared_decode_version is not None and (
+        not isinstance(declared_decode_version, int) or isinstance(declared_decode_version, bool)
+    ):
+        raise PanelError(
+            f"build_panel_provenance: declared_decode_version must be "
+            f"int or None, got "
+            f"{type(declared_decode_version).__name__}"
+        )
+    if declared_decode_version is not None and declared_decode_version < 1:
+        raise PanelError(
+            f"build_panel_provenance: declared_decode_version must be "
+            f">= 1 when provided, got {declared_decode_version}"
+        )
 
     run_identity.assert_admitted()
 
     members = tuple(member_identities)
     horizons = tuple(declared_label_horizons)
+
+    # Registry-revision cross-check: every member must agree
+    # with the panel-level ``registry_revision``; declared
+    # schema and decode versions, when provided, must agree
+    # with every member's matching field. A disagreement
+    # raises :class:`PanelRegistryRevisionError` so an
+    # incompatible member cannot be silently merged or
+    # back-filled (T101 acceptance: "members whose registry
+    # or schema revisions are incompatible ... are refused
+    # rather than merged, backfilled or silently converted").
+    for member in members:
+        if not isinstance(member, PanelMemberIdentity):
+            raise PanelError(
+                f"build_panel_provenance: member_identities: every "
+                f"entry must be PanelMemberIdentity, got "
+                f"{type(member).__name__}"
+            )
+        if member.registry_revision != registry_revision:
+            raise PanelRegistryRevisionError(
+                f"build_panel_provenance: member {member.pool_id_hex!r} "
+                f"carries registry_revision "
+                f"{member.registry_revision!r}, which disagrees with "
+                f"the panel-level registry_revision "
+                f"{registry_revision!r}; the panel refuses to merge or "
+                f"back-fill across registry revisions"
+            )
+        if declared_schema_version is not None and member.schema_version != declared_schema_version:
+            raise PanelRegistryRevisionError(
+                f"build_panel_provenance: member {member.pool_id_hex!r} "
+                f"carries schema_version {member.schema_version}, which "
+                f"disagrees with the declared schema_version "
+                f"{declared_schema_version}; the panel refuses to "
+                f"merge or back-fill across schema revisions"
+            )
+        if declared_decode_version is not None and member.decode_version != declared_decode_version:
+            raise PanelRegistryRevisionError(
+                f"build_panel_provenance: member {member.pool_id_hex!r} "
+                f"carries decode_version {member.decode_version}, which "
+                f"disagrees with the declared decode_version "
+                f"{declared_decode_version}; the panel refuses to "
+                f"merge or back-fill across decode revisions"
+            )
 
     payload = {
         "version": PanelProvenance.VERSION,
@@ -768,6 +889,8 @@ def build_panel_provenance(
         "registry_revision": registry_revision,
         "label_schema_digest": label_schema_digest,
         "declared_label_horizons": list(horizons),
+        "declared_schema_version": declared_schema_version,
+        "declared_decode_version": declared_decode_version,
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     content_hash = "0x" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -780,6 +903,8 @@ def build_panel_provenance(
         label_schema_digest=label_schema_digest,
         declared_label_horizons=horizons,
         content_hash=content_hash,
+        declared_schema_version=declared_schema_version,
+        declared_decode_version=declared_decode_version,
     )
 
 

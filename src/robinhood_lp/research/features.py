@@ -289,6 +289,28 @@ class FeatureRegistrySnapshot:
             "declarations": [d.to_dict() for d in self.declarations],
         }
 
+    def get(self, column_name: str) -> FeatureDeclaration:
+        """Return the declaration for ``column_name``.
+
+        The snapshot is sealed at panel-build time, so resolving
+        a column by name does not require the live
+        :class:`FeatureRegistry`. A column not present in the
+        snapshot raises :class:`UnknownFeatureError` so a fold
+        cannot silently consume an off-snapshot column.
+        """
+        if not isinstance(column_name, str) or not column_name:
+            raise FeatureRegistryError(
+                f"FeatureRegistrySnapshot.get: column_name must be "
+                f"non-empty str, got {column_name!r}"
+            )
+        for declaration in self.declarations:
+            if declaration.column_name == column_name:
+                return declaration
+        raise UnknownFeatureError(
+            f"FeatureRegistrySnapshot.get: no feature declared under "
+            f"{column_name!r} in snapshot {self.content_hash!r}"
+        )
+
 
 class FeatureRegistry:
     """The in-memory registry of :class:`FeatureDeclaration` rows.
