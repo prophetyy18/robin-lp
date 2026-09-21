@@ -1,0 +1,208 @@
+# T069 independent review
+
+- Base commit: `75a7e5446a9f431c424c715c743ed3bf48f68124`
+- Candidate commit: `4731b626a25fbb2747e3cadb920e98db47df8193`
+- Verdict: **PASS**
+
+## Checks
+
+### candidate_commit_scope — PASS
+
+The candidate commit 4731b62 is a workflow-controller bookkeeping commit (status flip and evidence file). The implementation under review is the orchestrator module, CLI subcommand, and tests committed in 2f64e64 (attempt 1) and 1569f13 (attempt 2); both are reachable from the candidate tip via the planning amendment chain. The diff between base 75a7e54 and candidate 4731b62 correctly contains the implementation, the planning amendment to the acceptance clause, and the workflow bookkeeping.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003 git show 4731b626a25fbb2747e3cadb920e98db47df8193 --stat touches only todo/config.yaml (6 lines: workflow_state CHANGES_REQUESTED->AWAITING_REVIEW, T069.status CHANGES_REQUESTED->AWAITING_REVIEW, attempt 2->3, latest_review pointer) and todo/evidence/P06/T069/attempt-003-developer.json (new file)
+- /home/lpdev/lp-worktrees/review-t069-attempt-003 git show 4731b626a25fbb2747e3cadb920e98db47df8193 -- src/ tests/ tools/ produces no output (no source-code changes)
+- /home/lpdev/lp-worktrees/review-t069-attempt-003 todo/evidence/P06/T069/attempt-003-developer.json summary states 'Attempt 3 of T069 is verification-only on the existing attempt-2 implementation. No edits were made.'
+- /home/lpdev/lp-worktrees/review-t069-attempt-003 git diff 1569f13252bada1ba0e8c2a800efbd845d5b9da9 4731b626a25fbb2747e3cadb920e98db47df8193 --stat shows only todo/* bookkeeping (config.yaml, evidence, T069.md acceptance clause, plan-review-002, review-002, triage-002, owner-decision-002) with no src/, tests/, tools/ changes
+
+### dependencies_approved — PASS
+
+All five declared dependencies (T041, T053, T061, T068, T105) are APPROVED in todo/config.yaml. The phase-entry gate is satisfied.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003 python3 -c 'import yaml; c=yaml.safe_load(open("todo/config.yaml")); print({k: c["tasks"][k]["status"] for k in ["T041","T053","T061","T068","T105"]})' returns {'T041': 'APPROVED', 'T053': 'APPROVED', 'T061': 'APPROVED', 'T068': 'APPROVED', 'T105': 'APPROVED'}
+
+### module_version_pinned — PASS
+
+ORCHESTRATOR_VERSION is pinned to 't069.backtest_orchestrator.v1' and exposed at the module level.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/src/robinhood_lp/orchestrator/__init__.py line 146 ORCHESTRATOR_VERSION='t069.backtest_orchestrator.v1'
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestModuleVersion::test_orchestrator_version_is_t069 passes
+
+### layer_purity_orchestrator — PASS
+
+The orchestrator imports only the documented layers (backtest, reports, strategy) and stdlib; no RPC, storage, signing, execution, web, or presentation imports were introduced. Layer purity is satisfied.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/src/robinhood_lp/orchestrator/__init__.py lines 90-142 import only from robinhood_lp.backtest.engine, backtest.events, backtest.models, reports.manifest, reports.metrics, reports.registry_binding, reports.validation, strategy.adapter, strategy.adaptive, strategy.registry and stdlib (contextlib, hashlib, json, os, tempfile, threading, dataclasses, enum, pathlib, typing)
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tools/check_imports/layer_map.py line 153 registers robinhood_lp.orchestrator under 'application / orchestration'
+- /home/lpdev/lp-worktrees/review-t069-attempt-003 PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.check_imports check -> 'import-graph check passed: no findings'
+
+### run_request_validation — PASS
+
+RunRequest.__post_init__ rejects every malformed input the T069 contract binds to a closed vocabulary or non-empty string. All 14 validation tests pass.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestRunRequestValidation 14 tests pass: empty run_id, empty dataset_version, negative block_range_start, block_range_end<start, zero interval, empty strategy_identity, negative seed, invalid clock/fill/cost/quote, invalid valuation_qualification, empty reporting_numeraire, empty code_revision
+
+### successful_publication_one_manifest_per_request — PASS
+
+A successful run over a single pool publishes exactly one T105 registry-bound manifest and one report under its own run_id; the record round-trips through the RunStateStore without mutation.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestSuccessfulRunPublication::test_single_pool_run_publishes_manifest_and_report passes
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestSuccessfulRunPublication::test_run_record_serialisation_round_trips passes
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/src/robinhood_lp/orchestrator/__init__.py _execute writes one manifest and one report per successful request, then transitions to RunState.SUCCEEDED with manifest_path/report_path recorded
+
+### two_heterogeneous_pools_one_manifest_each — PASS
+
+The amended acceptance clause is satisfied. The Owner picked Reading B and the planning amendment (d0506ee) was independently PASS'd by plan-review-002; the implementation matches the amended contract verbatim (one RunRequest -> one pool_key_id -> one manifest under its own run_id; multi-pool coverage achieved via separate RunRequests sharing dataset/numeraire/qualification).
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestSuccessfulRunPublication::test_two_heterogeneous_pools_share_run_identity passes
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/todo/phases/P06-backtesting-and-strategy/T069.md acceptance clause (planning amendment d0506ee, PASS'd by plan-review-002) reads 'two new run requests over two heterogeneous pool fixtures that share dataset_version, reporting_numeraire and valuation_qualification each publish exactly one manifest under their own run_id, and the shared dataset_version, reporting_numeraire and valuation_qualification are recorded on every published manifest under its own run_id (test)'
+- Test issues two separate RunRequests with run_id='multi-001' and run_id='multi-002' on two heterogeneous pool_key_ids, asserts manifest_a and manifest_b share dataset_version, reporting_numeraire, valuation_qualification, and differ in pool_key_id
+
+### byte_equivalent_rerun — PASS
+
+Re-running the same request reproduces byte-equivalent canonical artefacts (manifest + report + record, excluding run_id-derived fields). The previous tautological comparison from attempt 1 was replaced with an actual fresh-re-run comparison in attempt 2.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestRerunReproducibility::test_same_request_produces_byte_equivalent_manifests passes; the test performs two fresh submits against two independent orchestrator instances (independent store roots, event sources, run_ids 'rerun-A' and 'rerun-B'), strips run-id-derived fields (manifest.run_id/report_checksum, report.run_id/manifest_checksum, record.run_id/manifest_path/report_path/request.run_id), and asserts canonical JSON byte-equivalence via _canonical_json helper
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/src/robinhood_lp/orchestrator/__init__.py _canonical_json helper provides deterministic byte-equal serialisation matching the on-disk writer (sort_keys, separators=(',', ':'), ensure_ascii=False)
+
+### cancellation_and_failure_closed — PASS
+
+Cancelled runs, unknown identities, missing datasets, out-of-coverage ranges, and legacy pre-registry sources all fail closed with a T069_ reason code and no manifest/report is published. The RunStateStore's terminal-immutability invariant prevents a SUCCEEDED write from overwriting a CANCELLED record in the in-flight-restart scenario.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestCancellationAndFailureClosed 5 tests pass: cancellation (via _CancellingEventSource firing the token), unknown strategy identity, missing dataset version, block range outside coverage, legacy manifest source
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/src/robinhood_lp/orchestrator/__init__.py _execute catches RunCancelled and writes a CANCELLED record with reason_code, no manifest/report published; cancellation routes via RunCancelled catch block in _execute
+- RunStateStore.write (line 1023) refuses to overwrite a terminal record so a CANCELLED record in the store will not be replaced by a subsequent SUCCEEDED write from a concurrent orchestrator
+
+### run_state_store_atomic_immutable — PASS
+
+RunStateStore writes atomically via temp-file rename; terminal records are read-only. Reloaded records round-trip through run_record_from_dict.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestRunStateStore 4 tests pass: atomic round trip, terminal-record immutable, invalid state rejected, list_runs ordering
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/src/robinhood_lp/orchestrator/__init__.py RunStateStore.write uses tempfile.mkstemp + os.replace for atomic write (lines 1027-1040); terminal records are read-only (line 1023)
+
+### restart_while_running — PASS
+
+A restart while a run is RUNNING neither duplicates the run nor loses its state; resume_in_flight picks up the in-flight record and drives it to a terminal state.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestRestartInFlight::test_resume_in_flight_picks_up_running_records passes; only one record exists after restart (assert run_ids == ('restart-001',))
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/src/robinhood_lp/orchestrator/__init__.py resume_in_flight (lines 1670-1690) reads every RUNNING record and drives it through _execute
+
+### product_rerun_preserves_source — PASS
+
+A product rerun creates a new durable RunRecord linked to source_manifest_path/source_checksum and leaves the source manifest byte-identical.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestProductRerunPreservesSource::test_product_rerun_creates_new_record_and_preserves_source passes; source manifest bytes equal before and after, and the store contains both run records
+
+### no_credentials_in_run_record — PASS
+
+The run record carries no key material, endpoint alias, or secret.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestRunRecordContainsNoCredentials::test_record_payload_contains_no_key_material passes; forbidden tokens list covers 'private_key', 'PRIVATE_KEY', 'seed_phrase', 'mnemonic', 'rpc_secret', 'API_KEY', 'api_key', 'ALIAS', 'WEBHOOK', 'PASSWORD', 'password='
+
+### cli_no_web_process — PASS
+
+backtest start, list, observe, cancel (and resume via the orchestrator) work via CLI with no Web process running; an invalid request fails closed before any result is written. Test note: the subprocess invocation uses env={'PYTHONPATH': 'src'} (relative); pytest must be launched from the worktree root for resolution to find the candidate's src/.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestCLISubcommandsWithoutWeb::test_cli_start_observe_cancel passes when run from the worktree directory with PYTHONPATH=src; subprocess invokes 'python -m robinhood_lp backtest start/list/observe/cancel' and verifies the JSON record round-trips with no Web session
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestCLISubcommandsWithoutWeb::test_cli_start_invalid_request_returns_nonzero passes; an invalid request exits non-zero with no manifest written
+
+### orchestrator_composes_existing_surfaces — PASS
+
+The orchestrator composes the existing T061 engine, T063 metrics / coverage / decisions, T105 registry-bound manifest authority, and T068 registry without re-implementing any of them.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestOrchestratorComposition 4 tests pass; orchestrator module re-exports BacktestEngine, empty_position_state, compute_run_metrics, build_coverage_summary, extract_decisions, decisions_checksum, LedgerSnapshot, build_experiment_manifest, validate_manifest, write_manifest_to_path, bind_strategy_to_registry, UnknownStrategyIdentityError
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/src/robinhood_lp/orchestrator/__init__.py imports BacktestEngine, BacktestEvent, ModelBundle classes from robinhood_lp.backtest; ExperimentManifest / metrics helpers / bind_strategy_to_registry / validation / registry classes from robinhood_lp.reports / robinhood_lp.strategy
+
+### rerun_manifest_cli_not_absorbed — PASS
+
+The T105 artifact rerun command stays an artifact operation carrying no T069 run state.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/src/robinhood_lp/__main__.py _run_rerun_manifest (lines 282-404) imports only from robinhood_lp.reports / reports.registry_binding / reports.validation — no orchestrator or RunStateStore
+- The 'rerun-manifest' subcommand is registered alongside 'ingest' and 'backtest' as separate subcommands at __main__.py lines 96 and 138
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/src/robinhood_lp/orchestrator/__init__.py grep for 'rerun-manifest' returns no matches (orchestrator does not import or reference the artifact rerun CLI)
+
+### no_mutation_of_stored_data — PASS
+
+The orchestrator does not mutate stored partitions, approvals, risk configuration, or the strategy registry; only RunStateStore state is written.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/src/robinhood_lp/orchestrator/__init__.py _execute calls read_manifest_from_path / validate_manifest against the source but only reads; the product rerun path stores source_checksum and never overwrites the source file
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/tests/test_backtest_t069.py::TestProductRerunPreservesSource confirms the source manifest is byte-identical after the rerun
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/src/robinhood_lp/orchestrator/__init__.py does not import robinhood_lp.storage or any partition reader
+
+### planning_amendment_to_acceptance_clause — PASS
+
+The Owner picked Reading B in owner-decision-002; the planning amendment (d0506ee) transcribed the decision into the acceptance clause and was independently PASS'd by plan-review-002. The amended contract is the authoritative contract for this review.
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/todo/evidence/P06/T069/attempt-002-planner.json (new in d0506ee) records outcome PLAN_READY with the Owner-decision transcription into the acceptance clause (Reading B: one RunRequest -> one pool_key_id -> one manifest under its own run_id; multi-pool coverage via separate RunRequests)
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/todo/reviews/P06/T069/plan-review-002.md verdict: PASS — base 1ea8012, candidate d0506ee; the planning correction accurately transcribes the OWNER_DECISION_REQUIRED answer; touches only todo/config.yaml (workflow_state PLANNING->AWAITING_PLAN_REVIEW, T069.status PLANNING->AWAITING_PLAN_REVIEW), todo/evidence/P06/T069/attempt-002-planner.json, and todo/phases/P06-backtesting-and-strategy/T069.md (acceptance clause rewrite). No implementation files touched; no other contract section altered; no depends_on / intent_revision / spec_revision / attempt / evidence pointer / commit SHA / runtime model / approval data changes introduced.
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/todo/triage/P06/T069/owner-decision-002.json decision: 'Reading B: one run identity refers to shared dataset version, reporting numeraire and valuation qualification across separate RunRequests. One RunRequest carries exactly one pool_key_id and publishes exactly one manifest...'
+- /home/lpdev/lp-worktrees/review-t069-attempt-003/todo/phases/P06-backtesting-and-strategy/T069.md acceptance clause now reads: 'a new run request ... publishes exactly the registry-bound manifest and reports the T105 contract defines, with one RunRequest carrying exactly one pool_key_id and publishing exactly one manifest under the request's own run_id (test, golden); two new run requests over two heterogeneous pool fixtures that share dataset_version, reporting_numeraire and valuation_qualification each publish exactly one manifest under their own run_id...'
+
+### offline_tooling — PASS
+
+All offline tooling passes; the new test module is fully green (38/38) and the rest of the suite is unaffected (2685 + 6 pre-existing skips).
+
+Evidence:
+
+- /home/lpdev/lp-worktrees/review-t069-attempt-003 PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/ tests/ tools/ -> 'All checks passed!'
+- /home/lpdev/lp-worktrees/review-t069-attempt-003 PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/ -> 'Success: no issues found in 131 source files'
+- /home/lpdev/lp-worktrees/review-t069-attempt-003 PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.check_imports check -> 'import-graph check passed: no findings'
+- /home/lpdev/lp-worktrees/review-t069-attempt-003 PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.check_acceptance check -> 'acceptance check passed: no findings'
+- /home/lpdev/lp-worktrees/review-t069-attempt-003 PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.check_citations check -> 'citation check passed: no findings'
+- /home/lpdev/lp-worktrees/review-t069-attempt-003 PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_backtest_t069.py -q -> '38 passed in 1.05s'
+- /home/lpdev/lp-worktrees/review-t069-attempt-003 PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest --no-header --ignore=tests/test_abi_artifacts.py -q -> '2685 passed, 6 skipped in 29.29s' (the 6 skips are pre-existing forge / gpg / unsorted-currency skips unrelated to T069)
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- The orchestrator's private _build_model_bundle mirrors the canonical T105 deterministic model bundle in src/robinhood_lp/reports/rerun.py::_build_model_bundle. The two serve different purposes (live run from registered request vs. artifact rerun from saved manifest). This is unchanged from the approved attempt-2 implementation and is acceptable composition glue, not a re-implementation of an engine/manifest/feature surface.
+- The default risk callback (_approve_risk_callback) approves every decision; wiring the T070 risk gateway is a deliberate follow-up tracked in the orchestrator's docstring and is unchanged from the approved attempt-2 implementation.
+- The CLI cancel writes a terminal CANCELLED record directly to the store without holding the orchestrator's in-process cancel_token; for an out-of-process RUNNING run, this leaves the in-flight orchestrator running until it next tries to write (the store's terminal-record immutability prevents the SUCCEEDED write from succeeding). A reviewer-facing observation, not a contract violation: any orphan manifest written by the in-flight orchestrator before its rejected SUCCEEDED write is not referenced by any record (CANCELLED records carry manifest_path=None). This is unchanged from the approved attempt-2 implementation.
+- tests/test_abi_artifacts.py fails in this worktree due to a missing forge / Solidity library; the failure is environmental and unrelated to T069 (CI installs Foundry and clones the libraries). This test was excluded from the broader suite verification above.
