@@ -1,0 +1,256 @@
+# T101 independent review
+
+- Base commit: `a414ab7a48a81ffe32a954c1abdb050e2d436161`
+- Candidate commit: `3c5da67516f8a5ca35113298c4b4f579bd611a54`
+- Verdict: **FAIL**
+
+## Checks
+
+### task-status-and-deps — PASS
+
+All five declared dependencies (T050, T069, T100, T104, T105) are APPROVED, the workflow has advanced T101 to AWAITING_REVIEW, and the candidate commit is a single feat commit on top of the documented base.
+
+Evidence:
+
+- todo/config.yaml: T050, T069, T100, T104, T105 status='APPROVED'
+- todo/phases/P10-research-and-models/T101.md declares OWNER_PLAN_EXTENSION_2026-09-18 contract status
+- T101 base_commit=a414ab7, candidate_commit=3c5da67, workflow_state=AWAITING_REVIEW
+
+### t101-test-suite — PASS
+
+All 60 task-specific tests pass and the broader research/dataset test scope is green (242/0). The two repository-wide failures reproduced on the base commit are forge-Oracle source-path and architecture-section22; both are absent from the T101 diff.
+
+Evidence:
+
+- tests/test_panel_t101.py: 1276 lines covering feature/label/boundary/splits/panel/models/harness
+- python -m pytest tests/test_panel_t101.py: 60 passed in 0.19s
+- python -m pytest tests/test_panel_t101.py tests/ -k 't100 or research or dataset or panel_t101': 242 passed, 2544 deselected in 8.31s
+
+### imports-and-static-checks — PASS
+
+Import-graph, ruff lint, ruff format (on T101 files), and mypy are all green. The layer map correctly classifies boundary/features/labels/splits/harness as backtest-tier and models as strategy-tier. The three broader reformat flags in src/robinhood_lp/__main__.py predate T101.
+
+Evidence:
+
+- python -m tools.check_imports check: import-graph check passed: no findings
+- python -m ruff check src/ tests/ tools/: All checks passed!
+- python -m ruff format --check src/robinhood_lp/research/ tests/test_panel_t101.py: 10 files already formatted
+- python -m mypy src/robinhood_lp/research/: Success: no issues found in 9 source files
+- tools/check_imports/layer_map.py adds robinhood_lp.research.{boundary,features,labels,splits,harness} -> 'backtest' and keeps .panel->backtest and .models->strategy
+
+### forward-feature-detection — PASS
+
+A forward-derived feature detected at panel build raises ForwardFeatureError, satisfying the acceptance clause at the assembly boundary. run_fold_evaluation also calls the gate but with synthetic placeholder logic (rotates snapshot declarations by index) — see defect flag below.
+
+Evidence:
+
+- src/robinhood_lp/research/features.py: validate_panel_against_decision_time raises ForwardFeatureError when availability_time>decision_time or window_kind!=decision_time_kind
+- src/robinhood_lp/research/harness.py assemble_panel_dataset calls validate_panel_against_decision_time over every registered declaration
+- tests/test_panel_t101.py: test_assemble_panel_dataset_refuses_forward_feature, test_validate_panel_against_decision_time_blocks_forward_features, test_validate_panel_against_decision_time_blocks_wrong_kind all pass
+
+### split-machinery — PASS
+
+Three split modes honoured, SplitLeakageError raised when eval_start < train_end + purge + embargo, SplitNonTemporalError raised for any other mode, and the gap is derived from the label horizons rather than hand-picked.
+
+Evidence:
+
+- src/robinhood_lp/research/splits.py build_pool_holdout_split / build_time_holdout_split / build_walk_forward_split and forbid_non_temporal_split
+- src/robinhood_lp/research/splits.py _combined_gap_from_label_horizons derives purge=embargo=max(label_horizons), recorded on PanelSplitDefinition.purge_size / embargo_size
+- tests pass: test_pool_holdout_rejects_single_pool, test_time_holdout_rejects_future_leakage, test_walk_forward_emits_multiple_folds, test_forbid_non_temporal_split_rejects_random, test_pool_holdout_fold_assignments_are_disjoint
+
+### boundary-catalogue — PASS
+
+The named float boundary delivers an explicit catalogue, refuses crossings above IEEE-754 exact-integer width, and never returns a raw float from to_int. The catalogue refuses duplicate column names.
+
+Evidence:
+
+- src/robinhood_lp/research/boundary.py: Q64_64_FloatBoundary / IntegerFloatBoundary / ProbabilityFloatBoundary implement the StatisticalBoundary Protocol and use banker's rounding in to_int
+- default_panel_boundary_catalogue() declares realized_variance_q64_64, depth_proxy_ratio_q64_64, fee_per_swap_q64_64, exit_probability_q32, realized_volume_token0/1, swap_count, net_lp_return_q64_64
+- IntegerFloatBoundary.from_int raises BoundaryCrossingError for values > 2**53-1
+- ProbabilityFloatBoundary.to_int clamps out-of-unit values into [0,1] before rounding
+- tests: test_q64_64_boundary_round_trip, test_integer_boundary_overflow_rejected, test_probability_boundary_clamps, test_boundary_catalogue_rejects_duplicates, test_default_panel_boundary_catalogue_is_complete all pass
+
+### label-schema — PASS
+
+The schema mandates at least one TARGET role, enforces a per-kind minimum horizon (5min for vol/volume/fee-density/exit-prob, 1h for LVR-proxy and net-LP-return), and surfaces UNCERTAIN via the exception the caller translates (DS-032).
+
+Evidence:
+
+- src/robinhood_lp/research/labels.py: LabelKind.REALIZED_VOL/REALIZED_VOLUME/FEE_DENSITY/LOSS_VS_REBAL_PROXY/EXIT_PROBABILITY/NET_LP_RETURN and LabelRole.TARGET/AUXILIARY/OUTCOME
+- Validate-on-declare: horizon_seconds > 0 AND >= DEFAULT_LABEL_HORIZON_MIN[kind], observes_after_seconds >= horizon_seconds
+- validate_sample_size_for_quantile raises LabelSizeOverflowError when sample_size < minimum (default 30)
+- tests: test_label_schema_requires_target, test_label_schema_rejects_zero_horizon, test_default_label_schema_has_target, test_sample_size_validation_raises_underflow, test_default_quantile_levels pass
+
+### panel-provenance-and-run-bind — PASS
+
+A SUCCEEDED-only admission gate, a canonical content hash, the LEGACY_T063 marker gate, sample-level dedup with merge-or-conflict semantics, and the canonical sample_id are all enforced. Legacy pre-registry marker and non-SUCCEEDED lifecycle states are refused at panel build.
+
+Evidence:
+
+- src/robinhood_lp/research/panel.py: PanelRunIdentity.assert_admitted raises PanelFailedRunError / PanelCancelledRunError / PanelRunIdentityError for the non-SUCCEEDED states; SUCCEEDED rejects spurious failure/cancellation reason codes
+- build_panel_provenance runs run_identity.assert_admitted() and computes a 0x-prefixed SHA-256 content_hash from the canonical JSON of {version, run_identity, member_identities, registry_revision, label_schema_digest, declared_label_horizons}
+- assert_not_legacy_manifest_marker raises PanelLegacyManifestError for 'LEGACY_T063'
+- canonical_sample_id f'{chain_id}|{pool_id_hex}|{decision_time}' is the dedup key
+- tests: test_panel_run_identity_admits_only_succeeded, test_panel_run_identity_failed_requires_reason_code, test_panel_run_identity_cancelled_requires_reason_code, test_build_panel_provenance_refuses_failed_run, test_build_panel_provenance_refuses_cancelled_run, test_build_panel_provenance_accepts_succeeded_run, test_assert_not_legacy_manifest_marker_rejects_legacy, test_canonical_sample_id_matches_documented_format, test_deduplicate_feature_rows_merges_columns, test_deduplicate_feature_rows_rejects_conflict, test_deduplicate_label_rows_merges_columns pass
+
+### sample-size-disclosure — PASS
+
+Every fold report carries observation_count/effective_sample_size/per_pool_counts with min_samples_for_quantile and the SAMPLE_SIZE_UNDERFLOW verdict when the floor is breached.
+
+Evidence:
+
+- src/robinhood_lp/research/harness.py SampleSizeDisclosure carries observation_count, effective_sample_size, per_pool_counts, min_samples_for_quantile, sample_size_underflow
+- compute_sample_size_disclosure counts samples whose decision_time + max(label_horizons) <= fold_end and sets sample_size_underflow = effective_sample_size < min_samples_for_quantile
+- run_fold_evaluation returns FoldVerdictCode.SAMPLE_SIZE_UNDERFLOW when the disclosure flags underflow
+- tests: test_compute_sample_size_disclosure_reports_per_pool, test_compute_sample_size_disclosure_underflow_when_below_floor, test_run_fold_evaluation_returns_underflow_when_too_few_samples pass
+
+### models-and-diagnostics — PASS
+
+The three named model families plus the four diagnostics (importance/calibration/quantile coverage/trivial baseline) are implemented; the artifact carries dataset_version, seed, code_revision and a content_hash, satisfying DS-030, DS-033 and DS-043 surface checks. Loss, DEGENERATE, UNCERTAIN and SAMPLE_SIZE_UNDERFLOW are surfaced honestly (DS-034).
+
+Evidence:
+
+- src/robinhood_lp/research/models.py: LinearRegularizedModel (closed-form ridge), LinearQuantileModel (IRWLS for pinball loss at declared tau), GradientBoostingModel (deterministic shallow stumps, plain-Python)
+- compute_calibration_report returns CalibrationReport with per-bucket predicted_mean/realised_frequency/sample_count and an ECE in [0,1]
+- compute_quantile_coverage returns QuantileCoverageReport with sample_count
+- compare_against_trivial_baseline returns ModelVerdictCode.{BETTER_THAN_TRIVIAL,NOT_BETTER_THAN_TRIVIAL,UNCERTAIN}; UNCERTAIN is returned when sample_count < min_samples
+- build_model_artifact hash includes version + hyperparameters + dataset_version + feature_config_hash + split_definition_hash + code_revision + seed
+- tests: test_linear_regularized_model_fits_and_infers, test_linear_quantile_model_converges, test_gradient_boosting_model_fits_and_infers, test_trivial_baseline_reports_zero_when_no_baseline_supplied, test_compare_against_trivial_baseline_reports_higher, test_compare_against_trivial_baseline_reports_lost, test_compare_against_trivial_baseline_underflow, test_calibration_report_computes_ece, test_quantile_coverage_matches_quantile_level pass
+
+### byte-equivalent-rerun — PASS
+
+A saved TrainingHarnessConfig and its produced ModelArtifact are byte-equivalent on re-run under identical inputs (DS-043).
+
+Evidence:
+
+- src/robinhood_lp/research/harness.py build_training_harness canonicalises {registry_snapshot.content_hash, label_schema_digest, split.mode, split_purge_plus_embargo, boundary_catalogue, seed, decision_time_kind, code_revision, declared_min_samples_for_quantile, declared_label_horizons} under json.dumps(sort_keys=True, separators=(',',':')) into a 0x-prefixed SHA-256
+- build_model_artifact similarly canonicalises its payload before hashing
+- test_saved_config_rerun_produces_byte_equivalent_artifact: two runs on the same config produce identical model_artifact.content_hash; test_build_training_harness_produces_deterministic_hash: cfg_a.content_hash == cfg_b.content_hash
+
+### prefix-invariance — PASS
+
+A feature row at time t is unchanged when extra rows past the horizon are appended (DS-010 prefix-invariance). The dedup is deterministic on first-occurrence.
+
+Evidence:
+
+- test_prefix_invariance_features_unchanged_when_past_truncated confirms that adding an unrelated row past the label horizon does not change sample s1's columns
+- PanelFeatureRow columns are an immutable Mapping[str, int|None] so dedup picks the first occurrence verbatim
+- validate_panel_against_decision_time rejects features whose availability_time > decision_time, so any cross-horizon feature would surface as ForwardFeatureError at assemble
+
+### registry-revision-mismatch-gate — FAIL
+
+PanelRegistryRevisionError is defined and exported but the code path that would raise it is absent. build_panel_provenance accepts arbitrary members and a single registry_revision string with no cross-record check, so members with incompatible registry/schema revisions are silently accepted at panel-build time. The must-not 'merge or backfill samples from incompatible registry or schema revisions' is not enforced. There is no test coverage for this clause.
+
+Evidence:
+
+- Acceptance clause: 'members whose registry or schema revisions are incompatible ... are refused rather than merged, backfilled or silently converted into panel samples (test)'
+- src/robinhood_lp/research/panel.py: PanelMemberIdentity carries registry_revision / source_checksum / schema_version / decode_version (lines 286-293)
+- PanelProvenance.registry_revision is one string for the whole panel; build_panel_provenance never compares it against the member_identities it aggregates
+- grep -rn 'PanelRegistryRevisionError' src/ tests/: only the class declaration (panel.py:77) and re-exports in __init__.py -- raise sites: NONE
+- tests/test_panel_t101.py: zero tests assert that differing registry_revision/schema_version/decode_version triggers refusal
+
+### fold-level-forward-feature-gate — FAIL
+
+The fold-level forward-feature gate does not actually re-validate the columns the fold consumes; it is a placeholder that picks registry declarations by index modulo. assemble_panel_dataset catches a forward feature at build, but the acceptance clause 'a deliberately injected future-derived feature is detected and fails the run' is not exercised through the fold path and the synthetic re-check cannot reliably catch every injection.
+
+Evidence:
+
+- src/robinhood_lp/research/harness.py:942-957: run_fold_evaluation builds the validate_panel_against_decision_time argument as 'snapshot.declarations[i % len(declarations)] for i in range(len(feature_columns))' -- a synthetic placeholder that rotates declarations by index rather than resolving the actual feature columns passed in
+- The developer's own evidence (todo/evidence/P10/T101/attempt-001-developer.json residual_risks) acknowledges the placeholder: 'run_fold_evaluation wraps the forward-feature registry re-check around a synthetic placeholder ... but a future task that wires per-feature eval columns will tighten the gate further.'
+- tests/test_panel_t101.py: no test forces a feature to be declared forward via run_fold_evaluation and verifies FoldVerdictCode.FORWARD_FEATURE_REJECTED; the existing forward-feature tests only cover assemble_panel_dataset and validate_panel_against_decision_time in isolation
+
+### split-applies-empty-feature-rows — FAIL
+
+apply_split_to_panel returns empty PanelFeatureRow placeholders; the per-fold (train, eval) tuples do not carry the actual integer feature columns the panel assembled. The structural partition is correct, but downstream callers cannot consume a populated feature matrix from this candidate.
+
+Evidence:
+
+- src/robinhood_lp/research/harness.py:562-636 apply_split_to_panel / _populate_fold pass sample_features={} and synthesise empty PanelFeatureRow(sample_id=sample_id, columns={}) for every train / eval row
+- Acknowledged in attempt-001-developer.json residual_risks: 'apply_split_to_panel uses an empty feature mapping; populate_fold synthesises empty PanelFeatureRow placeholders. T102 (model layer consumer) is expected to thread the real feature rows into the call; this candidate only proves the partition shape.'
+- tests: only test_apply_split_to_panel_returns_train_eval_pairs checks the (train, eval) partition shape; no test verifies a feature row's columns survive the partition
+
+### missing-feature-column-gate — UNKNOWN
+
+The boundary case 'an entirely missing feature column' is not asserted at panel build. Whether the harness should reject is a contract reading; the implementation treats missing keys as the row not consuming that feature, which is permissive but unverified against the contract.
+
+Evidence:
+
+- src/robinhood_lp/research/harness.py assemble_panel_dataset only iterates 'for column_name in columns' and rejects unknown columns; it does not require the row to declare every column the registry exposes
+- PanelFeatureRow.columns is a free-form Mapping[str, int|None] with no completeness check; a row could omit any number of declared columns and still assemble
+- tests/test_panel_t101.py: no test feeds a row whose registry column is missing
+
+### constant-feature-detection — UNKNOWN
+
+The boundary case 'a constant feature' has no explicit detector. A constant column would still be trained on without a regression-guard or normaliser, so a degenerate model could be published as PASSED. Whether the contract requires an explicit guard is a contract reading.
+
+Evidence:
+
+- Search across src/robinhood_lp/research/ for any constant-variance / std == 0 / variance floor detector: none found in boundary.py, features.py, harness.py, or models.py
+- LinearRegularizedModel.fit still succeeds on a constant column (X^T X is well-defined under the L2 floor) and GradientBoostingModel's stump search simply never splits on the column
+- tests/test_panel_t101.py: no test builds a constant feature column and asserts an honest-failure or normalisation refusal
+
+### horizon-exceeds-pool-window — UNKNOWN
+
+The boundary case 'a horizon longer than a pool's window' degrades to sample-size underflow rather than an explicit refuse; whether that degradation is the contract intent is a reading.
+
+Evidence:
+
+- LabelDeclaration only enforces horizon_seconds > 0 and >= DEFAULT_LABEL_HORIZON_MIN[kind]; no upper bound against the pool's window
+- compute_sample_size_disclosure handles a horizon crossing fold_end by zeroing the contribution to effective_sample_size and triggering sample_size_underflow when the resulting count < min_samples_for_quantile
+- tests/test_panel_t101.py: no test builds a panel whose label horizon spans more time than the pool history and asserts a refusal or honest-failure verdict
+- Note: per-pool extended-history windows mean this case is unlikely to surface during the current sample-size regime
+
+### datset-numeraire-qualification — PASS
+
+The 'dataset not qualified for declared numeraire' gate is owned by the approved T100 dataset module; T101 binds the qualification forward without performing any silent conversion.
+
+Evidence:
+
+- T100 dataset module exposes validate_numeraire_route and NumeraireLevel.RELATIVE_ONLY guard, plus assert_no_usd_fields and RELATIVE_ONLY_FORBIDDEN_NUMERAIRE_TOKEN (grep src/robinhood_lp/research/dataset.py)
+- T101 imports NumeraireLevel / NumeraireQualification / validate_numeraire_route (research/__init__.py) and records valuation_qualification on PanelRunIdentity
+- T100 is APPROVED and binds the refusal gate at the dataset layer; T101 carries the qualification forward and runs no silent conversion
+- tests/test_panel_t101.py: test_panel_run_identity_failed_requires_reason_code confirms PanelRunIdentity accepts only 'QUALIFIED' or 'RELATIVE_ONLY' and rejects other vocab
+
+### manifest-set-run-mismatch — UNKNOWN
+
+Whether 'a manifest set that does not belong to the declared T069 run' requires an explicit build-time refusal (rather than relying on content_hash drift on re-run) is a contract reading. The implementation encodes the run identity but does not actively refuse a mismatched manifest set at panel build.
+
+Evidence:
+
+- PanelRunIdentity records a single run_id and assert_admitted only checks lifecycle; there is no API-level guard that two PanelSampleProvenance rows from different run_ids are forbidden in a single panel
+- PanelProvenance.content_hash includes the run_identity run_id, so a cross-run merge would change the hash and be detectable on re-run, but the build path will not refuse it
+
+### reporting-uncertainty — PASS
+
+Underflow / uncertainty is surfaced explicitly via SAMPLE_SIZE_UNDERFLOW and UNCERTAIN verdict codes alongside the per-pool, observation-count and effective-sample-size disclosure -- satisfying DS-032.
+
+Evidence:
+
+- Every FoldEvaluation carries SampleSizeDisclosure with observation_count, effective_sample_size and per_pool_counts
+- TrivialBaselineComparison and QuantileCoverageReport both store sample_count and the trivial baseline returns ModelVerdictCode.UNCERTAIN when sample_count < DEFAULT_TRIVIAL_BASELINE_MIN_SAMPLES
+- test_run_fold_evaluation_returns_underflow_when_too_few_samples: FoldVerdictCode.SAMPLE_SIZE_UNDERFLOW when eval_feature count = 1 and min_samples=5
+
+## Must-not violations
+
+- merge or backfill samples from incompatible registry or schema revisions -- PanelRegistryRevisionError is defined but no code path raises it; build_panel_provenance and the harness do not cross-check member registry_revision / schema_version / decode_version against the panel-level registry_revision, so the gate is not enforced at runtime
+
+## Unknowns
+
+- whether a constant-feature boundary case needs an explicit detector (DS-033 / acceptance list)
+- whether a horizon longer than a pool's window requires an explicit refusal in addition to the sample-size underflow that already surfaces
+- whether a missing feature column in a row requires an explicit refusal at assemble_panel_dataset time
+- whether the manifest-set-does-not-belong-to-declared-T069-run case requires an active build-time refusal or is satisfied by content_hash drift on re-run
+- whether the synthetically-placeholder forward-feature gate inside run_fold_evaluation is acceptable given that assemble_panel_dataset provides the real gate (acceptance text says 'detected and fails the run')
+- two pre-existing repository-wide pytest failures (tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output and tests/test_documentation_citations.py::test_check_passes_on_real_repository) reproduce on the unchanged base commit a414ab7 and are not introduced by T101
+
+## Required changes
+
+- Implement and raise PanelRegistryRevisionError in build_panel_provenance (or in a dedicated validator) when any PanelMemberIdentity.registry_revision / schema_version / decode_version disagrees with the panel-level registry_revision / declared revisions; add tests covering both the matching and mismatching cases per the acceptance clause.
+- Replace the index-rotation placeholder in run_fold_evaluation's forward-feature gate with a real registration lookup for each entry of feature_columns against config.registry_snapshot, or remove the gate from run_fold_evaluation entirely and rely on assemble_panel_dataset as the single check (with the test surface updated accordingly).
+- Thread real PanelFeatureRow objects through apply_split_to_panel / _populate_fold -- either accept sample_features: Mapping[str, PanelFeatureRow] as input and carry it into the returned per-fold (train, eval) tuples, or document the boundary in the function header and add a test that exercises the populated path.
+
+## Residual risks
+
+- The T100 dataset module owns the numeraire-qualification refusal; T101 only binds the qualification forward. If T100's gate is later weakened, T101 will silently inherit the change.
+- The pool-holdout per-pool out-of-sample metric clause is satisfied only because the single-pool-holdout fold's eval set equals the held-out pool samples; pool holdouts with multiple hold-out pools would not produce a per-pool breakdown in FoldEvaluation. The spec lists this only at fold scope, so this is a documented interpretation rather than a defect.
+- Tests/test_panel_t101.py -- 60 tests pass but 0 tests directly exercise the registry/schema-revision refusal path or the fold-level forward-feature path; even with the required_changes applied, additional negative tests are needed to lock the gates.
