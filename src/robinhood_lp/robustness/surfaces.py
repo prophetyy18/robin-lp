@@ -478,11 +478,45 @@ def build_regime_segmentation(
 
 
 # ---------------------------------------------------------------------------
+# Legacy marker (T106 cutover)
+# ---------------------------------------------------------------------------
+
+
+#: Legacy marker for surfaces built by the T064 generic builder.
+#:
+#: The T106 cutover constrains current parameter surfaces to the
+#: registry schema. A :class:`ParameterSurface` built by
+#: :func:`build_parameter_surface` is a legacy artifact: it carries
+#: no registry / schema binding, and a current publication path
+#: must not publish evidence from it. The marker is the
+#: deterministic sentinel the runner / report raise when a current
+#: publication path tries to consume a legacy surface. The
+#: :func:`is_legacy_surface` helper is the gate the runner uses to
+#: refuse such a path.
+LEGACY_SURFACE_MARKER: Final[str] = "LEGACY_T064_SURFACE"
+
+
+def is_legacy_surface(surface: object) -> bool:
+    """Return ``True`` iff ``surface`` is a T064 legacy :class:`ParameterSurface`.
+
+    The helper is the deterministic gate every current publication
+    path passes through: a current evidence path rejects a legacy
+    surface before any fold is evaluated. The legacy path itself
+    (the T064 runner / report) still publishes legacy artifacts;
+    the helper discriminates the two paths by class identity.
+    """
+    from robinhood_lp.robustness.surfaces import ParameterSurface
+
+    return isinstance(surface, ParameterSurface)
+
+
+# ---------------------------------------------------------------------------
 # Public surface
 # ---------------------------------------------------------------------------
 
 
 __all__ = [
+    "LEGACY_SURFACE_MARKER",
     "SURFACES_VERSION",
     "VALID_AXIS_VALUE_KINDS",
     "VALID_REGIME_LABELS",
@@ -495,5 +529,6 @@ __all__ = [
     "SurfaceError",
     "build_parameter_surface",
     "build_regime_segmentation",
+    "is_legacy_surface",
     "summarize_sensitivity",
 ]

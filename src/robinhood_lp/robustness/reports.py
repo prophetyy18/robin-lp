@@ -53,6 +53,9 @@ from robinhood_lp.robustness.disclosure import (
 from robinhood_lp.robustness.scenarios import (
     ScenarioCatalogue,
 )
+from robinhood_lp.robustness.schema_binding import (
+    SCHEMA_BOUND_SURFACES_VERSION as _SCHEMA_BOUND_SURFACES_VERSION,
+)
 from robinhood_lp.robustness.splits import (
     LabelHorizon,
     PoolHoldoutSplit,
@@ -65,8 +68,16 @@ from robinhood_lp.robustness.surfaces import (
     SensitivitySummary,
 )
 
-#: Module version.
+#: Module version for the T064 legacy report. The legacy report is
+#: preserved read-only; current evidence is published through the
+#: schema-bound :class:`SchemaBoundRobustnessReport` (T106) instead.
 REPORTS_VERSION: Final[str] = "t064.robustness_reports.v1"
+
+#: Module version for the T106 schema-bound robustness report. The
+#: constant is the schema-bound report schema version; a release
+#: that revises the binding contract must bump the version and
+#: the manifest authority (T105) records the bump.
+SCHEMA_BOUND_REPORTS_VERSION: Final[str] = "t106.robustness_reports.v1"
 
 #: The primary generalisation axis the report names. Per DS-021,
 #: ``POOL_HOLDOUT`` is the primary axis; time holdout and
@@ -499,6 +510,475 @@ def build_robustness_report(
 
 
 # ---------------------------------------------------------------------------
+# Schema-bound robustness report (T106)
+# ---------------------------------------------------------------------------
+
+
+class SchemaBoundReportError(RobustnessReportError):
+    """Base class for schema-bound report construction / validation failures."""
+
+
+class IncompatibleBindingError(SchemaBoundReportError):
+    """The schema-bound surface and the registry-derived binding disagree.
+
+    The T106 contract binds that a current report must agree with the
+    registry's current revision; a binding that names a different
+    registry version, registry checksum, parameter-schema version,
+    or parameter-schema checksum is rejected before the report is
+    built.
+    """
+
+
+class LegacySurfaceInCurrentReportError(SchemaBoundReportError):
+    """A legacy :class:`ParameterSurface` was supplied to the schema-bound path.
+
+    The T106 contract binds that current evidence cannot be
+    published through the legacy surface. The helper raises this
+    error so a reviewer can localise the misuse.
+    """
+
+
+def _call_to_dict(value: object) -> object:
+    """Call ``to_dict()`` on ``value``.
+
+    The :class:`SchemaBoundRobustnessReport` field
+    :attr:`schema_bound_surface` is typed as ``object | None`` so
+    the constructor can reject a legacy :class:`ParameterSurface`
+    at the boundary; the helper narrows the type to a Protocol-
+    like shape with a :meth:`to_dict` method for the
+    serialisation step. The runtime value is either ``None`` or
+    a :class:`SchemaBoundParameterSurface`; the
+    :meth:`SchemaBoundRobustnessReport.__post_init__` gate
+    enforces the invariant.
+    """
+    # Cast through ``Any`` because the field is typed as
+    # ``object`` to allow the legacy-surface rejection check
+    # above; the to_dict call is the one place the field is
+    # widened and the call site controls the runtime type.
+    from typing import Any, cast
+
+    target = cast(Any, value)
+    return target.to_dict()
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaBoundRobustnessReport:
+    """A registry / schema-bound robustness report (T106).
+
+    The report extends the T064 :class:`RobustnessReport` with the
+    full registry / schema binding every current publication path
+    carries. The report is the canonical artifact the T107 search /
+    candidate lock consumes; the report's identity (its schema-bound
+    binding tuple) is the deterministic gate the runner uses to
+    refuse a merge with results from an incompatible surface.
+
+    Field units / shapes:
+
+    - ``version`` — ``SCHEMA_BOUND_REPORTS_VERSION``.
+    - ``run_id`` — non-empty string.
+    - ``primary_generalisation_axis`` — always
+      :data:`PRIMARY_GENERALISATION_AXIS`.
+    - ``label_horizon`` / ``purge_embargo_length`` / ``embargo_unit``
+      — :class:`LabelHorizon` and its derived fields (the embargo
+      length equals ``label_horizon.value`` by construction).
+    - ``train_results`` / ``validation_results`` / ``test_results``
+      — disjoint :class:`FoldResult` tuples (per
+      :func:`assert_train_validation_test_separation`).
+    - ``pool_holdout_results`` — non-empty tuple of
+      :class:`PoolHoldoutResult`; per-pool disclosure is the primary
+      generalisation statement (DS-021).
+    - ``walk_forward_splits`` — tuple of :class:`WalkForwardSplit`.
+    - ``time_holdout_split`` — :class:`TimeHoldoutSplit` or ``None``.
+    - ``pool_holdout_split`` — :class:`PoolHoldoutSplit`.
+    - ``regime_segmentation`` — :class:`RegimeSegmentation` or ``None``.
+    - ``sensitivity_summary`` — :class:`SensitivitySummary`.
+    - ``scenario_catalogue`` — :class:`ScenarioCatalogue`.
+    - ``multiple_comparison_disclosure`` —
+      :class:`MultipleComparisonDisclosure`.
+    - ``conclusion_statement`` — non-empty string.
+    - ``schema_bound_surface`` — :class:`SchemaBoundParameterSurface`
+      or ``None`` when the runner was invoked without a parameter
+      sweep. A current report never carries a legacy
+      :class:`ParameterSurface`.
+    - ``registry_version`` / ``registry_checksum`` — the registry
+      revision the report binds to.
+    - ``parameter_schema_version`` / ``parameter_schema_checksum`` —
+      the per-identity schema revision.
+    - ``strategy_identity`` / ``strategy_version`` — the registered
+      strategy the report binds to.
+
+    Validation enforces:
+
+    - ``version`` equals :data:`SCHEMA_BOUND_REPORTS_VERSION`.
+    - Every binding field is non-empty.
+    - ``schema_bound_surface`` is either ``None`` or a
+      :class:`SchemaBoundParameterSurface` whose registry / schema
+      binding matches the report's binding.
+    - The per-pool metric names agree with the sensitivity summary's
+      metric name.
+    - The train / validation / test fold sets are disjoint.
+    - The pool-holdout results are non-empty.
+    """
+
+    version: str
+    run_id: str
+    label_horizon: LabelHorizon
+    train_results: tuple[FoldResult, ...]
+    validation_results: tuple[FoldResult, ...]
+    test_results: tuple[FoldResult, ...]
+    pool_holdout_results: tuple[PoolHoldoutResult, ...]
+    walk_forward_splits: tuple[WalkForwardSplit, ...]
+    time_holdout_split: TimeHoldoutSplit | None
+    pool_holdout_split: PoolHoldoutSplit
+    regime_segmentation: RegimeSegmentation | None
+    sensitivity_summary: SensitivitySummary
+    scenario_catalogue: ScenarioCatalogue
+    multiple_comparison_disclosure: MultipleComparisonDisclosure
+    conclusion_statement: str
+    schema_bound_surface: object | None
+    registry_version: str
+    registry_checksum: str
+    parameter_schema_version: str
+    parameter_schema_checksum: str
+    strategy_identity: str
+    strategy_version: str
+
+    def __post_init__(self) -> None:
+        if self.version != SCHEMA_BOUND_REPORTS_VERSION:
+            raise SchemaBoundReportError(
+                f"SchemaBoundRobustnessReport.version: must be "
+                f"{SCHEMA_BOUND_REPORTS_VERSION!r}, got {self.version!r}"
+            )
+        if not isinstance(self.run_id, str) or not self.run_id:
+            raise SchemaBoundReportError(
+                "SchemaBoundRobustnessReport.run_id: must be non-empty str"
+            )
+        if self.purge_embargo_length != self.label_horizon.purge_embargo_length:
+            raise SchemaBoundReportError(
+                f"SchemaBoundRobustnessReport: purge_embargo_length="
+                f"{self.purge_embargo_length} disagrees with "
+                f"label_horizon.purge_embargo_length="
+                f"{self.label_horizon.purge_embargo_length}"
+            )
+        if self.embargo_unit != self.label_horizon.embargo_unit:
+            raise SchemaBoundReportError(
+                f"SchemaBoundRobustnessReport: embargo_unit="
+                f"{self.embargo_unit!r} disagrees with "
+                f"label_horizon.embargo_unit={self.label_horizon.embargo_unit!r}"
+            )
+        if not isinstance(self.conclusion_statement, str) or not self.conclusion_statement:
+            raise SchemaBoundReportError(
+                "SchemaBoundRobustnessReport.conclusion_statement: must be non-empty str"
+            )
+        if not self.pool_holdout_results:
+            raise MissingPrimaryGeneralisationError(
+                "SchemaBoundRobustnessReport: pool_holdout_results must be "
+                "non-empty; DS-021 binds pool holdout as the primary "
+                "generalisation test and per-pool results as the primary "
+                "disclosure"
+            )
+        assert_train_validation_test_separation(
+            train=self.train_results,
+            validation=self.validation_results,
+            test=self.test_results,
+        )
+        for result in self.pool_holdout_results:
+            if result.metric_name != self.sensitivity_summary.metric_name:
+                raise SchemaBoundReportError(
+                    f"SchemaBoundRobustnessReport: "
+                    f"pool_holdout_results[{result.pool_key_id!r}] "
+                    f"metric_name={result.metric_name!r} disagrees with "
+                    f"sensitivity_summary.metric_name="
+                    f"{self.sensitivity_summary.metric_name!r}"
+                )
+        for field in (
+            "registry_version",
+            "registry_checksum",
+            "parameter_schema_version",
+            "parameter_schema_checksum",
+            "strategy_identity",
+            "strategy_version",
+        ):
+            value = getattr(self, field)
+            if not isinstance(value, str) or not value:
+                raise SchemaBoundReportError(
+                    f"SchemaBoundRobustnessReport.{field}: must be non-empty str, got {value!r}"
+                )
+        # ``schema_bound_surface`` is either ``None`` or a
+        # :class:`SchemaBoundParameterSurface`. A current report
+        # never carries a legacy surface; the rejection surfaces as
+        # :class:`LegacySurfaceInCurrentReportError`.
+        if self.schema_bound_surface is not None:
+            from robinhood_lp.robustness.schema_binding import (
+                SchemaBoundParameterSurface,
+            )
+
+            if not isinstance(self.schema_bound_surface, SchemaBoundParameterSurface):
+                from robinhood_lp.robustness.surfaces import (
+                    ParameterSurface as _LegacyParameterSurface,
+                )
+
+                if isinstance(self.schema_bound_surface, _LegacyParameterSurface):
+                    raise LegacySurfaceInCurrentReportError(
+                        "SchemaBoundRobustnessReport: schema_bound_surface "
+                        "carries a legacy ParameterSurface; current "
+                        "publication cannot use the unrestricted T064 path"
+                    )
+                raise SchemaBoundReportError(
+                    f"SchemaBoundRobustnessReport.schema_bound_surface: must "
+                    f"be SchemaBoundParameterSurface or None, got "
+                    f"{type(self.schema_bound_surface).__name__}"
+                )
+            surface = self.schema_bound_surface
+            if surface.registry_version != self.registry_version:
+                raise IncompatibleBindingError(
+                    f"SchemaBoundRobustnessReport: surface.registry_version="
+                    f"{surface.registry_version!r} disagrees with "
+                    f"report.registry_version={self.registry_version!r}"
+                )
+            if surface.registry_checksum != self.registry_checksum:
+                raise IncompatibleBindingError(
+                    f"SchemaBoundRobustnessReport: surface.registry_checksum="
+                    f"{surface.registry_checksum!r} disagrees with "
+                    f"report.registry_checksum={self.registry_checksum!r}"
+                )
+            if surface.parameter_schema_version != self.parameter_schema_version:
+                raise IncompatibleBindingError(
+                    f"SchemaBoundRobustnessReport: surface.parameter_schema_version="
+                    f"{surface.parameter_schema_version!r} disagrees with "
+                    f"report.parameter_schema_version="
+                    f"{self.parameter_schema_version!r}"
+                )
+            if surface.parameter_schema_checksum != self.parameter_schema_checksum:
+                raise IncompatibleBindingError(
+                    f"SchemaBoundRobustnessReport: surface.parameter_schema_checksum="
+                    f"{surface.parameter_schema_checksum!r} disagrees with "
+                    f"report.parameter_schema_checksum="
+                    f"{self.parameter_schema_checksum!r}"
+                )
+            if surface.strategy_identity != self.strategy_identity:
+                raise IncompatibleBindingError(
+                    f"SchemaBoundRobustnessReport: surface.strategy_identity="
+                    f"{surface.strategy_identity!r} disagrees with "
+                    f"report.strategy_identity={self.strategy_identity!r}"
+                )
+            if surface.strategy_version != self.strategy_version:
+                raise IncompatibleBindingError(
+                    f"SchemaBoundRobustnessReport: surface.strategy_version="
+                    f"{surface.strategy_version!r} disagrees with "
+                    f"report.strategy_version={self.strategy_version!r}"
+                )
+
+    @property
+    def primary_generalisation_axis(self) -> str:
+        return PRIMARY_GENERALISATION_AXIS
+
+    @property
+    def purge_embargo_length(self) -> int:
+        return self.label_horizon.purge_embargo_length
+
+    @property
+    def embargo_unit(self) -> str:
+        return self.label_horizon.embargo_unit
+
+    @property
+    def binding_identity(self) -> str:
+        """Return the registry / schema-bound identity tuple.
+
+        The identity is the colon-joined
+        ``"<strategy_identity>:<strategy_version>:<parameter_schema_version>:<parameter_schema_checksum>:<registry_version>:<registry_checksum>"``
+        tuple. Two reports with the same identity may be combined
+        into one sensitivity conclusion; reports with different
+        identities must not be combined — :func:`assert_reports_compatible`
+        enforces the rule.
+        """
+        return (
+            f"{self.strategy_identity}:{self.strategy_version}:"
+            f"{self.parameter_schema_version}:{self.parameter_schema_checksum}:"
+            f"{self.registry_version}:{self.registry_checksum}"
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "version": self.version,
+            "run_id": self.run_id,
+            "primary_generalisation_axis": self.primary_generalisation_axis,
+            "label_horizon": {
+                "value": self.label_horizon.value,
+                "unit": self.label_horizon.unit,
+            },
+            "purge_embargo_length": self.purge_embargo_length,
+            "embargo_unit": self.embargo_unit,
+            "train_results": [r.to_dict() for r in self.train_results],
+            "validation_results": [r.to_dict() for r in self.validation_results],
+            "test_results": [r.to_dict() for r in self.test_results],
+            "pool_holdout_results": [r.to_dict() for r in self.pool_holdout_results],
+            "walk_forward_splits": [
+                {
+                    "fold_index": s.fold_index,
+                    "window_kind": s.window_kind,
+                }
+                for s in self.walk_forward_splits
+            ],
+            "time_holdout_split": (
+                {
+                    "train_segment_label": self.time_holdout_split.train.segment_label,
+                    "validation_segment_label": self.time_holdout_split.validation.segment_label,
+                    "test_segment_label": self.time_holdout_split.test.segment_label,
+                }
+                if self.time_holdout_split is not None
+                else None
+            ),
+            "pool_holdout_split": {
+                "train_pool_ids": sorted(
+                    (f.chain_id, f.pool_key_id) for f in self.pool_holdout_split.train_pool_folds
+                ),
+                "holdout_pool_ids": sorted(
+                    (f.chain_id, f.pool_key_id) for f in self.pool_holdout_split.holdout_pool_folds
+                ),
+            },
+            "regime_segmentation": (
+                self.regime_segmentation.to_dict() if self.regime_segmentation is not None else None
+            ),
+            "sensitivity_summary": self.sensitivity_summary.to_dict(),
+            "scenario_catalogue": self.scenario_catalogue.to_dict(),
+            "multiple_comparison_disclosure": self.multiple_comparison_disclosure.to_dict(),
+            "conclusion_statement": self.conclusion_statement,
+            "schema_bound_surface": (
+                _call_to_dict(self.schema_bound_surface)
+                if self.schema_bound_surface is not None
+                else None
+            ),
+            "registry_version": self.registry_version,
+            "registry_checksum": self.registry_checksum,
+            "parameter_schema_version": self.parameter_schema_version,
+            "parameter_schema_checksum": self.parameter_schema_checksum,
+            "strategy_identity": self.strategy_identity,
+            "strategy_version": self.strategy_version,
+            "binding_identity": self.binding_identity,
+            "schema_bound_surfaces_version": _SCHEMA_BOUND_SURFACES_VERSION,
+        }
+
+
+def assert_reports_compatible(
+    *,
+    left: SchemaBoundRobustnessReport,
+    right: SchemaBoundRobustnessReport,
+) -> None:
+    """Raise :class:`IncompatibleBindingError` if ``left`` and ``right`` disagree.
+
+    The T106 contract binds that results from incompatible schema
+    revisions are not merged into one sensitivity conclusion. The
+    helper is the deterministic gate every code path that merges
+    two schema-bound reports passes through.
+    """
+    if left.strategy_identity != right.strategy_identity:
+        raise IncompatibleBindingError(
+            f"assert_reports_compatible: strategy_identity differs "
+            f"(left={left.strategy_identity!r}, right={right.strategy_identity!r})"
+        )
+    if left.strategy_version != right.strategy_version:
+        raise IncompatibleBindingError(
+            f"assert_reports_compatible: strategy_version differs "
+            f"(left={left.strategy_version!r}, right={right.strategy_version!r})"
+        )
+    if left.parameter_schema_version != right.parameter_schema_version:
+        raise IncompatibleBindingError(
+            f"assert_reports_compatible: parameter_schema_version differs "
+            f"(left={left.parameter_schema_version!r}, "
+            f"right={right.parameter_schema_version!r})"
+        )
+    if left.parameter_schema_checksum != right.parameter_schema_checksum:
+        raise IncompatibleBindingError(
+            f"assert_reports_compatible: parameter_schema_checksum differs "
+            f"(left={left.parameter_schema_checksum!r}, "
+            f"right={right.parameter_schema_checksum!r})"
+        )
+    if left.registry_version != right.registry_version:
+        raise IncompatibleBindingError(
+            f"assert_reports_compatible: registry_version differs "
+            f"(left={left.registry_version!r}, right={right.registry_version!r})"
+        )
+    if left.registry_checksum != right.registry_checksum:
+        raise IncompatibleBindingError(
+            f"assert_reports_compatible: registry_checksum differs "
+            f"(left={left.registry_checksum!r}, right={right.registry_checksum!r})"
+        )
+
+
+def build_schema_bound_robustness_report(
+    *,
+    run_id: str,
+    label_horizon: LabelHorizon,
+    train_results: Iterable[FoldResult],
+    validation_results: Iterable[FoldResult],
+    test_results: Iterable[FoldResult],
+    pool_holdout_results: Iterable[PoolHoldoutResult],
+    walk_forward_splits: Iterable[WalkForwardSplit],
+    pool_holdout_split: PoolHoldoutSplit,
+    sensitivity_summary: SensitivitySummary,
+    scenario_catalogue: ScenarioCatalogue,
+    multiple_comparison_disclosure: MultipleComparisonDisclosure,
+    conclusion_statement: str,
+    registry_version: str,
+    registry_checksum: str,
+    parameter_schema_version: str,
+    parameter_schema_checksum: str,
+    strategy_identity: str,
+    strategy_version: str,
+    time_holdout_split: TimeHoldoutSplit | None = None,
+    regime_segmentation: RegimeSegmentation | None = None,
+    schema_bound_surface: object | None = None,
+) -> SchemaBoundRobustnessReport:
+    """Build a :class:`SchemaBoundRobustnessReport`.
+
+    The function is the canonical builder every current publication
+    path uses. The builder enforces every T064 acceptance clause
+    the schema-bound report inherits (separation, primary
+    generalisation, embargo derivation, per-pool metric agreement)
+    and adds the T106 binding gate: every binding field must be a
+    non-empty string, and a non-``None`` ``schema_bound_surface``
+    must agree with the binding.
+    """
+    train = tuple(train_results)
+    validation = tuple(validation_results)
+    test = tuple(test_results)
+    pool_holdout = tuple(pool_holdout_results)
+    walk_forward = tuple(walk_forward_splits)
+    if not pool_holdout:
+        raise MissingPrimaryGeneralisationError(
+            "build_schema_bound_robustness_report: pool_holdout_results must "
+            "be non-empty; DS-021 binds pool holdout as the primary "
+            "generalisation test"
+        )
+    assert_train_validation_test_separation(train=train, validation=validation, test=test)
+    return SchemaBoundRobustnessReport(
+        version=SCHEMA_BOUND_REPORTS_VERSION,
+        run_id=run_id,
+        label_horizon=label_horizon,
+        train_results=train,
+        validation_results=validation,
+        test_results=test,
+        pool_holdout_results=pool_holdout,
+        walk_forward_splits=walk_forward,
+        time_holdout_split=time_holdout_split,
+        pool_holdout_split=pool_holdout_split,
+        regime_segmentation=regime_segmentation,
+        sensitivity_summary=sensitivity_summary,
+        scenario_catalogue=scenario_catalogue,
+        multiple_comparison_disclosure=multiple_comparison_disclosure,
+        conclusion_statement=conclusion_statement,
+        schema_bound_surface=schema_bound_surface,
+        registry_version=registry_version,
+        registry_checksum=registry_checksum,
+        parameter_schema_version=parameter_schema_version,
+        parameter_schema_checksum=parameter_schema_checksum,
+        strategy_identity=strategy_identity,
+        strategy_version=strategy_version,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Public surface
 # ---------------------------------------------------------------------------
 
@@ -506,14 +986,21 @@ def build_robustness_report(
 __all__ = [
     "PRIMARY_GENERALISATION_AXIS",
     "REPORTS_VERSION",
+    "SCHEMA_BOUND_REPORTS_VERSION",
     "VALID_FOLD_RESULT_ROLES",
     "FoldResult",
     "FoldResultError",
+    "IncompatibleBindingError",
     "InvalidReportAxisError",
+    "LegacySurfaceInCurrentReportError",
     "MissingPrimaryGeneralisationError",
     "PoolHoldoutResult",
     "RobustnessReport",
     "RobustnessReportError",
+    "SchemaBoundReportError",
+    "SchemaBoundRobustnessReport",
+    "assert_reports_compatible",
     "assert_train_validation_test_separation",
     "build_robustness_report",
+    "build_schema_bound_robustness_report",
 ]

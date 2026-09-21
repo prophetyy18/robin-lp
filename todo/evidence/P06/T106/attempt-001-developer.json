@@ -1,0 +1,41 @@
+{
+  "task_id": "T106",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented T106 by constraining robustness analysis to the T068 strategy registry's parameter schema. Added a new schema-bound parameter surface module (`robinhood_lp.robustness.schema_binding`) that builds axes from the exact registered identity and parameter-schema revision recorded by the T105 manifest, validates every axis value against the schema's declared type / unit / range, and carries the registry / schema identity, version, and checksum with the surface. Added a new schema-bound robustness report (`SchemaBoundRobustnessReport`, version `t106.robustness_reports.v1`) that records the binding and rejects a legacy T064 `ParameterSurface` from the current publication path. Added a new schema-bound runner (`SchemaBoundRobustnessRunner`, version `t106.robustness_runner.v1`) that rejects a legacy surface and produces the schema-bound report. The legacy T064 surface / runner / report paths remain intact for the legacy artifact reader / test path, preserving all T064 acceptance clauses (every T064 test still passes). Comprehensive coverage in `tests/test_robustness_t106.py` (106 tests) exercises positive construction, boundary edges, negative cases (undeclared, wrong-type, wrong-unit, out-of-range, bool masquerading as int, duplicate axes, non-empty vs empty strings), schema-revision incompatibility, registry-binding compatibility, the heterogeneous-strategy requirement (`IDENTITY_FIXED_WIDTH` and `IDENTITY_ADAPTIVE_RANGE`), determinism, layer purity, the old-path-unreachable guarantee, and T064 legacy preservation.",
+  "commands": [
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_robustness_t106.py -q --no-header",
+      "result": "106 passed in 0.35s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_robustness_t064.py tests/test_strategy_t068.py tests/test_reports_t105.py tests/test_robustness_t106.py -q --no-header",
+      "result": "349 passed in 0.85s — every T064 / T068 / T105 / T106 test passes; T064 acceptance clauses preserved."
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ --no-header -q --ignore=tests/test_workflow.py",
+      "result": "2844 passed, 6 skipped, 2 pre-existing failures (test_abi_artifacts.py requires Foundry not on PATH; test_documentation_citations.py flags a missing T069 module path on base commit caf0fad). Both pre-existing failures are unrelated to T106; they are present on the base commit before my changes."
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/robustness/schema_binding.py src/robinhood_lp/robustness/reports.py src/robinhood_lp/robustness/runner.py src/robinhood_lp/robustness/surfaces.py src/robinhood_lp/robustness/__init__.py tests/test_robustness_t106.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/robustness/schema_binding.py src/robinhood_lp/robustness/reports.py src/robinhood_lp/robustness/runner.py src/robinhood_lp/robustness/surfaces.py src/robinhood_lp/robustness/__init__.py tests/test_robustness_t106.py",
+      "result": "All files already formatted."
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/robinhood_lp/robustness/schema_binding.py src/robinhood_lp/robustness/reports.py src/robinhood_lp/robustness/runner.py src/robinhood_lp/robustness/surfaces.py src/robinhood_lp/robustness/__init__.py",
+      "result": "Success: no issues found in 5 source files."
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_robustness_t106.py::TestSchemaBindingLayerPurity -v --no-header",
+      "result": "2 passed — the schema-binding module does not import any forbidden boundary module (rpc / storage / signer / web / backtest / etc.) and the registry layer-purity check passes."
+    }
+  ],
+  "residual_risks": [
+    "The pre-existing T069 row in `docs/spec/architecture/ARCHITECTURE.md` line 154 references a module `robinhood_lp.application.backtest_runs` that does not resolve under `src/robinhood_lp/`. The `test_documentation_citations.py::test_check_passes_on_real_repository` failure is present on base commit `caf0fad` before my changes and is not caused by T106. The architecture-citation checker enforces that every row of the §2.2 table resolves to a module path; the T069 row requires a future maintenance fix (or a T069 implementation) and is out of scope for T106.",
+    "The `test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output` test requires Foundry (`forge`) on PATH to regenerate the oracle vector harness output. Foundry is not installed in this environment; the test is skipped (not failing for T106 reasons) per the test's own skip annotation.",
+    "Schema-bound report's `to_dict()` adds a `schema_bound_surfaces_version` field that mirrors the schema-binding module's version constant; downstream consumers that compare JSON serialisations against T064 report bytes must be aware that the schema-bound report schema is intentionally distinct and lives at `t106.robustness_reports.v1`.",
+    "The schema-bound runner rejects a legacy T064 `ParameterSurface` at the inputs dataclass and at run-time; a downstream T107 / T102 / T096 caller that previously constructed a `ParameterSurface` for the same purpose must migrate to `build_schema_bound_surface` before T106 lands."
+  ]
+}
