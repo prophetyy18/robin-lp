@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0025",
+  "task_ids": [],
+  "layer": "PROPHET",
+  "target_status": null,
+  "summary": "Sync §2.2 ARCHITECTURE.md rows for T069 and T109 with the modules each task actually delivered (T069 → robinhood_lp.orchestrator; T109 → attempt-4 modified modules). Also evaluate T110/T111 rows for the same kind of drift.",
+  "owner_direction": "T069 在 attempt-1 APPROVED 时实际交付了 src/robinhood_lp/orchestrator/__init__.py（在 tools/check_imports/layer_map.py 里已注册到 application/orchestration 层），但 A0012 在创建 T069 时做的命名预测 robinhood_lp.application.backtest_runs 留在了 §2.2 行从未同步；T109 拆分时（commit d697dd7）又重复了这个错误的预测路径。T109 attempt-4（commit c79e4c83，已 APPROVED）实际改动在 src/robinhood_lp/{orchestrator/__init__.py, backtest/engine.py, protocol/contracts.py, reports/{manifest,run_state,validation}.py}。请把 §2.2 T069 行从 robinhood_lp.application.backtest_runs 改为 robinhood_lp.orchestrator，§2.2 T109 行改为 T109 attempt-4 实际交付的模块集 robinhood_lp.{orchestrator, backtest.engine, protocol.contracts, reports.{manifest,run_state,validation}}。同时评估 T110、T111 行的 §2.2 路径是否也已实现，未实现的按 PROPHET 的预测路径标注规范处理。所有 task status、attempts、evidence、commit、approval metadata 不动。"
+}

@@ -151,10 +151,10 @@ application / backtest orchestration
 | 3 | T038 (retired; superseded by T039) | `robinhood_lp.qualification.{second_pool,two_pool,two_pool_window,two_pool_failure_paths,two_pool_runbook}` | presentation / reports |
 | 5 | T049 | `robinhood_lp.protocol.sizing` | protocol/domain |
 | 6 | T068 | `robinhood_lp.strategy.registry` (registered strategy identities, parameter schemas and code provenance) | strategy |
-| 6 | T069 (superseded by T109) | `robinhood_lp.application.backtest_runs` (predecessor product-level run entry point over stored data, replay, features, the engine and the manifest) | application / orchestration |
+| 6 | T069 (superseded by T109) | `robinhood_lp.orchestrator` (predecessor product-run lifecycle delivery: durable identity, queue/progress/status, cancellation and atomic publication of the registry-bound manifest/report) | application / orchestration |
 | 6 | T105 (superseded by T109) | `robinhood_lp.reports.{manifest,validation,rerun,run_identity,metrics}` (predecessor registry-bound manifest and artifact-rerun delivery) | backtest / research |
-| 6 | T109 | `robinhood_lp.application.backtest_runs` (product-run lifecycle, causal scheduling and atomic evidence publication) | application / orchestration |
-| 6 | T109 | `robinhood_lp.reports.{manifest,validation,rerun,run_identity,metrics,evidence}` (canonical-dataset manifest/report/evidence publication) | backtest / research |
+| 6 | T109 | `robinhood_lp.orchestrator` (product-run lifecycle, causal scheduling and atomic evidence publication; the backtest / research row below names the rest of attempt-4's module set) | application / orchestration |
+| 6 | T109 | `robinhood_lp.backtest.engine`, `robinhood_lp.reports.{manifest,run_state,validation}` (causal-scheduling engine extension and atomic manifest/run-state/validation publication) | backtest / research |
 | 6 | T110 | `robinhood_lp.application.historical_replay` (qualified MarketState/RunState composition and replay frames) | application / orchestration |
 | 6 | T111 | `robinhood_lp.reports.evidence_adapter` (validated T101/T102/T106 compatibility view over current artifacts) | backtest / research |
 | 6 | T106 | `robinhood_lp.robustness` (schema-bound surfaces, splits, scenarios, runner and reports) | backtest / research |
@@ -208,6 +208,11 @@ models may compose T104 but may not implement another fee path. T111's versioned
 view preserves the logical run/dataset/pool/range/registry/schema bindings consumed by approved
 T101 and T106 and the T102 path through them, resolving canonical event bytes from T100 references
 instead of reopening T069/T105 publication.
+
+The T109 row above spans three layers because attempt-4 also extends `robinhood_lp.protocol.contracts`
+at protocol/domain: the optional `block_number` / `transaction_index` / `log_index` cursor triple
+on `BacktestEvent` belongs to the protocol layer map and so is named here in prose rather than
+in a §2.2 backtest / research row that already lists the other module layers attempt-4 touched.
 
 For new T109 runs, delayed execution is a correction inside the one T061 engine schedule, not a
 projection-layer reorder: a future fill remains queued until its actual fill-data MarketCursor is
