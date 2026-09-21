@@ -76,6 +76,21 @@ fee-growth 积分器。
 因此绑定后一个游标而不是原 decision 游标。任何会改变或证明运行状态、但无法绑定到数据集
 内确切规范游标的 transition，都使新式成功证据发布失败。
 
+对新的 T109 run，这一绑定是对**同一条 T061 执行调度路径**的扩展与纠正，不是结果发布后
+的重新排序：decision/risk 若选择未来 fill-data event，现有引擎路径把 latency/fill 作为 pending
+pipeline 按该实际 `MarketCursor` 排队，只在主市场循环到达该游标、该事件已进入 information
+frontier 后才依次应用 latency 与 fill、改变 ledger。到达 fill 游标时，先应用该游标的市场事件，
+再按原 decision cursor 和 pipeline identity 的确定性顺序释放到期的 latency/fill，然后才把
+更新后的状态提供给由该游标触发的新 strategy callback/risk pipeline。同一 cursor 立即成交的
+pipeline 仍保持 decision → risk → latency → fill。
+
+因此 trigger A 与 fill C 之间的任何 market event B、strategy callback、risk decision、指标或
+会计观察只能看到 pre-fill 状态；不得因引擎已搜索到 C 就提前改变 ledger。append-only audit 的
+`run_transition_ordinal` 在创建时必须与非递减 `MarketCursor` 顺序一致（同游标按 ordinal），
+尤其任何 state-changing transition 都必须满足这一点；不一致使成功发布失败。禁止先产生
+non-causal history 再按 cursor post-sort evidence 来“修复”。pre-T109 artifact 保持原样并返回
+exact historical `RunState` unavailable，不得按本规则重排、重释或补造其历史。
+
 证据还记录全局单调、不可重复的 `run_transition_ordinal`，即原始运行在其 append-only audit
 chain 中产生 transition 的顺序。同一游标内按该 ordinal 应用 transition，并验证每条 pipeline
 的因果阶段为 decision → risk → latency → fill；同一区块的不同市场事件先按 `MarketCursor`

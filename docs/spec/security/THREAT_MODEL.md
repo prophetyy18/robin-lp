@@ -477,12 +477,15 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
 - **Severity:** Critical
 - **Scenario:** A reader combines a run with a different dataset, pool or cursor, infers run
   transitions from integer timestamps, re-executes the current strategy, substitutes a final
-  summary for intermediate state, or uses an alternative fee calculation. The resulting frame
+  summary for intermediate state, exposes a future delayed fill to an intervening callback, sorts
+  a non-causal audit history after the run, or uses an alternative fee calculation. The resulting frame
   looks historical but does not represent either canonical market truth or what that exact run did.
 - **Controls:** `DS-005`–`DS-007` bind post-event MarketState and post-transition RunState to one
   immutable dataset/content hash, exact canonical cursor and deterministic transition ordinal;
   T109 publishes checksummed run evidence atomically, refuses unbound transitions, never invokes
-  strategy callbacks for replay and composes rather than copies the two timelines; T104 remains the
+  strategy callbacks for replay and composes rather than copies the two timelines; new T109 runs
+  queue delayed latency/fill inside the single T061 schedule until the actual fill-data cursor, and
+  require audit ordinal/cursor agreement at creation rather than post-sort repair; T104 remains the
   sole fee-growth/range-fee projection with its dataset/window/cursor/reconstruction provenance;
   pre-evidence runs are explicitly unavailable instead of regenerated.
 - **Owner:** T100 (canonical dataset identity) + T104 (fee-growth projection) + T109 (current
@@ -528,7 +531,7 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
 | T-19 | Research artifacts stay research: no execution authority, approval appearance or reachability | T085 acceptance; T086 journeys; ADR-014 clauses 1 and 5 |
 | T-20 | One central, non-bypassable risk gateway ahead of any model output | T070 + T060/T102 acceptance; `G-RISK-01` |
 | T-21 | Additive publishing, content hashes, canonical dataset references and dataset/registry-version binding in the manifest/evidence | T100/T063/T105 historical evidence plus T109/T101 acceptance; `DS-002`/`DS-043` |
-| T-22 | Exact cursor/ordinal binding, immutable run evidence, no strategy rerun, T104-only fee projection | T104/T109 acceptance; `DS-005`–`DS-007` |
+| T-22 | Exact cursor/ordinal binding, causally queued delayed fills, immutable run evidence, no post-sort/strategy rerun, T104-only fee projection | T061/T104/T109 acceptance; `DS-005`–`DS-007` |
 
 ## 6. Residual risks and owner follow-ups
 

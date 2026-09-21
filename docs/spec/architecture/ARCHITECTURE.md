@@ -207,6 +207,13 @@ logical run/dataset/pool/range/registry/schema bindings consumed by approved T10
 T102 path through them, resolving canonical event bytes from T100 references instead of reopening
 T069/T105 publication.
 
+For new T109 runs, delayed execution is a correction inside the one T061 engine schedule, not a
+projection-layer reorder: a future fill remains queued until its actual fill-data MarketCursor is
+reached, so intervening callbacks and accounting views remain pre-fill. Audit ordinal and cursor
+order agree when created; T109 refuses publication instead of sorting a non-causal audit history
+afterward. Historical predecessor artifacts remain read-only and unavailable for exact RunState,
+not reinterpreted under the corrected schedule.
+
 ## 3. Cross-cutting policies
 
 The following are enforced by every layer and audited by the Definition of
