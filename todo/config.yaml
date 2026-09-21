@@ -805,8 +805,8 @@
       "depends_on": [
         "T025",
         "T027",
-        "T105",
-        "T107"
+        "T107",
+        "T109"
       ],
       "task_file": "todo/phases/P07-risk-and-paper/T073.md",
       "attempt": 0,
@@ -879,7 +879,7 @@
         "T025",
         "T072",
         "T080",
-        "T105"
+        "T109"
       ],
       "task_file": "todo/phases/P08-operations-and-web/T084.md",
       "attempt": 0,
@@ -924,8 +924,8 @@
       "status": "PLANNED",
       "depends_on": [
         "T068",
-        "T069",
-        "T084"
+        "T084",
+        "T109"
       ],
       "task_file": "todo/phases/P08-operations-and-web/T087.md",
       "attempt": 0,
@@ -938,8 +938,8 @@
       "phase": "P08",
       "status": "PLANNED",
       "depends_on": [
-        "T069",
-        "T084"
+        "T084",
+        "T109"
       ],
       "task_file": "todo/phases/P08-operations-and-web/T088.md",
       "attempt": 0,
@@ -1046,7 +1046,8 @@
         "T088",
         "T095",
         "T097",
-        "T108"
+        "T108",
+        "T109"
       ],
       "task_file": "todo/phases/P09-signer-testnet-and-live/T096.md",
       "attempt": 0,
@@ -1123,7 +1124,8 @@
       "status": "PLANNED",
       "depends_on": [
         "T085",
-        "T102"
+        "T102",
+        "T109"
       ],
       "task_file": "todo/phases/P10-research-and-models/T103.md",
       "attempt": 0,
@@ -1188,8 +1190,8 @@
         "T065",
         "T066",
         "T068",
-        "T105",
-        "T106"
+        "T106",
+        "T109"
       ],
       "replaces": [
         "T066"
@@ -1207,7 +1209,7 @@
       "depends_on": [
         "T067",
         "T068",
-        "T105"
+        "T109"
       ],
       "replaces": [
         "T067"

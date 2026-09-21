@@ -1,0 +1,17 @@
+{
+  "amendment_id": "A0023",
+  "task_ids": [
+    "T073",
+    "T084",
+    "T087",
+    "T088",
+    "T096",
+    "T103",
+    "T107",
+    "T108"
+  ],
+  "layer": "CONTRACT",
+  "target_status": "PLANNED",
+  "summary": "repoint planned consumers to exact historical replay authority T109",
+  "owner_direction": "Implement the approved A0022 planning impacts for T073, T084, T087, T088, T096, T103, T107 and T108. Repoint current T069/T105 authority to T109 where required; make T103 consume market-only MarketState with hypothetical-position separation and T104 provenance; make T088 consume exact ReplayFrame with cursor scrubbing, causal delayed-fill semantics, T104 provenance and legacy-unavailable behavior; preserve all existing obligations and resolve the exact A0022 impact IDs without implementation code."
+}

@@ -1,0 +1,15 @@
+{
+  "amendment_id": "A0023",
+  "layer": "CONTRACT",
+  "raised": [],
+  "resolves": [
+    "A0022:T073:consume-t109-current-evidence",
+    "A0022:T084:present-t109-replay-provenance",
+    "A0022:T087:trigger-t109-and-link-replay",
+    "A0022:T088:consume-replay-frame",
+    "A0022:T096:include-replay-goals-and-t109-evidence",
+    "A0022:T103:consume-market-state",
+    "A0022:T107:consume-t109-manifest-authority",
+    "A0022:T108:teach-t109-publication"
+  ]
+}

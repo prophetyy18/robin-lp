@@ -1,0 +1,29 @@
+{
+  "amendment_id": "A0023",
+  "outcome": "AMENDMENT_READY",
+  "summary": "Repointed exactly the eight planned consumers named by A0022 to T109 and made their contracts consume the current canonical-dataset and exact-replay authority without weakening their prior obligations. T073 and T107 bind current authorization/candidate evidence to T109 checksums without granting permission; T084 presents provenance and availability only; T087 triggers and observes T109 and links replayable success to T088; T088 scrubs causally captured ReplayFrame state with T104-only fee projection; T103 consumes market-only MarketState with a separately labelled hypothetical position; T108 teaches canonical references and causal publication; and T096 makes T109 current while retaining T069/T105 as predecessor evidence. No application code, Spec, Intent, task state or approval evidence changed.",
+  "rationale": "A0022 already resolved the product and architecture decisions and raised stable per-task impacts. This CONTRACT amendment applies those dispositions at their planned consumers: current dependencies now reach T109, predecessor artifacts remain byte-identical/read-only and exact-replay unavailable, delayed-fill evidence is consumed in original cursor/ordinal order rather than inferred or post-sorted, and T104 remains the sole historical fee-growth/range-fee authority. Existing lifecycle, authorization, Web layering, research, candidate-lock, documentation and final-dossier duties remain in place. No Owner decision is required.",
+  "unresolved_questions": [],
+  "impact_assessment": {
+    "intent": "No Intent text changed. The contracts now implement the already-approved A0022 meanings: MarketState is canonical historical market truth, RunState is exact saved simulation state, and ReplayFrame is their same-cursor composition.",
+    "specification": "No Spec text changed. The contracts consume the approved DS-005 through DS-007, T104 provenance and T-22 causality boundaries from A0022; T103 is market-only with a hypothetical overlay, while T088 is exact completed-run replay.",
+    "contracts": "Only T073, T084, T087, T088, T096, T103, T107 and T108 changed. Every prior obligation was retained while current T069/T105 authority was replaced by T109 where A0022 required. Legacy availability, fail-closed mismatch handling, no-authority rules, causal cursor semantics, T104-only projection and verification cases are explicit.",
+    "dependencies": "Only the eight named depends_on fields changed. T073 and T107 replace T105 with T109; T084 and T108 replace T105 with T109; T087 and T088 replace T069 with T109; T103 adds T109; and T096 adds a direct T109 edge. Contract headers and config fields match exactly, workflow validation passes, and the graph remains acyclic.",
+    "implementation": "No src, tests or other implementation file changed. The future implementation must adapt the existing T061/T069/T105 paths through T109 and must not create a second replay, backtest, accounting, run-lifecycle, manifest or fee-projection implementation.",
+    "data": "Current consumers bind immutable T100 dataset references/content hashes and T109 manifest/report/evidence checksums. Complete market timelines are not copied per run. Pre-T109 T069/T105/T063 records and locks remain byte-identical historical data and are not backfilled, reordered or inferred into exact replay.",
+    "operations": "T087 retains trigger, observe and cancel lifecycle behavior and adds evidence availability plus the T088 link. T073 retains explicit Owner authorization. T084 remains a read-only provenance shell. T096 requires current independently reviewed T109 evidence and records explicit blockers for absent, unapproved, legacy-only or mismatched delivery.",
+    "security": "Replay and provenance evidence grant no strategy, risk, registration, paper, approval, signer, execution, promotion or live authority. Existing authentication and secret prohibitions remain. All current consumers fail closed on dataset, pool, range, cursor, revision, checksum or T104-provenance mismatch as applicable.",
+    "verification": "tools.workflow validate passed; tools.check_acceptance check passed with no findings; tools.check_imports check passed with no findings; dependency-header/config comparison passed for all eight targets; and git diff --check passed. tools.check_citations check reported only the pre-existing T069 robinhood_lp.application.backtest_runs module-path finding recorded during A0022 review and added no finding from A0023. Independent Plan Review must inspect contract completeness and the exact impact resolutions."
+  },
+  "affected_existing_tasks": [],
+  "resolved_task_impacts": [
+    "A0022:T073:consume-t109-current-evidence",
+    "A0022:T084:present-t109-replay-provenance",
+    "A0022:T087:trigger-t109-and-link-replay",
+    "A0022:T088:consume-replay-frame",
+    "A0022:T096:include-replay-goals-and-t109-evidence",
+    "A0022:T103:consume-market-state",
+    "A0022:T107:consume-t109-manifest-authority",
+    "A0022:T108:teach-t109-publication"
+  ]
+}
