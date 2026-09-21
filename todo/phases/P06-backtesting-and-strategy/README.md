@@ -14,7 +14,8 @@ candidate-lock and authoring-guide paths; and T069's
 product-level run entry point turns a registered strategy, its parameters and a data range
 into a reproducible manifest and report with observable run state; T109 adds dataset-addressed
 historical market state and immutable run evidence sufficient for exact historical run replay
-without another replay, backtest or accounting engine; T107 produces an
+without another replay, backtest or accounting engine, and composes rather than replaces T104's
+fee-growth/range-fee projection; T107 produces an
 explicitly provisional candidate marked `EXPERIMENTAL_NOT_LIVE_APPROVED`, or an honest
 `NO_TRADE`. Neither is live approval.
 

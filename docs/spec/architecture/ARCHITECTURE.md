@@ -198,6 +198,15 @@ layer and describes the rest in prose: T105 extends the artifact-rerun entry thr
 `robinhood_lp.__main__` CLI surface, which the map classifies as application /
 orchestration and which the T097 row already maps.
 
+T109 replaces the T069/T105 current-write authorities but composes the already-approved
+reconstruction and research primitives rather than absorbing them. In particular, T040/T041 own
+post-event pool/tick reconstruction and T104 remains the sole dataset/window/cursor/reconstruction-
+bound fee-growth and exact range-fee projection; T109 and the Web read models may compose T104 but
+may not implement another fee path. T109's versioned manifest compatibility view preserves the
+logical run/dataset/pool/range/registry/schema bindings consumed by approved T101 and T106 and the
+T102 path through them, resolving canonical event bytes from T100 references instead of reopening
+T069/T105 publication.
+
 ## 3. Cross-cutting policies
 
 The following are enforced by every layer and audited by the Definition of

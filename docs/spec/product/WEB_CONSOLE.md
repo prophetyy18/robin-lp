@@ -157,7 +157,9 @@ preliminary paper 必须标为仅实现验证，不得显示为 live 晋级证�
 
 该页的市场回放读取 `DS-005` 的 `MarketState(dataset_version, pool_key_id, cursor)`，因此
 不需要策略或模拟运行。假设仓位仍是明确标注的反事实检查，不得显示为某次已完成运行
-实际采取的仓位。
+实际采取的仓位。该页显示的 fee-growth 或假设 range fee 只读取 T104 在同一数据集、
+窗口、游标与 reconstruction revision 上的投影，并展示这些 provenance；页面或其 API
+不得另算、估算或替换 T104 的费用语义。
 
 该页面由 T103 拥有，明确不属于 T084 的验收范围。
 
@@ -207,6 +209,8 @@ Swap/再平衡成本，并显式列出未解释残差而不是并入其他分项
 `ReplayFrame(run_id, cursor)`：市场部分来自运行绑定数据集的 `MarketState`，策略、
 仓位与会计部分来自该次运行已保存证据的 `RunState`。页面不得为了回放旧运行而再次
 执行策略，也不得把假设仓位、当前策略版本的输出或最终汇总复制到历史游标上冒充状态。
+需要历史 fee-growth 或 range-fee 投影时，该页只组合 T104，并保留其数据集、窗口、游标
+与 reconstruction revision provenance；`ReplayFrame` 和页面都不得成为第二个费用实现。
 
 该页面由 T088 拥有：它不属于 T103 的四个研究页面，也不改变 T084–T086 各自已有的
 验收范围。

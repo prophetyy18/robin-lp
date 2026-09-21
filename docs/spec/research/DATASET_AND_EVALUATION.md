@@ -46,9 +46,19 @@
 `MarketCursor` 使用规范事件顺序 `(block_number, transaction_index, log_index)`；只给出
 区块号时表示该区块结束。`MarketState(dataset_version, pool_key_id, cursor)` 是该数据集
 在该游标上的历史市场事实，由数据集所引用的规范分区通过既有 replay 与 tick
-重建路径产生，不依赖策略或模拟运行。可持久化与数据集内容哈希及重建修订绑定的稀疏
-checkpoint 或投影以加速查询，但它们不是第二个事实来源，多个运行不得各自复制完整
-历史市场事件时间线。
+重建路径产生，不依赖策略或模拟运行。精确游标表示产生该游标的规范市场事件**应用后**
+的状态；区块结束查询使用该区块内最大的规范游标，并包含该区块的全部市场事件。
+在首个规范事件之前的查询返回数据集声明并绑定的初始池状态，不把首个事件后的状态
+倒填到之前。可持久化与数据集内容哈希及重建修订绑定的稀疏 checkpoint 或投影以加速
+查询，但它们不是第二个事实来源，多个运行不得各自复制完整历史市场事件时间线。
+
+`MarketState` 的核心字段边界是 T040/T041 已重建的 slot0、活跃流动性、协议费、
+initialized tick、bitmap 与 tick liquidity；它不声称 T040/T041 重建了
+`feeGrowthGlobal`。历史 `feeGrowthGlobal`、`feeGrowthOutside`、`feeGrowthInside` 与任意
+range/liquidity 的精确费用查询继续由 T104 的、绑定同一数据集内容哈希、窗口、事件游标
+和 reconstruction revision 的 `FeeGrowthProjection` 提供。需要这些字段的读模型把该投影
+与 `MarketState` 组合并展示 T104 provenance；不得在 `MarketState` 或 Web 中实现替代的
+fee-growth 积分器。
 
 ### `DS-006` — 已完成运行的历史状态
 
@@ -60,10 +70,26 @@ checkpoint 或投影以加速查询，但它们不是第二个事实来源，多
 事实投影，不得重新调用策略代码，也不得建立第二套 backtest 或会计逻辑。失败或取消的
 运行不得发布看似完整的 simulation evidence。
 
+每条 persisted run transition 与 checkpoint 必须在原始 T061 运行期间绑定到一个确切的
+`MarketCursor`，不得事后从 T061 的整数 `timestamp` 猜测。decision 与 risk 绑定触发它们的
+规范市场事件游标；latency 与 fill 绑定实际提供 fill data 的规范市场事件游标，delayed fill
+因此绑定后一个游标而不是原 decision 游标。任何会改变或证明运行状态、但无法绑定到数据集
+内确切规范游标的 transition，都使新式成功证据发布失败。
+
+证据还记录全局单调、不可重复的 `run_transition_ordinal`，即原始运行在其 append-only audit
+chain 中产生 transition 的顺序。同一游标内按该 ordinal 应用 transition，并验证每条 pipeline
+的因果阶段为 decision → risk → latency → fill；同一区块的不同市场事件先按 `MarketCursor`
+排序，再按 ordinal 排序。`RunState(run_id, cursor)` 明确定义为初始运行状态加上所有绑定
+游标 `<= cursor` 的 transition 后的**post-transition state**。首个市场事件之前返回已记录的
+initial strategy/position/accounting state；区块结束查询包含该区块所有游标及每个游标的全部
+transition。checkpoint 也表示其 `(cursor, last_run_transition_ordinal)` 后的状态，恢复时从该
+边界之后继续，不能重复应用或跳过同游标 transition。
+
 ### `DS-007` — 组合回放帧
 
 `ReplayFrame(run_id, cursor)` 是读取时组合，不是另一份持久化时间线：它通过运行记录解析
-不可变数据集引用，取得同一 PoolKey 与游标上的 `MarketState` 和 `RunState`，验证数据集
+不可变数据集引用，取得同一 PoolKey 与游标上的 post-event `MarketState` 和同游标全部运行
+transition 之后的 `RunState`，验证数据集
 内容哈希、游标范围、重建/引擎/会计/证据修订及各自校验和一致后返回两者。任何绑定缺失、
 不匹配、超出覆盖或证据损坏都必须 fail closed，不能用当前链状态、当前策略重跑、插值或
 最新 checkpoint 冒充目标游标的状态。
