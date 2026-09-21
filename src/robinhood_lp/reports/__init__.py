@@ -40,6 +40,16 @@ References:
 
 from __future__ import annotations
 
+from robinhood_lp.reports.evidence_adapter import (
+    EVIDENCE_ADAPTER_VERSION,
+    EvidenceAdapterError,
+    EvidenceAdapterMismatchError,
+    PanelManifestBinding,
+    T106RobustnessBinding,
+    build_panel_manifest_binding,
+    build_t106_robustness_binding,
+    resolve_panel_event_stream,
+)
 from robinhood_lp.reports.legacy import (
     LEGACY_MANIFEST_VERSION,
     LEGACY_MARKER,
@@ -112,6 +122,29 @@ from robinhood_lp.reports.run_identity import (
     run_identity_from_dict,
     validate_run_identity,
 )
+from robinhood_lp.reports.run_state import (
+    REPLAY_FRAME_VERSION,
+    ReplayFrame,
+    ReplayFrameBindingError,
+    ReplayFrameError,
+    ReplayProjector,
+    RunState,
+    RunStateOrderingError,
+    build_replay_projector,
+)
+from robinhood_lp.reports.simulation_evidence import (
+    SIMULATION_EVIDENCE_VERSION,
+    RunStateCheckpoint,
+    RunTransition,
+    SimulationEvidence,
+    SimulationEvidenceChecksumError,
+    SimulationEvidenceError,
+    SimulationEvidenceFieldError,
+    SimulationEvidenceOrderingError,
+    build_simulation_evidence,
+    compute_evidence_checksum,
+    simulation_evidence_from_dict,
+)
 from robinhood_lp.reports.validation import (
     VALIDATION_VERSION,
     DatasetQualificationRecord,
@@ -134,11 +167,14 @@ from robinhood_lp.reports.validation import (
 __all__ = [
     # versions
     "BINDING_VERSION",
+    "EVIDENCE_ADAPTER_VERSION",
     "LEGACY_MANIFEST_VERSION",
     "MANIFEST_VERSION",
     "METRICS_VERSION",
+    "REPLAY_FRAME_VERSION",
     "RERUN_VERSION",
     "RUN_IDENTITY_VERSION",
+    "SIMULATION_EVIDENCE_VERSION",
     "VALIDATION_VERSION",
     # sentinels / vocabularies
     "LEGACY_MARKER",
@@ -156,6 +192,8 @@ __all__ = [
     "VALID_STRATEGY_KINDS",
     # errors
     "CrossManifestDisagreementError",
+    "EvidenceAdapterError",
+    "EvidenceAdapterMismatchError",
     "ForeignManifestError",
     "InvalidLegacyManifestError",
     "InvalidManifestFieldError",
@@ -170,7 +208,14 @@ __all__ = [
     "PriorRunOverwriteError",
     "RegistryBindingError",
     "RelativeOnlyUSDPresentationError",
+    "ReplayFrameBindingError",
+    "ReplayFrameError",
     "RunIdentityError",
+    "RunStateOrderingError",
+    "SimulationEvidenceChecksumError",
+    "SimulationEvidenceError",
+    "SimulationEvidenceFieldError",
+    "SimulationEvidenceOrderingError",
     "UnmigratableLegacyStrategyKindError",
     "UnknownStrategyIdentityError",
     # dataclasses / value objects
@@ -179,11 +224,19 @@ __all__ = [
     "ExperimentManifest",
     "LedgerSnapshot",
     "LegacyExperimentManifest",
+    "PanelManifestBinding",
+    "ReplayFrame",
+    "ReplayProjector",
     "RerunResult",
     "RunIdentity",
     "RunMetrics",
+    "RunState",
+    "RunStateCheckpoint",
+    "RunTransition",
     "SerialisedEvent",
+    "SimulationEvidence",
     "StrategyBinding",
+    "T106RobustnessBinding",
     # builders
     "assert_binding_matches_registry",
     "assert_no_prior_run_at_path",
@@ -192,7 +245,12 @@ __all__ = [
     "binding_parameter_dict",
     "build_coverage_summary",
     "build_experiment_manifest",
+    "build_panel_manifest_binding",
+    "build_replay_projector",
+    "build_simulation_evidence",
     "build_strategy_binding",
+    "build_t106_robustness_binding",
+    "compute_evidence_checksum",
     "compute_parameter_schema_checksum",
     "compute_report_checksum",
     "compute_run_metrics",
@@ -207,8 +265,10 @@ __all__ = [
     "migrate_legacy_manifest",
     "rerun_manifest",
     "rerun_manifest_from_object",
+    "resolve_panel_event_stream",
     "run_identity_from_dict",
     "serialised_event_from_dict",
+    "simulation_evidence_from_dict",
     "validate_manifest",
     "validate_multi_pool_run",
     "validate_run_identity",

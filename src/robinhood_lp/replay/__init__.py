@@ -75,6 +75,16 @@ from robinhood_lp.replay.fee_surface import (
     run_equivalence_check,
 )
 from robinhood_lp.replay.input import ReplayInput
+from robinhood_lp.replay.market_state import (
+    MARKET_STATE_VERSION,
+    CursorFormatError,
+    CursorOutOfRangeError,
+    MarketCursor,
+    MarketState,
+    MarketStateError,
+    MarketStateReader,
+    build_market_state_reader,
+)
 from robinhood_lp.replay.output import ReplayOutput, replay_output_fingerprint
 from robinhood_lp.replay.protocol_fee import (
     pack_protocol_fee,
@@ -135,6 +145,8 @@ __all__ = [
     "BudgetExhaustionRecord",
     "CROSSING_ONE_FOR_ZERO",
     "CROSSING_ZERO_FOR_ONE",
+    "CursorFormatError",
+    "CursorOutOfRangeError",
     "DYNAMIC_FEE_FLAG",
     "DuplicateEventError",
     "EquivalenceCheck",
@@ -148,7 +160,12 @@ __all__ = [
     "InvalidLiquidityError",
     "InvalidTickRangeError",
     "LiquidityOverflowError",
+    "MARKET_STATE_VERSION",
     "MAX_LIQUIDITY",
+    "MarketCursor",
+    "MarketState",
+    "MarketStateError",
+    "MarketStateReader",
     "MissingTransactionIndexError",
     "PoolCheckpoint",
     "PoolComparisonInput",
@@ -185,6 +202,7 @@ __all__ = [
     "WindowDescriptorError",
     "add_liquidity",
     "build_fee_growth_surface",
+    "build_market_state_reader",
     "compress",
     "decode_get_fee_growth_globals",
     "decode_get_liquidity",

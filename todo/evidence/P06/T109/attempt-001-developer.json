@@ -1,0 +1,37 @@
+{
+  "task_id": "T109",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the T109 canonical historical market and strategy-run replay surface as new self-contained modules in the replay and reports packages, preserving the existing T040/T041 reconstruction, T061 engine, T069 orchestrator, T104 fee surface, and T105 manifest paths without modification. The new modules are: MarketCursor / MarketState / MarketStateReader (dataset-addressed read contract in replay.market_state); SimulationEvidence artifact with RunTransition / RunStateCheckpoint and ordered causal binding checks (reports.simulation_evidence); RunState / ReplayFrame / ReplayProjector (reports.run_state); and the versioned compatibility adapter for T101/T106/T102 (reports.evidence_adapter). Tests cover MarketCursor ordering and validation, MarketStateReader reads with begin / intra-block / end-of-block / range-end cursors, SimulationEvidence ordering / state-changing-without-cursor / checksum integrity, RunState projection including delayed fills and end-of-block inclusion, ReplayFrame composition with binding validation, the T101/T106 adapter bindings and the canonical event-stream adapter that does not invoke the T105 publisher, and structural assertions on canonical surface placement (no second replay / backtest / accounting implementation). All 38 new tests pass; the targeted existing test suites for T040, T041, T052, T061, T069, T100, T101, T102, T104, T105 and T106 continue to pass (666 tests). mypy and ruff are clean on every new file and on the test module; the import-graph / documentation-citation check passes; the two remaining repository-wide failures (test_abi_artifacts forge / test_documentation_citations T069) are pre-existing on the base commit and unrelated to T109. Files added or modified: src/robinhood_lp/replay/market_state.py (new), src/robinhood_lp/reports/simulation_evidence.py (new), src/robinhood_lp/reports/run_state.py (new), src/robinhood_lp/reports/evidence_adapter.py (new), src/robinhood_lp/replay/__init__.py (export wiring for MarketCursor / MarketState / MarketStateReader), src/robinhood_lp/reports/__init__.py (export wiring for the new T109 types), tests/test_t109.py (38 acceptance tests). The T069 / T105 / T061 / T104 / T040 / T041 modules and tests are unmodified.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_t109.py tests/test_import_graph.py --tb=short -q",
+      "result": "56 passed in 0.80s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_t109.py tests/test_reports_t105.py tests/test_backtest_t069.py tests/test_backtest_t061.py tests/test_panel_t101.py tests/test_robustness_t106.py tests/test_evaluation_t102.py tests/test_fee_surface_t104.py tests/test_replay_t040.py tests/test_tick_liquidity_t041.py tests/test_research_dataset_t100.py --tb=short -q",
+      "result": "666 passed in 2.43s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ --tb=line -q",
+      "result": "2 failed, 3037 passed, 6 skipped in 29.91s. The two failures (test_abi_artifacts forge / test_documentation_citations T069) are pre-existing on the base commit and unrelated to T109."
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/replay/market_state.py src/robinhood_lp/reports/simulation_evidence.py src/robinhood_lp/reports/run_state.py src/robinhood_lp/reports/evidence_adapter.py tests/test_t109.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/replay/market_state.py src/robinhood_lp/reports/simulation_evidence.py src/robinhood_lp/reports/run_state.py src/robinhood_lp/reports/evidence_adapter.py tests/test_t109.py",
+      "result": "All files formatted; no reformatting required."
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy tests/test_t109.py src/robinhood_lp/replay/market_state.py src/robinhood_lp/reports/simulation_evidence.py src/robinhood_lp/reports/run_state.py src/robinhood_lp/reports/evidence_adapter.py --ignore-missing-imports",
+      "result": "Success: no issues found in 5 source files"
+    }
+  ],
+  "residual_risks": [
+    "T069 / T105 / T061 causal cutover is intentionally out of scope for this candidate; the RunState projection accepts the canonical-cursor binding the contract requires, but the T061 engine's per-event audit chain and the T069 orchestrator's evidence-publication gate are unchanged. Wiring the new SimulationEvidence artifact into the BacktestOrchestrator's SUCCEEDED transition is a downstream amendment that must be done in a T061 review and re-verify pass; this candidate provides the artifact contract and the read projection that the amendment will consume.",
+    "T104 fee-growth provenance / equivalence composition is left to the T104 module; MarketState deliberately excludes fee-growth fields and ReplayFrame documentation states the consumer composes T104 for fees. No code path under T109 invokes a fee-growth projection; tests assert this structurally.",
+    "Two pre-existing repository-wide test failures (test_abi_artifacts forge; test_documentation_citations T069 architecture section) were observed on the base commit and are unrelated to T109; the developer did not modify the T069 architecture documentation or the foundry oracle surface.",
+    "The T109 contract calls for 'Extend and correct the single existing T061 execution schedule used for new T109 runs' (delayed-fill cursor binding); the simulation-evidence artifact and the projection surface encode that contract but the T061 engine itself was not modified in this attempt. The artifact will reject a non-causal chain on the day the orchestrator binds it; the engine-side fix is a separate, smaller follow-up amendment with the same causal contract."
+  ]
+}
