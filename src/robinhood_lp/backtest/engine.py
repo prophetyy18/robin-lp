@@ -110,6 +110,7 @@ from robinhood_lp.backtest.events import (
     FutureDataViolation,
     PositionState,
     _normalise_payload,  # noqa: F401 — used by tests for symmetry
+    extract_event_cursor,
 )
 from robinhood_lp.backtest.models import (
     FillOutcome,
@@ -331,6 +332,26 @@ def _manifest_hash(events: Sequence[BacktestEvent]) -> str:
     return "0x" + hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def _fill_cursor(
+    fill_data: BacktestEvent | None,
+    trigger: BacktestEvent,
+) -> tuple[int, int, int] | None:
+    """Return the canonical cursor the LATENCY / FILL transition binds to.
+
+    The T109 contract binds delayed fills to the *later* canonical
+    cursor that supplied the fill data; an immediate fill binds to the
+    trigger cursor itself. The function returns ``None`` when the
+    canonical cursor cannot be resolved (the engine still emits a
+    ``LATENCY`` / ``FILL`` audit event with ``cursor=None`` and the
+    evidence layer treats it as a system-marker transition).
+    """
+    if fill_data is not None:
+        cursor = extract_event_cursor(fill_data)
+        if cursor is not None:
+            return cursor
+    return extract_event_cursor(trigger)
+
+
 # ---------------------------------------------------------------------------
 # Engine
 # ---------------------------------------------------------------------------
@@ -436,6 +457,7 @@ class BacktestEngine:
             parent_event_ids=(ENGINE_ROOT_EVENT_ID,),
             payload=init_payload,
             ledger_hash_after=ledger.ledger_hash(),
+            cursor=None,
         )
         audit_chain.append(init_audit)
 
@@ -455,6 +477,7 @@ class BacktestEngine:
                     parent_event_ids=(event.event_id,),
                     payload=shutdown_payload,
                     ledger_hash_after=ledger.ledger_hash(),
+                    cursor=extract_event_cursor(event),
                 )
                 audit_chain.append(shutdown_audit)
                 break
@@ -476,6 +499,7 @@ class BacktestEngine:
                     parent_event_ids=(event.event_id,),
                     payload=seen_payload,
                     ledger_hash_after=ledger.ledger_hash(),
+                    cursor=extract_event_cursor(event),
                 )
                 audit_chain.append(seen_audit)
                 continue
@@ -518,6 +542,7 @@ class BacktestEngine:
                     parent_event_ids=(event.event_id,),
                     payload=violation_payload,
                     ledger_hash_after=ledger.ledger_hash(),
+                    cursor=extract_event_cursor(event),
                 )
                 audit_chain.append(violation_audit)
                 continue
@@ -551,6 +576,7 @@ class BacktestEngine:
                 parent_event_ids=(event.event_id,),
                 payload=decision_payload,
                 ledger_hash_after=ZERO_LEDGER_HASH,
+                cursor=extract_event_cursor(event),
             )
             audit_chain.append(decision_audit)
 
@@ -580,6 +606,7 @@ class BacktestEngine:
                 parent_event_ids=(decision_audit.event_id,),
                 payload=risk_payload,
                 ledger_hash_after=ZERO_LEDGER_HASH,
+                cursor=extract_event_cursor(event),
             )
             audit_chain.append(risk_audit)
             if not risk_decision.approved:
@@ -620,6 +647,11 @@ class BacktestEngine:
                 parent_event_ids=(risk_audit.event_id,),
                 payload=latency_payload,
                 ledger_hash_after=ZERO_LEDGER_HASH,
+                # Bind the latency transition to the actual fill cursor
+                # the engine observed (the contract's "delayed fill
+                # belongs to the later canonical event that supplied fill
+                # data" rule).
+                cursor=_fill_cursor(fill_data, event),
             )
             audit_chain.append(latency_audit)
 
@@ -715,6 +747,11 @@ class BacktestEngine:
                 parent_event_ids=(latency_audit.event_id,),
                 payload=fill_payload,
                 ledger_hash_after=ledger.ledger_hash(),
+                # The FILL transition binds to the actual fill data
+                # event's cursor (the contract's "delayed fill binds to
+                # the later canonical event that supplies fill data"
+                # rule). Immediate fills share the trigger cursor.
+                cursor=_fill_cursor(fill_data, event),
             )
             audit_chain.append(fill_audit)
 

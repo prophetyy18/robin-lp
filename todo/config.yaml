@@ -12,7 +12,7 @@
   },
   "active_phase": "P06",
   "active_task": "T109",
-  "workflow_state": "IN_DEVELOPMENT",
+  "workflow_state": "AWAITING_REVIEW",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -1225,7 +1225,7 @@
     },
     "T109": {
       "phase": "P06",
-      "status": "IN_DEVELOPMENT",
+      "status": "AWAITING_REVIEW",
       "depends_on": [
         "T041",
         "T052",

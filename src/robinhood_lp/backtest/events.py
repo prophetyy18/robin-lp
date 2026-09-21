@@ -517,6 +517,7 @@ class AuditEvent:
     sequence: int
     payload: tuple[tuple[str, int | str | bool], ...]
     ledger_hash_after: str
+    cursor: tuple[int, int, int] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.version, str) or not self.version:
@@ -554,6 +555,27 @@ class AuditEvent:
             raise BacktestEventError(
                 f"AuditEvent.event_id: must be non-empty str, got {self.event_id!r}"
             )
+        # Normalise the cursor: ``-1`` sentinel for end-of-block; otherwise
+        # ``(block_number, transaction_index, log_index)``. The cursor
+        # field does **not** participate in ``event_id`` hashing so legacy
+        # audit chains remain byte-identical; the cursor is metadata the
+        # T109 simulation-evidence artifact binds to its
+        # :class:`RunTransition` records.
+        if self.cursor is not None:
+            if not isinstance(self.cursor, tuple) or len(self.cursor) != 3:
+                raise BacktestEventError(
+                    f"AuditEvent.cursor: must be (block, tx, log) tuple or "
+                    f"None, got {self.cursor!r}"
+                )
+            for value in self.cursor:
+                if not isinstance(value, int) or isinstance(value, bool):
+                    raise BacktestEventError(
+                        f"AuditEvent.cursor: every entry must be int, got {value!r}"
+                    )
+                if value < -1:
+                    raise BacktestEventError(
+                        f"AuditEvent.cursor: every entry must be >= -1, got {value}"
+                    )
         # Normalise the payload once at construction time so two equivalent
         # payloads hash to the same id regardless of insertion order.
         normalised = _normalise_payload(self.payload)
@@ -571,12 +593,19 @@ class AuditEvent:
         parent_event_ids: Sequence[str],
         payload: Mapping[str, int | str | bool] | Sequence[tuple[str, int | str | bool]],
         ledger_hash_after: str,
+        cursor: tuple[int, int, int] | None = None,
     ) -> AuditEvent:
         """Construct an :class:`AuditEvent` with a deterministic event id.
 
         The event id is computed from the canonical serialisation of the
         supplied fields. Two constructions with equal inputs always
         produce the same id in any process.
+
+        ``cursor`` is the optional T109 canonical cursor binding. The
+        cursor does **not** participate in ``event_id`` hashing so legacy
+        audit chains remain byte-identical across the T109 cutover; the
+        cursor is the canonical ``(block_number, transaction_index,
+        log_index)`` triple the engine observed at emission time.
         """
         if stage not in _VALID_STAGES:
             raise InvalidStageError(
@@ -608,6 +637,7 @@ class AuditEvent:
             sequence=sequence,
             payload=normalised_payload,
             ledger_hash_after=ledger_hash_after,
+            cursor=cursor,
         )
 
 
@@ -655,6 +685,54 @@ def assert_backtest_events_layer_is_pure() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Cursor extraction helper (T109)
+# ---------------------------------------------------------------------------
+
+
+def extract_event_cursor(event: BacktestEvent) -> tuple[int, int, int] | None:
+    """Return the canonical :class:`MarketCursor` triple for ``event``.
+
+    The T109 contract binds every transition to the exact canonical
+    cursor the engine observed at emission time, never derived later
+    from the integer timestamp. A :class:`BacktestEvent` may carry
+    its cursor through the optional ``block_number`` /
+    ``transaction_index`` / ``log_index`` payload attributes; when
+    absent, the engine falls back to the legacy
+    ``(timestamp, 0, 0)`` derivation only when the event is a
+    system-level bookkeeping entry whose cursor is structurally
+    undefined (the engine emits the cursor as ``None`` so the
+    evidence layer treats it as the system-init / shutdown marker).
+
+    Returns ``None`` for events that carry no market binding (e.g.
+    ``SHUTDOWN`` / non-reactive bookkeeping events the engine skips).
+    """
+    if not isinstance(event, BacktestEvent):
+        raise BacktestEventError(
+            f"extract_event_cursor: event must be BacktestEvent, got {type(event).__name__}"
+        )
+    block_number = getattr(event, "block_number", None)
+    transaction_index = getattr(event, "transaction_index", None)
+    log_index = getattr(event, "log_index", None)
+    if (
+        isinstance(block_number, int)
+        and not isinstance(block_number, bool)
+        and block_number >= 0
+        and isinstance(transaction_index, int)
+        and not isinstance(transaction_index, bool)
+        and transaction_index >= 0
+        and isinstance(log_index, int)
+        and not isinstance(log_index, bool)
+        and log_index >= 0
+    ):
+        return (block_number, transaction_index, log_index)
+    if event.kind == KIND_SHUTDOWN:
+        # SHUTDOWN is a system marker; the engine already broke out of
+        # the main loop so the cursor is not used.
+        return None
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Public surface
 # ---------------------------------------------------------------------------
 
@@ -699,4 +777,5 @@ __all__ = [
     "STATUS_SYSTEM_INIT",
     "STATUS_SYSTEM_SHUTDOWN",
     "assert_backtest_events_layer_is_pure",
+    "extract_event_cursor",
 ]

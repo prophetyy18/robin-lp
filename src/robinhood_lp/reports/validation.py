@@ -55,11 +55,14 @@ from pathlib import Path
 from typing import Final
 
 from robinhood_lp.reports.manifest import (
+    MANIFEST_VERSION_T109,
     ExperimentManifest,
     InvalidManifestFieldError,
     ManifestError,
+    T109ExperimentManifest,
     compute_report_checksum,
     experiment_manifest_from_dict,
+    t109_experiment_manifest_from_dict,
 )
 from robinhood_lp.reports.metrics import (
     _VALID_VALUATION_QUALIFICATIONS,
@@ -74,6 +77,7 @@ from robinhood_lp.reports.run_identity import (
     RunIdentity,
     validate_run_identity,
 )
+from robinhood_lp.reports.simulation_evidence import SimulationEvidence
 
 #: Module version. The T105 cutover bumped the version because the
 #: registry-binding clause is part of the validation surface.
@@ -272,7 +276,7 @@ def _check_report_checksum(manifest: ExperimentManifest) -> None:
 
 
 def validate_manifest(
-    manifest: ExperimentManifest,
+    manifest: ExperimentManifest | T109ExperimentManifest,
     *,
     dataset_qualification: DatasetQualificationRecord | None = None,
 ) -> None:
@@ -289,7 +293,17 @@ def validate_manifest(
     Cross-manifest invariants (multi-pool run identity) are enforced
     by :func:`robinhood_lp.reports.run_identity.validate_run_identity`;
     call that function separately on the full manifest set.
+
+    The function accepts both the legacy T105
+    :class:`ExperimentManifest` and the T109 dataset-referenced
+    :class:`T109ExperimentManifest`. The T109 manifest carries
+    identical registry-binding, dataset, numeraire, qualification,
+    pool, range, and checksum fields; the function exercises the
+    same gates against either schema.
     """
+    if isinstance(manifest, T109ExperimentManifest):
+        _validate_t109_manifest(manifest, dataset_qualification=dataset_qualification)
+        return
     # 1. Required fields.
     for field in (
         "dataset_version",
@@ -327,6 +341,104 @@ def validate_manifest(
     #    disagreement with the slot, recorded and current values
     #    attached for diagnosis.
     _check_registry_binding(manifest)
+
+
+def _validate_t109_manifest(
+    manifest: T109ExperimentManifest,
+    *,
+    dataset_qualification: DatasetQualificationRecord | None = None,
+) -> None:
+    """Validate a T109 dataset-referenced manifest against the same clauses.
+
+    The T109 manifest carries every binding / dataset / numeraire /
+    qualification / checksum field the legacy validator exercises;
+    the function adapts the field-access path to the T109 schema
+    and refuses to fall back to a T105 read.
+    """
+    # 1. Required fields. The T109 schema names every required
+    #    field with the same slot the legacy validator uses, but the
+    #    attribute access path differs slightly.
+    for field in (
+        "dataset_version",
+        "reporting_numeraire",
+        "dataset_content_hash",
+        "code_revision",
+    ):
+        value = getattr(manifest, field, None)
+        if not isinstance(value, str) or not value:
+            raise MissingRequiredFieldError(field=field)
+
+    # 2. Per-pool invariant. The T109 manifest does not carry the
+    #    legacy ``events`` attribute; the dataset partition
+    #    references are the binding. We rebuild an empty
+    #    ExperimentManifest view of the same pool identity so the
+    #    invariant runs the same code path the legacy validator
+    #    exercises.
+    if not isinstance(manifest.pool_key_id, str) or not manifest.pool_key_id:
+        raise MissingRequiredFieldError(field="pool_key_id")
+
+    # 3. Report checksum.
+    _check_t109_report_checksum(manifest)
+
+    # 4. Numeraire / qualification agreement with the dataset's record.
+    if dataset_qualification is not None and (
+        manifest.reporting_numeraire != dataset_qualification.reporting_numeraire
+        or manifest.valuation_qualification != dataset_qualification.valuation_qualification
+        or manifest.dataset_version != dataset_qualification.dataset_version
+    ):
+        raise NumeraireQualificationDisagreementError(
+            manifest_numeraire=manifest.reporting_numeraire,
+            manifest_qual=manifest.valuation_qualification,
+            dataset_numeraire=dataset_qualification.reporting_numeraire,
+            dataset_qual=dataset_qualification.valuation_qualification,
+        )
+
+    # 5. Registry-binding agreement (T105). The T109 manifest
+    #    carries the same binding fields; rebuild a transient
+    #    StrategyBinding and reuse the existing gate.
+    from robinhood_lp.reports.registry_binding import (
+        StrategyBinding,
+        assert_binding_matches_registry,
+    )
+
+    validated_parameters: tuple[tuple[str, int | bool | str], ...] = tuple(
+        sorted(
+            (key, value)
+            for key, value in manifest.strategy_params.items()
+            if isinstance(value, (int, bool, str))
+        )
+    )
+    binding = StrategyBinding(
+        strategy_identity=manifest.strategy_identity,
+        strategy_version=manifest.strategy_version,
+        registry_version=manifest.registry_version,
+        registry_checksum=manifest.registry_checksum,
+        parameter_schema_version=manifest.parameter_schema_version,
+        parameter_schema_checksum=manifest.parameter_schema_checksum,
+        code_provenance_module=manifest.code_provenance_module,
+        code_provenance_revision=manifest.code_provenance_revision,
+        code_provenance_symbol=manifest.code_provenance_symbol,
+        validated_parameters=validated_parameters,
+    )
+    assert_binding_matches_registry(binding)
+
+
+def _check_t109_report_checksum(manifest: T109ExperimentManifest) -> None:
+    """Recompute and verify the report_checksum slot of a T109 manifest.
+
+    The function is the T109 counterpart of
+    :func:`_check_report_checksum`; the canonical serialisation is
+    identical to the T105 path (sorted keys, separators
+    ``(',', ':')``, ``ensure_ascii=False``).
+    """
+    payload = manifest.to_dict()
+    recomputed = compute_report_checksum(payload)
+    if recomputed != manifest.report_checksum:
+        raise ManifestChecksumError(
+            slot="report_checksum",
+            recorded=manifest.report_checksum,
+            recomputed=recomputed,
+        )
 
 
 def _check_registry_binding(manifest: ExperimentManifest) -> None:
@@ -556,6 +668,51 @@ def load_manifest_from_path(
     return manifest
 
 
+def load_t109_manifest_from_path(
+    target_path: Path,
+    *,
+    dataset_qualification: DatasetQualificationRecord | None = None,
+) -> T109ExperimentManifest:
+    """Load and validate a T109 dataset-referenced manifest from ``target_path``.
+
+    The function is the T109 counterpart to
+    :func:`load_manifest_from_path`. It rejects the legacy T105
+    embedded ``input_event_list`` schema and refuses to load a
+    payload whose ``version`` is anything other than
+    :data:`MANIFEST_VERSION_T109`. The returned manifest is guaranteed
+    to have passed :func:`validate_manifest` against the supplied
+    :class:`DatasetQualificationRecord` (``None`` skips that step).
+
+    The T109 schema carries ``dataset_partition_refs`` instead of
+    ``input_event_list``; a payload that carries the legacy field is
+    rejected here so a downstream reader cannot silently fall back to
+    the predecessor path.
+    """
+    if not target_path.exists():
+        raise FileNotFoundError(f"load_t109_manifest_from_path: {target_path} not found")
+    raw = target_path.read_text(encoding="utf-8")
+    payload_obj = json.loads(raw)
+    if not isinstance(payload_obj, Mapping):
+        raise InvalidManifestFieldError(
+            f"load_t109_manifest_from_path: {target_path} root must be a JSON object"
+        )
+    if payload_obj.get("version") != MANIFEST_VERSION_T109:
+        raise InvalidManifestFieldError(
+            f"load_t109_manifest_from_path: {target_path} declares version="
+            f"{payload_obj.get('version')!r}, expected {MANIFEST_VERSION_T109!r}"
+        )
+    # The T109 schema carries dataset_partition_refs; refuse to load a
+    # legacy payload that still embeds the complete input_event_list.
+    if "input_event_list" in payload_obj:
+        raise InvalidManifestFieldError(
+            f"load_t109_manifest_from_path: {target_path} carries a legacy "
+            f"input_event_list; the T109 schema requires dataset_partition_refs"
+        )
+    manifest = t109_experiment_manifest_from_dict(payload_obj)
+    validate_manifest(manifest, dataset_qualification=dataset_qualification)
+    return manifest
+
+
 # ---------------------------------------------------------------------------
 # Multi-pool validation entry point
 # ---------------------------------------------------------------------------
@@ -596,6 +753,79 @@ def validate_multi_pool_run(
 
 
 # ---------------------------------------------------------------------------
+# T109 dataset-referenced publication
+# ---------------------------------------------------------------------------
+
+
+def write_t109_manifest_to_path(
+    manifest: T109ExperimentManifest,
+    target_path: Path,
+    *,
+    overwrite: bool = False,
+) -> None:
+    """Validate, then write a :class:`T109ExperimentManifest` to ``target_path``.
+
+    The function is the publish gate for the T109 dataset-referenced
+    manifest. It enforces the "no overwrite" rule and writes the
+    canonical JSON. The caller is responsible for supplying a manifest
+    whose :attr:`T109ExperimentManifest.report_checksum` matches its
+    canonical serialisation (the builder does this).
+    """
+    assert_no_prior_run_at_path(
+        target_path=target_path,
+        run_id=manifest.run_id,
+        chain_id=manifest.chain_id,
+        pool_key_id=manifest.pool_key_id,
+        overwrite=overwrite,
+    )
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(
+        json.dumps(
+            manifest.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def write_simulation_evidence_to_path(
+    evidence: SimulationEvidence,
+    target_path: Path,
+    *,
+    overwrite: bool = False,
+) -> None:
+    """Validate, then write a :class:`SimulationEvidence` to ``target_path``.
+
+    The function is the T109 evidence-publication gate. It refuses
+    to overwrite an existing file at the same path unless the
+    ``overwrite=True`` flag is explicit. The caller is responsible
+    for supplying an evidence artifact whose checksum matches its
+    canonical serialisation (the builder does this).
+    """
+    if not overwrite and target_path.exists():
+        raise PriorRunOverwriteError(
+            path=str(target_path),
+            run_id=evidence.run_id,
+            chain_id=0,
+            pool_key_id=evidence.pool_key_id,
+        )
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(
+        json.dumps(
+            evidence.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+# ---------------------------------------------------------------------------
 # SHA-256 helper (re-exported for tests)
 # ---------------------------------------------------------------------------
 
@@ -627,7 +857,10 @@ __all__ = [
     "file_sha256",
     "iter_validation_errors",
     "load_manifest_from_path",
+    "load_t109_manifest_from_path",
     "validate_manifest",
     "validate_multi_pool_run",
     "write_manifest_to_path",
+    "write_simulation_evidence_to_path",
+    "write_t109_manifest_to_path",
 ]

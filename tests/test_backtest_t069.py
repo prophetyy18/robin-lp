@@ -106,7 +106,7 @@ from robinhood_lp.orchestrator import (
     run_record_from_dict,
 )
 from robinhood_lp.reports.manifest import (
-    MANIFEST_VERSION,
+    MANIFEST_VERSION_T109,
 )
 from robinhood_lp.strategy.registry import (
     IDENTITY_HOLD,
@@ -261,7 +261,9 @@ class _CancellingEventSource(EventSource):
 class _StaticDatasetResolver(DatasetResolver):
     """A resolver that returns a fixed coverage for one dataset / pool pair."""
 
-    def __init__(self, coverages: dict[tuple[str, int, str], DatasetCoverage] | None = None) -> None:
+    def __init__(
+        self, coverages: dict[tuple[str, int, str], DatasetCoverage] | None = None
+    ) -> None:
         self._coverages = coverages or {}
 
     def add(
@@ -420,9 +422,7 @@ class TestRunRequestValidation:
 
     def test_block_range_end_below_start_rejected(self) -> None:
         with pytest.raises(InvalidRunRequestError):
-            _build_request(
-                run_id="r1", block_range_start=100, block_range_end=50
-            )
+            _build_request(run_id="r1", block_range_start=100, block_range_end=50)
 
     def test_zero_interval_rejected(self) -> None:
         with pytest.raises(InvalidRunRequestError):
@@ -479,9 +479,7 @@ class TestSuccessfulRunPublication:
         yield
         reset_default_registry_cache()
 
-    def test_single_pool_run_publishes_manifest_and_report(
-        self, tmp_path: Path
-    ) -> None:
+    def test_single_pool_run_publishes_manifest_and_report(self, tmp_path: Path) -> None:
         events = _events_for_pool()
         resolver = _StaticDatasetResolver()
         resolver.add(
@@ -508,11 +506,22 @@ class TestSuccessfulRunPublication:
         report_path = Path(record.report_path)
         assert manifest_path.exists()
         assert report_path.exists()
-        # The manifest is a valid T105 registry-bound manifest.
+        # The manifest is a valid T109 registry-bound, dataset-referenced manifest.
+        # T109 cutover: the current product-run entry point publishes the
+        # T109 schema (which references the dataset partition instead of
+        # embedding the complete input event timeline); the predecessor
+        # T105 embedded ``input_event_list`` schema is no longer reachable.
         manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        assert manifest_payload["version"] == MANIFEST_VERSION
+        assert manifest_payload["version"] == MANIFEST_VERSION_T109
         assert manifest_payload["run_id"] == "t069-run-001"
         assert manifest_payload["strategy_identity"] == IDENTITY_HOLD
+        # The T109 schema carries the dataset partition references that
+        # replace the embedded ``input_event_list``; an empty list would
+        # be a closed failure upstream.
+        assert "dataset_partition_refs" in manifest_payload
+        assert manifest_payload["dataset_partition_refs"]
+        # The legacy embedded ``input_event_list`` is no longer present.
+        assert "input_event_list" not in manifest_payload
 
     def test_run_record_serialisation_round_trips(self, tmp_path: Path) -> None:
         events = _events_for_pool()
@@ -540,9 +549,7 @@ class TestSuccessfulRunPublication:
         assert reloaded.manifest_path == record.manifest_path
         assert reloaded.report_path == record.report_path
 
-    def test_two_heterogeneous_pools_share_run_identity(
-        self, tmp_path: Path
-    ) -> None:
+    def test_two_heterogeneous_pools_share_run_identity(self, tmp_path: Path) -> None:
         """Two heterogeneous pools publish one manifest each under one run identity.
 
         The T069 acceptance clause binds this behaviour: a
@@ -597,10 +604,7 @@ class TestSuccessfulRunPublication:
         manifest_b = json.loads(Path(record_b.manifest_path).read_text(encoding="utf-8"))
         assert manifest_a["dataset_version"] == manifest_b["dataset_version"]
         assert manifest_a["reporting_numeraire"] == manifest_b["reporting_numeraire"]
-        assert (
-            manifest_a["valuation_qualification"]
-            == manifest_b["valuation_qualification"]
-        )
+        assert manifest_a["valuation_qualification"] == manifest_b["valuation_qualification"]
         # Different pools publish different manifests.
         assert manifest_a["pool_key_id"] != manifest_b["pool_key_id"]
 
@@ -619,9 +623,7 @@ class TestRerunReproducibility:
         yield
         reset_default_registry_cache()
 
-    def test_same_request_produces_byte_equivalent_manifests(
-        self, tmp_path: Path
-    ) -> None:
+    def test_same_request_produces_byte_equivalent_manifests(self, tmp_path: Path) -> None:
         """A fresh re-run of the same request reproduces canonical artifacts.
 
         The T069 acceptance clause binds re-run byte-equivalence:
@@ -679,12 +681,8 @@ class TestRerunReproducibility:
         second_manifest_bytes = Path(second.manifest_path).read_bytes()
         first_report_bytes = Path(first.report_path).read_bytes()
         second_report_bytes = Path(second.report_path).read_bytes()
-        first_record_bytes = (
-            first_orchestrator.store.record_path("rerun-A").read_bytes()
-        )
-        second_record_bytes = (
-            second_orchestrator.store.record_path("rerun-B").read_bytes()
-        )
+        first_record_bytes = first_orchestrator.store.record_path("rerun-A").read_bytes()
+        second_record_bytes = second_orchestrator.store.record_path("rerun-B").read_bytes()
         # Both runs must have produced artifacts of identical
         # length; the remaining comparisons parse and
         # canonicalise the declared observational fields out
@@ -707,20 +705,28 @@ class TestRerunReproducibility:
         #   manifest's ``report_checksum``);
         # - the run record's ``manifest_path`` / ``report_path``
         #   (encode the run_id in the file name) and the inner
-        #   request's ``run_id``.
+        #   request's ``run_id``;
+        # - the manifest's ``simulation_evidence_ref`` (the T109
+        #   dataset-referenced manifest references the per-run
+        #   evidence file by name; the file name carries the
+        #   ``run_id``) and the report's
+        #   ``simulation_evidence_ref``.
         # Strip every run-id-derived field so the comparison
         # surfaces only the canonical content the orchestrator
         # recomputes deterministically from the request.
         for payload in (first_manifest, second_manifest):
             payload.pop("run_id", None)
             payload.pop("report_checksum", None)
+            payload.pop("simulation_evidence_ref", None)
         for payload in (first_report, second_report):
             payload.pop("run_id", None)
             payload.pop("manifest_checksum", None)
+            payload.pop("simulation_evidence_ref", None)
         for payload in (first_record, second_record):
             payload.pop("run_id", None)
             payload.pop("manifest_path", None)
             payload.pop("report_path", None)
+            payload.pop("simulation_evidence_path", None)
             payload["request"].pop("run_id", None)
         # The canonical serialisation (sorted keys, no
         # whitespace) of every artifact must be byte-identical.
@@ -931,6 +937,7 @@ class TestRunStateStore:
             report_path=str(tmp_path / "report.json"),
             source_manifest_path=None,
             source_checksum=None,
+            simulation_evidence_path=None,
             created_at_unix_seconds=1_700_000_000,
             updated_at_unix_seconds=1_700_000_000,
             terminal_at_unix_seconds=1_700_000_000,
@@ -961,6 +968,7 @@ class TestRunStateStore:
             report_path=None,
             source_manifest_path=None,
             source_checksum=None,
+            simulation_evidence_path=None,
             created_at_unix_seconds=1_700_000_000,
             updated_at_unix_seconds=1_700_000_000,
             terminal_at_unix_seconds=1_700_000_000,
@@ -1026,6 +1034,7 @@ class TestRunStateStore:
                     report_path=None,
                     source_manifest_path=None,
                     source_checksum=None,
+                    simulation_evidence_path=None,
                     created_at_unix_seconds=0,
                     updated_at_unix_seconds=0,
                     terminal_at_unix_seconds=0,
@@ -1049,9 +1058,7 @@ class TestRestartInFlight:
         yield
         reset_default_registry_cache()
 
-    def test_resume_in_flight_picks_up_running_records(
-        self, tmp_path: Path
-    ) -> None:
+    def test_resume_in_flight_picks_up_running_records(self, tmp_path: Path) -> None:
         # Write a fake RUNNING record by hand (the orchestrator
         # transitions to RUNNING before the engine call; this
         # test exercises the resume path directly).
@@ -1084,6 +1091,7 @@ class TestRestartInFlight:
             report_path=None,
             source_manifest_path=None,
             source_checksum=None,
+            simulation_evidence_path=None,
             created_at_unix_seconds=1_700_000_000,
             updated_at_unix_seconds=1_700_000_000,
             terminal_at_unix_seconds=None,
@@ -1117,9 +1125,7 @@ class TestProductRerunPreservesSource:
         yield
         reset_default_registry_cache()
 
-    def _publish_source_manifest(
-        self, *, tmp_path: Path, run_id: str = "source-001"
-    ) -> Path:
+    def _publish_source_manifest(self, *, tmp_path: Path, run_id: str = "source-001") -> Path:
         events = _events_for_pool()
         resolver = _StaticDatasetResolver()
         resolver.add(
@@ -1136,9 +1142,7 @@ class TestProductRerunPreservesSource:
         record = orchestrator.submit(_build_request(run_id=run_id))
         return Path(record.manifest_path)
 
-    def test_product_rerun_creates_new_record_and_preserves_source(
-        self, tmp_path: Path
-    ) -> None:
+    def test_product_rerun_creates_new_record_and_preserves_source(self, tmp_path: Path) -> None:
         source_path = self._publish_source_manifest(tmp_path=tmp_path)
         source_bytes_before = source_path.read_bytes()
         events = _events_for_pool()
@@ -1185,9 +1189,7 @@ class TestRunRecordContainsNoCredentials:
         yield
         reset_default_registry_cache()
 
-    def test_record_payload_contains_no_key_material(
-        self, tmp_path: Path
-    ) -> None:
+    def test_record_payload_contains_no_key_material(self, tmp_path: Path) -> None:
         events = _events_for_pool()
         resolver = _StaticDatasetResolver()
         resolver.add(
@@ -1218,16 +1220,16 @@ class TestRunRecordContainsNoCredentials:
             "WEBHOOK",
             "PASSWORD",
             "password=",
-            "0x" + "ab" * 32,  # pool key id is hex, but we don't want full addresses that look like secrets
+            "0x"
+            + "ab"
+            * 32,  # pool key id is hex, but we don't want full addresses that look like secrets
         )
         for token in forbidden_tokens:
             if token in ("0x" + "ab" * 32,):
                 # The pool key id is recorded by design; it is
                 # public chain data, not a secret.
                 continue
-            assert token not in rendered, (
-                f"Run record leaked forbidden token: {token!r}"
-            )
+            assert token not in rendered, f"Run record leaked forbidden token: {token!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -1434,9 +1436,17 @@ class TestOrchestratorComposition:
     def test_orchestrator_imports_manifest_authority(self) -> None:
         from robinhood_lp import orchestrator as orch
 
-        assert hasattr(orch, "build_experiment_manifest")
-        assert hasattr(orch, "validate_manifest")
-        assert hasattr(orch, "write_manifest_to_path")
+        # T109 cutover: the current product-run entry point composes
+        # the T109 dataset-referenced manifest authority. The legacy
+        # ``build_experiment_manifest`` / ``validate_manifest`` /
+        # ``write_manifest_to_path`` re-exports are no longer surfaced
+        # by the orchestrator; the T109 successors
+        # (``build_t109_experiment_manifest`` /
+        # ``write_t109_manifest_to_path`` /
+        # ``load_t109_manifest_from_path``) are.
+        assert hasattr(orch, "build_t109_experiment_manifest")
+        assert hasattr(orch, "write_t109_manifest_to_path")
+        assert hasattr(orch, "load_t109_manifest_from_path")
 
     def test_orchestrator_imports_registry_binding(self) -> None:
         from robinhood_lp import orchestrator as orch

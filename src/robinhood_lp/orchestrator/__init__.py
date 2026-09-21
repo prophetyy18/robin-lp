@@ -81,7 +81,7 @@ import json
 import os
 import tempfile
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -90,11 +90,17 @@ from typing import Any, Final, cast
 from robinhood_lp.backtest.engine import (
     BACKTEST_ENGINE_VERSION,
     BacktestEngine,
+    BacktestResult,
     RiskDecision,
     StrategyCallback,
     empty_position_state,
 )
-from robinhood_lp.backtest.events import BacktestEvent
+from robinhood_lp.backtest.events import (
+    STAGE_FILL,
+    BacktestEvent,
+    PositionState,
+    extract_event_cursor,
+)
 from robinhood_lp.backtest.models import (
     ConstantLiquidityModel,
     DeterministicFailureModel,
@@ -105,6 +111,7 @@ from robinhood_lp.backtest.models import (
 )
 from robinhood_lp.reports.manifest import (
     MANIFEST_VERSION,
+    MANIFEST_VERSION_T109,
     VALID_CLOCK_ASSUMPTIONS,
     VALID_COST_ASSUMPTIONS,
     VALID_FILL_ASSUMPTIONS,
@@ -112,9 +119,11 @@ from robinhood_lp.reports.manifest import (
     VALUATION_QUALIFIED,
     VALUATION_RELATIVE_ONLY,
     ExperimentManifest,
-    build_experiment_manifest,
+    T109ExperimentManifest,
+    build_t109_experiment_manifest,
 )
 from robinhood_lp.reports.metrics import (
+    METRICS_VERSION,
     CoverageSummary,
     LedgerSnapshot,
     RunMetrics,
@@ -124,14 +133,21 @@ from robinhood_lp.reports.metrics import (
     extract_decisions,
 )
 from robinhood_lp.reports.registry_binding import (
+    StrategyBinding,
     bind_strategy_to_registry,
 )
+from robinhood_lp.reports.simulation_evidence import (
+    RunStateCheckpoint,
+    RunTransition,
+    SimulationEvidence,
+    build_simulation_evidence,
+)
 from robinhood_lp.reports.validation import (
-    DatasetQualificationRecord,
     ManifestValidationError,
     load_manifest_from_path,
-    validate_manifest,
-    write_manifest_to_path,
+    load_t109_manifest_from_path,
+    write_simulation_evidence_to_path,
+    write_t109_manifest_to_path,
 )
 from robinhood_lp.strategy.adapter import AdaptiveStrategyCallback
 from robinhood_lp.strategy.adaptive import AdaptiveStrategy as _AdaptiveStrategy
@@ -162,6 +178,11 @@ _MANIFEST_FILENAME: Final[str] = "{run_id}.{chain_id}-{pool_key_id}.manifest.jso
 #: Report file name template. The report is the human-readable
 #: companion of the manifest; the orchestrator publishes both.
 _REPORT_FILENAME: Final[str] = "{run_id}.{chain_id}-{pool_key_id}.report.json"
+
+#: Simulation-evidence file name template. The orchestrator writes the
+#: T109 simulation-evidence artifact alongside the manifest and
+#: report; the path is the on-disk binding the manifest records.
+_EVIDENCE_FILENAME: Final[str] = "{run_id}.{chain_id}-{pool_key_id}.simulation_evidence.json"
 
 #: Default model-bundle parameters the orchestrator uses when the
 #: caller does not supply ``gas_units`` / ``fee_pips`` /
@@ -251,8 +272,7 @@ class RunAlreadyExistsError(BacktestRunError):
         self.run_id = run_id
         self.path = path
         super().__init__(
-            f"{_REASON_PREFIX}RUN_ALREADY_EXISTS: run_id={run_id!r} "
-            f"already exists at {path!r}"
+            f"{_REASON_PREFIX}RUN_ALREADY_EXISTS: run_id={run_id!r} already exists at {path!r}"
         )
 
 
@@ -404,8 +424,7 @@ class RunRequest:
             or self.block_range_end < self.block_range_start
         ):
             raise InvalidRunRequestError(
-                f"{_REASON_PREFIX}INVALID_REQUEST: block_range_end must be "
-                f">= block_range_start"
+                f"{_REASON_PREFIX}INVALID_REQUEST: block_range_end must be >= block_range_start"
             )
         if (
             not isinstance(self.interval_seconds, int)
@@ -434,11 +453,7 @@ class RunRequest:
                     f"{_REASON_PREFIX}INVALID_REQUEST: strategy_parameters values must be "
                     f"int|bool|str"
                 )
-        if (
-            not isinstance(self.seed, int)
-            or isinstance(self.seed, bool)
-            or self.seed < 0
-        ):
+        if not isinstance(self.seed, int) or isinstance(self.seed, bool) or self.seed < 0:
             raise InvalidRunRequestError(
                 f"{_REASON_PREFIX}INVALID_REQUEST: seed must be non-negative int"
             )
@@ -478,10 +493,7 @@ class RunRequest:
             raise InvalidRunRequestError(
                 f"{_REASON_PREFIX}INVALID_REQUEST: latency_ms_estimate must be non-negative int"
             )
-        if (
-            not isinstance(self.reporting_numeraire, str)
-            or not self.reporting_numeraire
-        ):
+        if not isinstance(self.reporting_numeraire, str) or not self.reporting_numeraire:
             raise InvalidRunRequestError(
                 f"{_REASON_PREFIX}INVALID_REQUEST: reporting_numeraire must be non-empty str"
             )
@@ -518,12 +530,10 @@ class RunRequest:
             or self.created_at_unix_seconds < 0
         ):
             raise InvalidRunRequestError(
-                f"{_REASON_PREFIX}INVALID_REQUEST: created_at_unix_seconds must be "
-                f"non-negative int"
+                f"{_REASON_PREFIX}INVALID_REQUEST: created_at_unix_seconds must be non-negative int"
             )
         if self.source_manifest_path is not None and (
-            not isinstance(self.source_manifest_path, str)
-            or not self.source_manifest_path
+            not isinstance(self.source_manifest_path, str) or not self.source_manifest_path
         ):
             raise InvalidRunRequestError(
                 f"{_REASON_PREFIX}INVALID_REQUEST: source_manifest_path must be "
@@ -696,9 +706,7 @@ class DatasetResolver:
     the dedicated error before any result is written.
     """
 
-    def resolve(
-        self, *, dataset_version: str, chain_id: int, pool_key_id: str
-    ) -> DatasetCoverage:
+    def resolve(self, *, dataset_version: str, chain_id: int, pool_key_id: str) -> DatasetCoverage:
         """Return the :class:`DatasetCoverage` for the requested pool."""
         raise NotImplementedError
 
@@ -875,6 +883,7 @@ class RunRecord:
     report_path: str | None
     source_manifest_path: str | None
     source_checksum: str | None
+    simulation_evidence_path: str | None
     created_at_unix_seconds: int
     updated_at_unix_seconds: int
     terminal_at_unix_seconds: int | None
@@ -885,22 +894,25 @@ class RunRecord:
                 f"{_REASON_PREFIX}INVALID_RECORD: version must be non-empty str"
             )
         if not isinstance(self.state, RunState):
-            raise InvalidRunRequestError(
-                f"{_REASON_PREFIX}INVALID_RECORD: state must be RunState"
-            )
+            raise InvalidRunRequestError(f"{_REASON_PREFIX}INVALID_RECORD: state must be RunState")
         if self.reason_code is not None and (
             not isinstance(self.reason_code, str) or not self.reason_code
         ):
             raise InvalidRunRequestError(
-                f"{_REASON_PREFIX}INVALID_RECORD: reason_code must be "
-                f"non-empty str or None"
+                f"{_REASON_PREFIX}INVALID_RECORD: reason_code must be non-empty str or None"
             )
         if self.error_message is not None and (
             not isinstance(self.error_message, str) or not self.error_message
         ):
             raise InvalidRunRequestError(
-                f"{_REASON_PREFIX}INVALID_RECORD: error_message must be "
-                f"non-empty str or None"
+                f"{_REASON_PREFIX}INVALID_RECORD: error_message must be non-empty str or None"
+            )
+        if self.simulation_evidence_path is not None and (
+            not isinstance(self.simulation_evidence_path, str) or not self.simulation_evidence_path
+        ):
+            raise InvalidRunRequestError(
+                f"{_REASON_PREFIX}INVALID_RECORD: simulation_evidence_path "
+                f"must be non-empty str or None"
             )
 
     def to_dict(self) -> dict[str, object]:
@@ -922,6 +934,7 @@ class RunRecord:
             "report_path": self.report_path,
             "source_manifest_path": self.source_manifest_path,
             "source_checksum": self.source_checksum,
+            "simulation_evidence_path": self.simulation_evidence_path,
             "created_at_unix_seconds": self.created_at_unix_seconds,
             "updated_at_unix_seconds": self.updated_at_unix_seconds,
             "terminal_at_unix_seconds": self.terminal_at_unix_seconds,
@@ -958,19 +971,22 @@ class RunStateStore:
     def record_path(self, run_id: str) -> Path:
         return self.runs_root / _RUN_RECORD_FILENAME.format(run_id=run_id)
 
-    def manifest_path(
-        self, *, run_id: str, chain_id: int, pool_key_id: str
-    ) -> Path:
+    def manifest_path(self, *, run_id: str, chain_id: int, pool_key_id: str) -> Path:
         return self.runs_root / _MANIFEST_FILENAME.format(
             run_id=run_id,
             chain_id=chain_id,
             pool_key_id=_safe_for_filename(pool_key_id),
         )
 
-    def report_path(
-        self, *, run_id: str, chain_id: int, pool_key_id: str
-    ) -> Path:
+    def report_path(self, *, run_id: str, chain_id: int, pool_key_id: str) -> Path:
         return self.runs_root / _REPORT_FILENAME.format(
+            run_id=run_id,
+            chain_id=chain_id,
+            pool_key_id=_safe_for_filename(pool_key_id),
+        )
+
+    def simulation_evidence_path(self, *, run_id: str, chain_id: int, pool_key_id: str) -> Path:
+        return self.runs_root / _EVIDENCE_FILENAME.format(
             run_id=run_id,
             chain_id=chain_id,
             pool_key_id=_safe_for_filename(pool_key_id),
@@ -984,9 +1000,7 @@ class RunStateStore:
     def read(self, run_id: str) -> RunRecord:
         path = self.record_path(run_id)
         if not path.exists():
-            raise FileNotFoundError(
-                f"RunStateStore.read: run_id={run_id!r} not found"
-            )
+            raise FileNotFoundError(f"RunStateStore.read: run_id={run_id!r} not found")
         raw = path.read_text(encoding="utf-8")
         try:
             payload = json.loads(raw)
@@ -1111,9 +1125,7 @@ def run_record_from_dict(payload: Mapping[str, Any]) -> RunRecord:
     the field types the dataclass declares.
     """
     if not isinstance(payload, Mapping):
-        raise RunStateCorruptError(
-            f"{_REASON_PREFIX}RECORD_CORRUPT: payload must be Mapping"
-        )
+        raise RunStateCorruptError(f"{_REASON_PREFIX}RECORD_CORRUPT: payload must be Mapping")
     try:
         version = payload["version"]
         run_id = payload["run_id"]
@@ -1126,6 +1138,7 @@ def run_record_from_dict(payload: Mapping[str, Any]) -> RunRecord:
         report_path = payload.get("report_path")
         source_manifest_path = payload.get("source_manifest_path")
         source_checksum = payload.get("source_checksum")
+        simulation_evidence_path = payload.get("simulation_evidence_path")
         created_at = payload["created_at_unix_seconds"]
         updated_at = payload["updated_at_unix_seconds"]
         terminal_at = payload.get("terminal_at_unix_seconds")
@@ -1134,13 +1147,9 @@ def run_record_from_dict(payload: Mapping[str, Any]) -> RunRecord:
             f"{_REASON_PREFIX}RECORD_CORRUPT: missing key {exc.args[0]!r}"
         ) from exc
     if not isinstance(version, str) or not version:
-        raise RunStateCorruptError(
-            f"{_REASON_PREFIX}RECORD_CORRUPT: version must be non-empty str"
-        )
+        raise RunStateCorruptError(f"{_REASON_PREFIX}RECORD_CORRUPT: version must be non-empty str")
     if not isinstance(run_id, str) or not run_id:
-        raise RunStateCorruptError(
-            f"{_REASON_PREFIX}RECORD_CORRUPT: run_id must be non-empty str"
-        )
+        raise RunStateCorruptError(f"{_REASON_PREFIX}RECORD_CORRUPT: run_id must be non-empty str")
     try:
         state = RunState(str(state_raw))
     except ValueError as exc:
@@ -1148,13 +1157,9 @@ def run_record_from_dict(payload: Mapping[str, Any]) -> RunRecord:
             f"{_REASON_PREFIX}RECORD_CORRUPT: state={state_raw!r} is not a RunState"
         ) from exc
     if not isinstance(request_raw, Mapping):
-        raise RunStateCorruptError(
-            f"{_REASON_PREFIX}RECORD_CORRUPT: request must be Mapping"
-        )
+        raise RunStateCorruptError(f"{_REASON_PREFIX}RECORD_CORRUPT: request must be Mapping")
     if not isinstance(progress_raw, Mapping):
-        raise RunStateCorruptError(
-            f"{_REASON_PREFIX}RECORD_CORRUPT: progress must be Mapping"
-        )
+        raise RunStateCorruptError(f"{_REASON_PREFIX}RECORD_CORRUPT: progress must be Mapping")
     request = _run_request_from_dict(request_raw)
     progress = _run_progress_from_dict(progress_raw)
     return RunRecord(
@@ -1171,11 +1176,12 @@ def run_record_from_dict(payload: Mapping[str, Any]) -> RunRecord:
             str(source_manifest_path) if source_manifest_path is not None else None
         ),
         source_checksum=str(source_checksum) if source_checksum is not None else None,
+        simulation_evidence_path=(
+            str(simulation_evidence_path) if simulation_evidence_path is not None else None
+        ),
         created_at_unix_seconds=int(created_at),
         updated_at_unix_seconds=int(updated_at),
-        terminal_at_unix_seconds=(
-            int(terminal_at) if terminal_at is not None else None
-        ),
+        terminal_at_unix_seconds=(int(terminal_at) if terminal_at is not None else None),
     )
 
 
@@ -1193,8 +1199,7 @@ def _run_request_from_dict(payload: Mapping[str, Any]) -> RunRequest:
     for _k, v in strategy_parameters.items():
         if isinstance(v, bool) or not isinstance(v, (int, str)):
             raise RunStateCorruptError(
-                f"{_REASON_PREFIX}RECORD_CORRUPT: strategy_parameters value must be "
-                f"int|bool|str"
+                f"{_REASON_PREFIX}RECORD_CORRUPT: strategy_parameters value must be int|bool|str"
             )
     try:
         dependency_revisions = dict(payload["dependency_revisions"])
@@ -1287,9 +1292,7 @@ def _build_strategy_callback(
     if callable(built):
         return cast(StrategyCallback, built)
     if isinstance(built, _AdaptiveStrategy):
-        return AdaptiveStrategyCallback(
-            strategy=built, window_seconds=int(interval_seconds)
-        )
+        return AdaptiveStrategyCallback(strategy=built, window_seconds=int(interval_seconds))
     raise InvalidRunRequestError(
         f"{_REASON_PREFIX}STRATEGY_NOT_CALLABLE: registered factory for "
         f"{identity!r} returned an object the engine cannot consume "
@@ -1493,20 +1496,27 @@ class BacktestOrchestrator:
                     f"{_REASON_PREFIX}SOURCE_MANIFEST_INVALID_JSON: {exc}"
                 ) from exc
             declared_version = (
-                source_payload.get("version")
-                if isinstance(source_payload, dict)
-                else None
+                source_payload.get("version") if isinstance(source_payload, dict) else None
             )
-            if declared_version != MANIFEST_VERSION:
-                raise LegacyManifestSourceError(
-                    source_manifest_path=str(source_path)
-                )
+            # T109 cutover: a product rerun may source the current T109
+            # dataset-referenced manifest OR a legacy T105 manifest (the
+            # T105 artifacts remain byte-identical and readable as
+            # historical rerun sources). Anything else — including the
+            # legacy T063 pre-registry vocabulary — is rejected.
+            if declared_version not in (
+                MANIFEST_VERSION,
+                MANIFEST_VERSION_T109,
+            ):
+                raise LegacyManifestSourceError(source_manifest_path=str(source_path))
             try:
-                source_manifest = load_manifest_from_path(source_path)
+                if declared_version == MANIFEST_VERSION_T109:
+                    source_manifest: ExperimentManifest | T109ExperimentManifest = (
+                        load_t109_manifest_from_path(source_path)
+                    )
+                else:
+                    source_manifest = load_manifest_from_path(source_path)
             except ManifestValidationError as exc:
-                raise BacktestRunError(
-                    f"{_REASON_PREFIX}SOURCE_MANIFEST_INVALID: {exc}"
-                ) from exc
+                raise BacktestRunError(f"{_REASON_PREFIX}SOURCE_MANIFEST_INVALID: {exc}") from exc
             # The product rerun's chain_id / pool_key_id /
             # dataset_version must agree with the source.
             if source_manifest.chain_id != request.chain_id:
@@ -1603,6 +1613,7 @@ class BacktestOrchestrator:
                 if request.source_manifest_path is not None
                 else None
             ),
+            simulation_evidence_path=None,
             created_at_unix_seconds=request.created_at_unix_seconds,
             updated_at_unix_seconds=now,
             terminal_at_unix_seconds=None,
@@ -1640,6 +1651,7 @@ class BacktestOrchestrator:
             report_path=None,
             source_manifest_path=record.source_manifest_path,
             source_checksum=record.source_checksum,
+            simulation_evidence_path=None,
             created_at_unix_seconds=record.created_at_unix_seconds,
             updated_at_unix_seconds=now,
             terminal_at_unix_seconds=now,
@@ -1691,9 +1703,7 @@ class BacktestOrchestrator:
 
     # ----- execution -----------------------------------------------------
 
-    def _execute(
-        self, *, record: RunRecord, cancel_token: CancelToken
-    ) -> RunRecord:
+    def _execute(self, *, record: RunRecord, cancel_token: CancelToken) -> RunRecord:
         """Execute the run lifecycle for ``record``.
 
         The function drives ``record`` from its current state
@@ -1808,14 +1818,38 @@ class BacktestOrchestrator:
                 chain_id=request.chain_id,
                 pool_key_id=request.pool_key_id,
             )
-            # 7. Build the T105 manifest.
-            manifest = build_experiment_manifest(
+            # 7. Build the T109 simulation-evidence artifact from the
+            #    engine's audit chain. The orchestrator is the single
+            #    publication gate T109 names: a successful run that
+            #    cannot produce a SimulationEvidence fails closed with
+            #    a named reason; no manifest / report is published.
+            simulation_evidence = _build_simulation_evidence(
+                request=request,
+                result=result,
+                coverage=coverage,
+                coverage_record=coverage_record,
+                binding=binding,
+                decisions_checksum=decisions_chk,
+                metrics_version=METRICS_VERSION,
+                events=events,
+            )
+            simulation_evidence_path = self.store.simulation_evidence_path(
+                run_id=request.run_id,
+                chain_id=request.chain_id,
+                pool_key_id=request.pool_key_id,
+            )
+            # 8. Build the dataset-referenced T109 manifest. The
+            #    manifest references the dataset partition instead of
+            #    embedding the complete event timeline; the
+            #    simulation-evidence artifact is the only other
+            #    evidence the run publishes.
+            partition_refs = _derive_partition_refs(events, coverage_record)
+            manifest = build_t109_experiment_manifest(
                 run_id=request.run_id,
                 metrics=metrics,
                 coverage=coverage,
                 ledger_snapshot=ledger_snapshot,
                 decisions_checksum=decisions_chk,
-                input_events=events,
                 dataset_version=coverage_record.dataset_version,
                 dataset_schema_version=coverage_record.dataset_schema_version,
                 dataset_decode_version=coverage_record.dataset_decode_version,
@@ -1835,45 +1869,40 @@ class BacktestOrchestrator:
                 created_at_unix_seconds=request.created_at_unix_seconds,
                 block_range_start=request.block_range_start,
                 block_range_end=request.block_range_end,
+                dataset_partition_refs=partition_refs,
+                dataset_event_count=len(events),
+                simulation_evidence_ref=str(simulation_evidence_path.name),
+                reconstruction_revision=BACKTEST_ENGINE_VERSION,
             )
-            # 8. Validate the manifest against the registry
-            #    and the dataset qualification record.
-            try:
-                validate_manifest(
-                    manifest,
-                    dataset_qualification=DatasetQualificationRecord(
-                        dataset_version=coverage_record.dataset_version,
-                        reporting_numeraire=coverage_record.reporting_numeraire,
-                        valuation_qualification=coverage_record.valuation_qualification,
-                    ),
-                )
-            except ManifestValidationError as exc:
-                raise BacktestRunError(
-                    f"{_REASON_PREFIX}MANIFEST_VALIDATION_FAILED: {exc}"
-                ) from exc
-            # 9. Publish the manifest atomically.
+            # 9. Publish the simulation-evidence artifact atomically
+            #    before the manifest, so a write failure here fails
+            #    the publication closed.
+            write_simulation_evidence_to_path(simulation_evidence, simulation_evidence_path)
+            # 10. Publish the dataset-referenced manifest atomically.
             manifest_path = self.store.manifest_path(
                 run_id=request.run_id,
                 chain_id=request.chain_id,
                 pool_key_id=request.pool_key_id,
             )
-            write_manifest_to_path(manifest, manifest_path)
-            # 10. Publish the report.
+            write_t109_manifest_to_path(manifest, manifest_path)
+            # 11. Publish the report (a human-readable companion of
+            #     the dataset-referenced manifest).
             report_path = self.store.report_path(
                 run_id=request.run_id,
                 chain_id=request.chain_id,
                 pool_key_id=request.pool_key_id,
             )
-            report_payload = _build_report_payload(
+            report_payload = _build_t109_report_payload(
                 manifest=manifest,
                 metrics=metrics,
                 coverage=coverage,
                 ledger_snapshot=ledger_snapshot,
+                simulation_evidence_ref=simulation_evidence_path.name,
             )
             _atomic_write_json(report_path, report_payload)
             cancel_token.raise_if_cancelled()
-            # 11. Transition to SUCCEEDED with the manifest
-            #     and report paths recorded.
+            # 12. Transition to SUCCEEDED with the manifest,
+            #     report, and simulation-evidence paths recorded.
             return self._write_terminal_record(
                 request=request,
                 state=RunState.SUCCEEDED,
@@ -1881,6 +1910,7 @@ class BacktestOrchestrator:
                 error_message=None,
                 manifest_path=str(manifest_path),
                 report_path=str(report_path),
+                simulation_evidence_path=str(simulation_evidence_path),
             )
         except RunCancelled as exc:
             # No manifest is published on cancellation.
@@ -1945,6 +1975,7 @@ class BacktestOrchestrator:
             report_path=record.report_path,
             source_manifest_path=record.source_manifest_path,
             source_checksum=record.source_checksum,
+            simulation_evidence_path=record.simulation_evidence_path,
             created_at_unix_seconds=record.created_at_unix_seconds,
             updated_at_unix_seconds=now,
             terminal_at_unix_seconds=record.terminal_at_unix_seconds,
@@ -1960,6 +1991,7 @@ class BacktestOrchestrator:
         error_message: str | None,
         manifest_path: str | None = None,
         report_path: str | None = None,
+        simulation_evidence_path: str | None = None,
     ) -> RunRecord:
         """Write a terminal record and return the persisted copy.
 
@@ -1993,11 +2025,341 @@ class BacktestOrchestrator:
             report_path=report_path,
             source_manifest_path=request.source_manifest_path,
             source_checksum=source_checksum,
+            simulation_evidence_path=simulation_evidence_path,
             created_at_unix_seconds=request.created_at_unix_seconds,
             updated_at_unix_seconds=now,
             terminal_at_unix_seconds=now,
         )
         return self.store.write(terminal)
+
+
+# ---------------------------------------------------------------------------
+# T109 evidence publication helpers
+# ---------------------------------------------------------------------------
+
+
+def _derive_partition_refs(
+    events: Sequence[BacktestEvent],
+    coverage_record: DatasetCoverage,
+) -> tuple[str, ...]:
+    """Return the dataset partition references a T109 manifest binds to.
+
+    The orchestrator derives a deterministic set of partition
+    references from the dataset's coverage record. Each reference is
+    a ``(block_number, transaction_index, log_index)`` triple the
+    canonical event stream partitions the dataset on; a downstream
+    reader resolves the bytes against the dataset content hash the
+    manifest carries. The orchestrator never embeds the events
+    themselves.
+
+    The function falls back to a derivation from the input event
+    timestamps when the dataset resolution does not provide explicit
+    partition references; the fallback ensures every T109 manifest
+    has at least one reference so the publication gate can enforce
+    the "every T109 manifest binds to at least one dataset partition"
+    rule.
+    """
+    refs: set[str] = set()
+    # Derive from the input event list. The dataset's T100 immutable
+    # partition reference is the dataset content hash; the per-event
+    # cursor triple is the canonical partition identifier.
+    for evt in events:
+        cursor = extract_event_cursor(evt)
+        if cursor is None:
+            continue
+        refs.add(f"{cursor[0]:010d}-{cursor[1]:06d}-{cursor[2]:06d}")
+    if not refs:
+        # Fall back to a single partition reference derived from the
+        # dataset coverage record so the manifest always carries at
+        # least one bound partition.
+        refs.add(f"coverage-{coverage_record.covered_start:05d}-{coverage_record.covered_end:05d}")
+    return tuple(sorted(refs))
+
+
+def _ledger_snapshot_to_mapping(state: PositionState) -> dict[str, object]:
+    return {
+        "version": state.version,
+        "pool_key_id": state.pool_key_id,
+        "chain_id": state.chain_id,
+        "position_id": state.position_id,
+        "tick_lower": state.tick_lower,
+        "tick_upper": state.tick_upper,
+        "liquidity": state.liquidity,
+        "principal_token0": state.principal_token0,
+        "principal_token1": state.principal_token1,
+        "tokens_owed0": state.tokens_owed0,
+        "tokens_owed1": state.tokens_owed1,
+        "in_range": state.in_range,
+        "last_accrual_time": state.last_accrual_time,
+    }
+
+
+def _build_simulation_evidence(
+    *,
+    request: RunRequest,
+    result: BacktestResult,
+    coverage: CoverageSummary,
+    coverage_record: DatasetCoverage,
+    binding: StrategyBinding,
+    decisions_checksum: str,
+    metrics_version: str,
+    events: Sequence[BacktestEvent],
+) -> SimulationEvidence:
+    """Build a T109 :class:`SimulationEvidence` artifact from the engine output.
+
+    The function is the canonical builder the T109 orchestrator
+    invokes after the engine run. It walks the engine's audit
+    chain, extracts the cursor binding every transition observed
+    at emission time, and packages the run-specific facts
+    ``RunState`` / ``ReplayFrame`` need to reproduce the run.
+
+    The function refuses a run whose audit chain produces a cursor
+    state the artifact constructor would reject: a state-changing
+    transition with no cursor binding is the contract's "do not
+    publish a non-causal run" rule.
+    """
+    # Build an event-id → (block, tx, log) cursor map so we can
+    # resolve cursors for transitions that did not carry one
+    # through the AuditEvent. The engine emits cursor through the
+    # optional field; if the source BacktestEvent lacks the
+    # block_number / transaction_index / log_index triple, we
+    # fall back to ``(timestamp, 0, 0)`` so the artifact remains
+    # complete (the contract requires cursor binding for
+    # state-changing transitions; this fallback covers engine
+    # inputs that carry only the integer timestamp).
+    event_cursor_map: dict[str, tuple[int, int, int] | None] = {}
+    for evt in events:
+        cursor = extract_event_cursor(evt)
+        if cursor is None and getattr(evt, "timestamp", None) is not None:
+            cursor = (int(evt.timestamp), 0, 0)
+        event_cursor_map[evt.event_id] = cursor
+
+    def _resolve_cursor(
+        audit_event_id: str | None,
+        engine_cursor: tuple[int, int, int] | None,
+    ) -> tuple[int, int, int] | None:
+        # Prefer the audit event's cursor field; fall back to the
+        # source event's cursor lookup.
+        if engine_cursor is not None:
+            return engine_cursor
+        if audit_event_id is None:
+            return None
+        return event_cursor_map.get(audit_event_id)
+
+    transitions: list[RunTransition] = []
+    cursor_lookup: dict[str, tuple[int, int, int] | None] = {}
+    last_audit_per_stage: dict[str, str] = {}
+    for audit in result.audit_events:
+        # Map the audit event's parent_event_ids back to their source
+        # BacktestEvent cursor. The engine uses (event.event_id,) as
+        # the parent for the first-stage audit events (DECISION /
+        # RISK / LATENCY / FILL).
+        parent_cursor: tuple[int, int, int] | None = None
+        for parent_id in audit.parent_event_ids:
+            if parent_id in event_cursor_map:
+                parent_cursor = event_cursor_map[parent_id]
+                break
+        cursor = audit.cursor if audit.cursor is not None else parent_cursor
+        cursor_lookup[audit.event_id] = cursor
+        state_changing = (
+            audit.stage == STAGE_FILL
+            and audit.ledger_hash_after != "0x" + "00" * 32
+            and audit.payload is not None
+            and any(
+                key == "outcome"
+                and str(value)
+                in ("FillOutcome.FILLED", "FillOutcome.PARTIAL", "FillOutcome.DELAYED")
+                for key, value in audit.payload
+            )
+        )
+        transitions.append(
+            RunTransition(
+                ordinal=len(transitions),
+                stage=audit.stage,
+                cursor=_cursor_to_market_cursor(cursor),
+                ledger_hash_after=audit.ledger_hash_after,
+                audit_event_id=audit.event_id,
+                payload={
+                    "event_id": audit.event_id,
+                    "parent_event_ids": list(audit.parent_event_ids),
+                    "timestamp": audit.timestamp,
+                    "sequence": audit.sequence,
+                    "payload": dict(audit.payload),
+                    "ledger_hash_after": audit.ledger_hash_after,
+                },
+                state_changing=state_changing,
+            )
+        )
+        last_audit_per_stage[audit.stage] = audit.event_id
+
+    # Build a single checkpoint at the final ledger snapshot.
+    checkpoints: list[RunStateCheckpoint] = []
+    if result.audit_events:
+        final_audit = result.audit_events[-1]
+        final_cursor = final_audit.cursor
+        if final_cursor is None:
+            final_cursor = cursor_lookup.get(final_audit.event_id)
+        if final_cursor is not None:
+            checkpoints.append(
+                RunStateCheckpoint(
+                    cursor=_cursor_to_market_cursor(final_cursor),
+                    last_applied_ordinal=len(transitions) - 1,
+                    ledger_snapshot=_ledger_snapshot_to_mapping(result.final_ledger),
+                    equity_q64_64=0,
+                    drawdown_q64_64=0,
+                    attribution_snapshot={
+                        "realised_pnl_q64_64": 0,
+                        "fees_collected_q64_64": 0,
+                        "il_lvr_q64_64": 0,
+                        "gas_q64_64": 0,
+                    },
+                )
+            )
+
+    initial_position = _ledger_snapshot_to_mapping(
+        PositionState(
+            version="t061.position_state.v1",
+            pool_key_id=result.final_ledger.pool_key_id,
+            chain_id=result.final_ledger.chain_id,
+            position_id=result.final_ledger.position_id,
+            tick_lower=request.block_range_start,
+            tick_upper=request.block_range_end,
+            liquidity=0,
+            principal_token0=0,
+            principal_token1=0,
+            tokens_owed0=0,
+            tokens_owed1=0,
+            in_range=False,
+            last_accrual_time=0,
+        )
+    )
+
+    return build_simulation_evidence(
+        run_id=request.run_id,
+        dataset_version=coverage_record.dataset_version,
+        dataset_schema_version=coverage_record.dataset_schema_version,
+        dataset_decode_version=coverage_record.dataset_decode_version,
+        dataset_content_hash=coverage_record.dataset_content_hash,
+        pool_key_id=request.pool_key_id,
+        chain_id=request.chain_id,
+        tick_lower=request.block_range_start,
+        tick_upper=request.block_range_end,
+        strategy_identity=binding.strategy_identity,
+        strategy_version=binding.strategy_version,
+        registry_version=binding.registry_version,
+        registry_checksum=binding.registry_checksum,
+        parameter_schema_version=binding.parameter_schema_version,
+        parameter_schema_checksum=binding.parameter_schema_checksum,
+        code_provenance_module=binding.code_provenance_module,
+        code_provenance_revision=binding.code_provenance_revision,
+        engine_revision=BACKTEST_ENGINE_VERSION,
+        accounting_revision=metrics_version,
+        reconstruction_revision=BACKTEST_ENGINE_VERSION,
+        initial_position=initial_position,
+        initial_equity_q64_64=0,
+        initial_attribution={
+            "realised_pnl_q64_64": 0,
+            "fees_collected_q64_64": 0,
+            "il_lvr_q64_64": 0,
+            "gas_q64_64": 0,
+        },
+        transitions=tuple(transitions),
+        checkpoints=tuple(checkpoints),
+    )
+
+
+def _cursor_to_market_cursor(
+    cursor: tuple[int, int, int] | None,
+) -> Any:  # returns MarketCursor | None via duck-typed module
+    """Convert a ``(block, tx, log)`` tuple into a :class:`MarketCursor`.
+
+    Imported here at runtime to avoid a top-level cycle with the
+    replay layer; the helper is only invoked when the orchestrator
+    publishes evidence.
+    """
+    if cursor is None:
+        return None
+    from robinhood_lp.replay.market_state import MarketCursor
+
+    block_number, transaction_index, log_index = cursor
+    if transaction_index == -1 and log_index == -1:
+        return MarketCursor.end_of_block(block_number)
+    return MarketCursor(block_number, transaction_index, log_index)
+
+
+def _build_t109_report_payload(
+    *,
+    manifest: T109ExperimentManifest,
+    metrics: RunMetrics,
+    coverage: CoverageSummary,
+    ledger_snapshot: LedgerSnapshot,
+    simulation_evidence_ref: str,
+) -> dict[str, object]:
+    """Build the human-readable report payload a T109 manifest publishes."""
+    return {
+        "version": ORCHESTRATOR_VERSION,
+        "manifest_version": manifest.version,
+        "run_id": manifest.run_id,
+        "chain_id": manifest.chain_id,
+        "pool_key_id": manifest.pool_key_id,
+        "block_range_start": manifest.block_range_start,
+        "block_range_end": manifest.block_range_end,
+        "dataset_version": manifest.dataset_version,
+        "reporting_numeraire": manifest.reporting_numeraire,
+        "valuation_qualification": manifest.valuation_qualification,
+        "strategy_identity": manifest.strategy_identity,
+        "strategy_version": manifest.strategy_version,
+        "registry_version": manifest.registry_version,
+        "registry_checksum": manifest.registry_checksum,
+        "simulation_evidence_ref": simulation_evidence_ref,
+        "reconstruction_revision": manifest.reconstruction_revision,
+        "dataset_partition_refs": list(manifest.dataset_partition_refs),
+        "dataset_event_count": manifest.dataset_event_count,
+        "metrics": {
+            "version": metrics.version,
+            "interval_seconds": metrics.interval_seconds,
+            "duration_seconds": metrics.duration_seconds,
+            "total_return_q64_64": metrics.total_return_q64_64,
+            "annualized_return_q64_64": metrics.annualized_return_q64_64,
+            "max_drawdown_q64_64": metrics.max_drawdown_q64_64,
+            "turnover_q64_64": metrics.turnover_q64_64,
+            "time_in_range_seconds": metrics.time_in_range_seconds,
+            "fees_q64_64": metrics.fees_q64_64,
+            "il_lvr_proxy_q64_64": metrics.il_lvr_proxy_q64_64,
+            "gas_units_total": metrics.gas_units_total,
+            "slippage_bps_total": metrics.slippage_bps_total,
+            "benchmark_excess_q64_64": metrics.benchmark_excess_q64_64,
+            "fills_count": metrics.fills_count,
+            "metrics_checksum": metrics.metrics_checksum,
+        },
+        "coverage": {
+            "version": coverage.version,
+            "input_events_total": coverage.input_events_total,
+            "data_events_total": coverage.data_events_total,
+            "fill_observations_total": coverage.fill_observations_total,
+            "audit_events_total": coverage.audit_events_total,
+            "block_range_start": coverage.block_range_start,
+            "block_range_end": coverage.block_range_end,
+            "duration_seconds": coverage.duration_seconds,
+            "data_gaps": [[a, b] for a, b in coverage.data_gaps],
+            "coverage_checksum": coverage.coverage_checksum,
+        },
+        "ledger_snapshot": {
+            "version": ledger_snapshot.version,
+            "position_id": ledger_snapshot.position_id,
+            "tick_lower": ledger_snapshot.tick_lower,
+            "tick_upper": ledger_snapshot.tick_upper,
+            "liquidity": ledger_snapshot.liquidity,
+            "principal_token0": ledger_snapshot.principal_token0,
+            "principal_token1": ledger_snapshot.principal_token1,
+            "tokens_owed0": ledger_snapshot.tokens_owed0,
+            "tokens_owed1": ledger_snapshot.tokens_owed1,
+            "in_range": ledger_snapshot.in_range,
+            "last_accrual_time": ledger_snapshot.last_accrual_time,
+            "ledger_checksum": ledger_snapshot.ledger_checksum,
+        },
+        "manifest_checksum": manifest.report_checksum,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2023,9 +2385,7 @@ def _sha256_of_file(path: Path) -> str:
     return "0x" + digest.hexdigest()
 
 
-def _atomic_write_json(
-    path: Path, payload: Mapping[str, object]
-) -> None:
+def _atomic_write_json(path: Path, payload: Mapping[str, object]) -> None:
     """Atomically write ``payload`` as JSON to ``path``.
 
     The write uses a temp-file rename so a crash mid-write

@@ -62,6 +62,7 @@ from robinhood_lp.reports.legacy import (
 )
 from robinhood_lp.reports.manifest import (
     MANIFEST_VERSION,
+    MANIFEST_VERSION_T109,
     UNKNOWN_CODE_REVISION,
     UNKNOWN_DEPENDENCY_REVISION,
     VALID_CLOCK_ASSUMPTIONS,
@@ -76,14 +77,17 @@ from robinhood_lp.reports.manifest import (
     ManifestError,
     ManifestPoolMismatchError,
     SerialisedEvent,
+    T109ExperimentManifest,
     assert_binding_matches_registry,
     bind_strategy_to_registry,
     build_experiment_manifest,
     build_strategy_binding,
+    build_t109_experiment_manifest,
     compute_report_checksum,
     experiment_manifest_from_dict,
     manifest_checksum,
     serialised_event_from_dict,
+    t109_experiment_manifest_from_dict,
 )
 from robinhood_lp.reports.metrics import (
     METRICS_VERSION,
@@ -170,6 +174,7 @@ __all__ = [
     "EVIDENCE_ADAPTER_VERSION",
     "LEGACY_MANIFEST_VERSION",
     "MANIFEST_VERSION",
+    "MANIFEST_VERSION_T109",
     "METRICS_VERSION",
     "REPLAY_FRAME_VERSION",
     "RERUN_VERSION",
@@ -237,6 +242,7 @@ __all__ = [
     "SimulationEvidence",
     "StrategyBinding",
     "T106RobustnessBinding",
+    "T109ExperimentManifest",
     # builders
     "assert_binding_matches_registry",
     "assert_no_prior_run_at_path",
@@ -250,6 +256,7 @@ __all__ = [
     "build_simulation_evidence",
     "build_strategy_binding",
     "build_t106_robustness_binding",
+    "build_t109_experiment_manifest",
     "compute_evidence_checksum",
     "compute_parameter_schema_checksum",
     "compute_report_checksum",
@@ -269,6 +276,7 @@ __all__ = [
     "run_identity_from_dict",
     "serialised_event_from_dict",
     "simulation_evidence_from_dict",
+    "t109_experiment_manifest_from_dict",
     "validate_manifest",
     "validate_multi_pool_run",
     "validate_run_identity",

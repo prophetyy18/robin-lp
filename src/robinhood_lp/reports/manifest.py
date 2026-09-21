@@ -114,7 +114,16 @@ from robinhood_lp.reports.registry_binding import (
 #: replaced the T063 hard-coded strategy vocabulary with the registry
 #: binding. Legacy T063 manifests are loaded through
 #: :mod:`robinhood_lp.reports.legacy`, which pins the prior version.
+#:
+#: T109 introduced ``t109.experiment_manifest.v1`` to drop the
+#: embedded complete ``input_event_list`` for new writes and bind the
+#: dataset content hash and partition references instead. New writes
+#: produced by the T069 orchestrator's SUCCEEDED branch carry the T109
+#: schema; pre-T109 artifacts remain byte-identical and are still
+#: readable as final reports, but :class:`RunState` / :class:`ReplayFrame`
+#: are explicitly unavailable for them.
 MANIFEST_VERSION: Final[str] = "t105.experiment_manifest.v1"
+MANIFEST_VERSION_T109: Final[str] = "t109.experiment_manifest.v1"
 
 #: Sentinel string used when the code revision is unknown (no git
 #: revision is available, e.g. an unpacked source tarball). The
@@ -1001,8 +1010,539 @@ def manifest_checksum(manifest: ExperimentManifest) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Deserialisation
+# T109 manifest schema (dataset-references, no embedded events)
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class T109ExperimentManifest:
+    """The dataset-referenced manifest a new T109 run publishes.
+
+    T109 replaces the T105 embedded ``input_event_list`` with the T100
+    dataset content hash plus the partition references the canonical
+    reader uses to resolve the same ordered input event stream. The
+    manifest carries every byte a downstream consumer needs to verify
+    a published run; the dataset reference is the only authority on
+    the canonical event timeline.
+
+    The dataclass is the per-pool manifest the T069 orchestrator's
+    SUCCEEDED branch publishes atomically with the simulation-evidence
+    artifact. It shares the registry-binding fields of
+    :class:`ExperimentManifest` but uses a distinct schema version so
+    a pre-T109 reader can refuse to interpret it as a legacy
+    ``input_event_list`` payload.
+
+    Field units mirror :class:`ExperimentManifest` for the registry /
+    dataset / pool / block-range slots. The new fields are:
+
+    - ``dataset_partition_refs`` — sorted tuple of non-empty partition
+      reference strings the dataset exposes for this
+      ``(chain_id, pool_key_id)``. The runner resolves these against
+      the dataset content hash and never embeds the events themselves.
+    - ``dataset_event_count`` — non-negative int; the count of input
+      events the canonical timeline references. A reader can use the
+      count to detect a partition-resolution failure without holding
+      the events.
+    - ``simulation_evidence_ref`` — non-empty str; the relative path
+      the manifest binds to for the simulation-evidence artifact. The
+      T109 publication transaction writes the manifest and the
+      evidence atomically; the path is the on-disk binding.
+    - ``reconstruction_revision`` — non-empty str; the reconstruction
+      revision the canonical T040/T041 reader must consume to
+      reproduce the timeline. A mismatch is a closed failure.
+    """
+
+    version: str
+    run_id: str
+    chain_id: int
+    pool_key_id: str
+    block_range_start: int
+    block_range_end: int
+    interval_seconds: int
+    dataset_version: str
+    dataset_schema_version: int
+    dataset_decode_version: int
+    dataset_content_hash: str
+    reporting_numeraire: str
+    valuation_qualification: str
+    code_revision: str
+    dependency_revisions: dict[str, str]
+    strategy_identity: str
+    strategy_version: str
+    registry_version: str
+    registry_checksum: str
+    parameter_schema_version: str
+    parameter_schema_checksum: str
+    code_provenance_module: str
+    code_provenance_revision: str
+    code_provenance_symbol: str
+    strategy_params: dict[str, int | str | bool]
+    seed: int
+    clock_assumption: str
+    fill_assumption: str
+    cost_assumption: str
+    quote_assumption: str
+    latency_units: int
+    latency_ms_estimate: int
+    decisions_checksum: str
+    ledger_checksum: str
+    metrics_checksum: str
+    coverage_checksum: str
+    report_checksum: str
+    metrics_version: str
+    dataset_partition_refs: tuple[str, ...]
+    dataset_event_count: int
+    simulation_evidence_ref: str
+    reconstruction_revision: str
+    created_at_unix_seconds: int
+
+    def __post_init__(self) -> None:
+        if self.version != MANIFEST_VERSION_T109:
+            raise InvalidManifestFieldError(
+                f"T109ExperimentManifest.version: must be "
+                f"{MANIFEST_VERSION_T109!r}, got {self.version!r}"
+            )
+        _require_non_empty_str(self.run_id, field_name="T109ExperimentManifest.run_id")
+        _require_positive_int(self.chain_id, field_name="T109ExperimentManifest.chain_id")
+        _require_non_empty_str(self.pool_key_id, field_name="T109ExperimentManifest.pool_key_id")
+        _require_non_negative_int(
+            self.block_range_start, field_name="T109ExperimentManifest.block_range_start"
+        )
+        _require_non_negative_int(
+            self.block_range_end, field_name="T109ExperimentManifest.block_range_end"
+        )
+        if self.block_range_end < self.block_range_start:
+            raise InvalidManifestFieldError(
+                f"T109ExperimentManifest: block_range_end={self.block_range_end} "
+                f"must be >= block_range_start={self.block_range_start}"
+            )
+        _require_positive_int(
+            self.interval_seconds, field_name="T109ExperimentManifest.interval_seconds"
+        )
+        _require_non_empty_str(
+            self.dataset_version, field_name="T109ExperimentManifest.dataset_version"
+        )
+        _require_non_negative_int(
+            self.dataset_schema_version,
+            field_name="T109ExperimentManifest.dataset_schema_version",
+        )
+        _require_non_negative_int(
+            self.dataset_decode_version,
+            field_name="T109ExperimentManifest.dataset_decode_version",
+        )
+        _require_non_empty_str(
+            self.dataset_content_hash,
+            field_name="T109ExperimentManifest.dataset_content_hash",
+        )
+        _require_non_empty_str(
+            self.reporting_numeraire,
+            field_name="T109ExperimentManifest.reporting_numeraire",
+        )
+        if self.valuation_qualification not in _VALID_VALUATION_QUALIFICATIONS:
+            raise InvalidManifestFieldError(
+                f"T109ExperimentManifest.valuation_qualification: must be one of "
+                f"{sorted(_VALID_VALUATION_QUALIFICATIONS)}, "
+                f"got {self.valuation_qualification!r}"
+            )
+        _require_non_empty_str(
+            self.code_revision, field_name="T109ExperimentManifest.code_revision"
+        )
+        if not isinstance(self.dependency_revisions, dict):
+            raise InvalidManifestFieldError(
+                f"T109ExperimentManifest.dependency_revisions: must be dict[str, str], "
+                f"got {type(self.dependency_revisions).__name__}"
+            )
+        _require_non_empty_str(
+            self.strategy_identity, field_name="T109ExperimentManifest.strategy_identity"
+        )
+        _require_non_empty_str(
+            self.strategy_version, field_name="T109ExperimentManifest.strategy_version"
+        )
+        _require_non_empty_str(
+            self.registry_version, field_name="T109ExperimentManifest.registry_version"
+        )
+        _require_non_empty_str(
+            self.registry_checksum, field_name="T109ExperimentManifest.registry_checksum"
+        )
+        _require_non_empty_str(
+            self.parameter_schema_version,
+            field_name="T109ExperimentManifest.parameter_schema_version",
+        )
+        _require_non_empty_str(
+            self.parameter_schema_checksum,
+            field_name="T109ExperimentManifest.parameter_schema_checksum",
+        )
+        _require_non_empty_str(
+            self.code_provenance_module,
+            field_name="T109ExperimentManifest.code_provenance_module",
+        )
+        _require_non_empty_str(
+            self.code_provenance_revision,
+            field_name="T109ExperimentManifest.code_provenance_revision",
+        )
+        _require_str(
+            self.code_provenance_symbol,
+            field_name="T109ExperimentManifest.code_provenance_symbol",
+        )
+        if not isinstance(self.strategy_params, dict):
+            raise InvalidManifestFieldError(
+                f"T109ExperimentManifest.strategy_params: must be "
+                f"dict[str, int|str|bool], got {type(self.strategy_params).__name__}"
+            )
+        _require_non_negative_int(self.seed, field_name="T109ExperimentManifest.seed")
+        if self.clock_assumption not in VALID_CLOCK_ASSUMPTIONS:
+            raise InvalidManifestFieldError(
+                f"T109ExperimentManifest.clock_assumption: must be one of "
+                f"{sorted(VALID_CLOCK_ASSUMPTIONS)}, got {self.clock_assumption!r}"
+            )
+        if self.fill_assumption not in VALID_FILL_ASSUMPTIONS:
+            raise InvalidManifestFieldError(
+                f"T109ExperimentManifest.fill_assumption: must be one of "
+                f"{sorted(VALID_FILL_ASSUMPTIONS)}, got {self.fill_assumption!r}"
+            )
+        if self.cost_assumption not in VALID_COST_ASSUMPTIONS:
+            raise InvalidManifestFieldError(
+                f"T109ExperimentManifest.cost_assumption: must be one of "
+                f"{sorted(VALID_COST_ASSUMPTIONS)}, got {self.cost_assumption!r}"
+            )
+        if self.quote_assumption not in VALID_QUOTE_ASSUMPTIONS:
+            raise InvalidManifestFieldError(
+                f"T109ExperimentManifest.quote_assumption: must be one of "
+                f"{sorted(VALID_QUOTE_ASSUMPTIONS)}, got {self.quote_assumption!r}"
+            )
+        _require_non_negative_int(
+            self.latency_units, field_name="T109ExperimentManifest.latency_units"
+        )
+        _require_non_negative_int(
+            self.latency_ms_estimate,
+            field_name="T109ExperimentManifest.latency_ms_estimate",
+        )
+        for slot in (
+            "decisions_checksum",
+            "ledger_checksum",
+            "metrics_checksum",
+            "coverage_checksum",
+            "report_checksum",
+        ):
+            value = getattr(self, slot)
+            _require_non_empty_str(value, field_name=f"T109ExperimentManifest.{slot}")
+        _require_non_empty_str(
+            self.metrics_version, field_name="T109ExperimentManifest.metrics_version"
+        )
+        if not isinstance(self.dataset_partition_refs, tuple):
+            raise InvalidManifestFieldError(
+                f"T109ExperimentManifest.dataset_partition_refs: must be tuple, "
+                f"got {type(self.dataset_partition_refs).__name__}"
+            )
+        if not self.dataset_partition_refs:
+            raise InvalidManifestFieldError(
+                "T109ExperimentManifest.dataset_partition_refs: must contain at "
+                "least one partition reference"
+            )
+        for ref in self.dataset_partition_refs:
+            if not isinstance(ref, str) or not ref:
+                raise InvalidManifestFieldError(
+                    f"T109ExperimentManifest.dataset_partition_refs: every entry "
+                    f"must be non-empty str, got {ref!r}"
+                )
+        _require_non_negative_int(
+            self.dataset_event_count,
+            field_name="T109ExperimentManifest.dataset_event_count",
+        )
+        _require_non_empty_str(
+            self.simulation_evidence_ref,
+            field_name="T109ExperimentManifest.simulation_evidence_ref",
+        )
+        _require_non_empty_str(
+            self.reconstruction_revision,
+            field_name="T109ExperimentManifest.reconstruction_revision",
+        )
+        _require_non_negative_int(
+            self.created_at_unix_seconds,
+            field_name="T109ExperimentManifest.created_at_unix_seconds",
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "version": self.version,
+            "run_id": self.run_id,
+            "chain_id": self.chain_id,
+            "pool_key_id": self.pool_key_id,
+            "block_range_start": self.block_range_start,
+            "block_range_end": self.block_range_end,
+            "interval_seconds": self.interval_seconds,
+            "dataset_version": self.dataset_version,
+            "dataset_schema_version": self.dataset_schema_version,
+            "dataset_decode_version": self.dataset_decode_version,
+            "dataset_content_hash": self.dataset_content_hash,
+            "reporting_numeraire": self.reporting_numeraire,
+            "valuation_qualification": self.valuation_qualification,
+            "code_revision": self.code_revision,
+            "dependency_revisions": dict(sorted(self.dependency_revisions.items())),
+            "strategy_identity": self.strategy_identity,
+            "strategy_version": self.strategy_version,
+            "registry_version": self.registry_version,
+            "registry_checksum": self.registry_checksum,
+            "parameter_schema_version": self.parameter_schema_version,
+            "parameter_schema_checksum": self.parameter_schema_checksum,
+            "code_provenance_module": self.code_provenance_module,
+            "code_provenance_revision": self.code_provenance_revision,
+            "code_provenance_symbol": self.code_provenance_symbol,
+            "strategy_params": dict(sorted(self.strategy_params.items())),
+            "seed": self.seed,
+            "clock_assumption": self.clock_assumption,
+            "fill_assumption": self.fill_assumption,
+            "cost_assumption": self.cost_assumption,
+            "quote_assumption": self.quote_assumption,
+            "latency_units": self.latency_units,
+            "latency_ms_estimate": self.latency_ms_estimate,
+            "decisions_checksum": self.decisions_checksum,
+            "ledger_checksum": self.ledger_checksum,
+            "metrics_checksum": self.metrics_checksum,
+            "coverage_checksum": self.coverage_checksum,
+            "report_checksum": self.report_checksum,
+            "metrics_version": self.metrics_version,
+            "dataset_partition_refs": list(self.dataset_partition_refs),
+            "dataset_event_count": self.dataset_event_count,
+            "simulation_evidence_ref": self.simulation_evidence_ref,
+            "reconstruction_revision": self.reconstruction_revision,
+            "created_at_unix_seconds": self.created_at_unix_seconds,
+        }
+
+    def to_canonical_json(self) -> str:
+        return json.dumps(
+            self.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+
+
+def build_t109_experiment_manifest(
+    *,
+    run_id: str,
+    metrics: RunMetrics,
+    coverage: CoverageSummary,
+    ledger_snapshot: LedgerSnapshot,
+    decisions_checksum: str,
+    dataset_version: str,
+    dataset_schema_version: int,
+    dataset_decode_version: int,
+    dataset_content_hash: str,
+    reporting_numeraire: str,
+    valuation_qualification: str,
+    code_revision: str,
+    dependency_revisions: Mapping[str, str],
+    strategy_binding: StrategyBinding,
+    seed: int,
+    clock_assumption: str,
+    fill_assumption: str,
+    cost_assumption: str,
+    quote_assumption: str,
+    latency_units: int,
+    latency_ms_estimate: int,
+    created_at_unix_seconds: int,
+    block_range_start: int,
+    block_range_end: int,
+    dataset_partition_refs: Sequence[str],
+    dataset_event_count: int,
+    simulation_evidence_ref: str,
+    reconstruction_revision: str,
+) -> T109ExperimentManifest:
+    """Build the dataset-referenced manifest a new T109 run publishes.
+
+    The function is the canonical builder for the T109 schema. The
+    manifest does **not** embed the input event timeline; the dataset
+    content hash plus the partition references the dataset exposes are
+    the binding a downstream reader uses to resolve the same canonical
+    ordered input event stream. The simulation-evidence artifact
+    recorded alongside the manifest is bound through
+    ``simulation_evidence_ref``.
+    """
+    pool_identity = (metrics.chain_id, metrics.pool_key_id)
+    if pool_identity != (ledger_snapshot.chain_id, ledger_snapshot.pool_key_id):
+        raise ManifestPoolMismatchError(
+            f"build_t109_experiment_manifest: metrics pool {pool_identity} disagrees "
+            f"with ledger pool "
+            f"({ledger_snapshot.chain_id}, {ledger_snapshot.pool_key_id!r})"
+        )
+    if pool_identity != (coverage.chain_id, coverage.pool_key_id):
+        raise ManifestPoolMismatchError(
+            f"build_t109_experiment_manifest: metrics pool {pool_identity} disagrees "
+            f"with coverage pool "
+            f"({coverage.chain_id}, {coverage.pool_key_id!r})"
+        )
+    sorted_partitions = tuple(sorted(dataset_partition_refs))
+    payload: dict[str, Any] = {
+        "version": MANIFEST_VERSION_T109,
+        "run_id": run_id,
+        "chain_id": metrics.chain_id,
+        "pool_key_id": metrics.pool_key_id,
+        "block_range_start": block_range_start,
+        "block_range_end": block_range_end,
+        "interval_seconds": metrics.interval_seconds,
+        "dataset_version": dataset_version,
+        "dataset_schema_version": dataset_schema_version,
+        "dataset_decode_version": dataset_decode_version,
+        "dataset_content_hash": dataset_content_hash,
+        "reporting_numeraire": reporting_numeraire,
+        "valuation_qualification": valuation_qualification,
+        "code_revision": code_revision,
+        "dependency_revisions": dict(sorted(dependency_revisions.items())),
+        "strategy_identity": strategy_binding.strategy_identity,
+        "strategy_version": strategy_binding.strategy_version,
+        "registry_version": strategy_binding.registry_version,
+        "registry_checksum": strategy_binding.registry_checksum,
+        "parameter_schema_version": strategy_binding.parameter_schema_version,
+        "parameter_schema_checksum": strategy_binding.parameter_schema_checksum,
+        "code_provenance_module": strategy_binding.code_provenance_module,
+        "code_provenance_revision": strategy_binding.code_provenance_revision,
+        "code_provenance_symbol": strategy_binding.code_provenance_symbol,
+        "strategy_params": dict(sorted(binding_parameter_dict(strategy_binding).items())),
+        "seed": seed,
+        "clock_assumption": clock_assumption,
+        "fill_assumption": fill_assumption,
+        "cost_assumption": cost_assumption,
+        "quote_assumption": quote_assumption,
+        "latency_units": latency_units,
+        "latency_ms_estimate": latency_ms_estimate,
+        "decisions_checksum": decisions_checksum,
+        "ledger_checksum": ledger_snapshot.ledger_checksum,
+        "metrics_checksum": metrics.metrics_checksum,
+        "coverage_checksum": coverage.coverage_checksum,
+        "report_checksum": "",
+        "metrics_version": METRICS_VERSION,
+        "dataset_partition_refs": list(sorted_partitions),
+        "dataset_event_count": dataset_event_count,
+        "simulation_evidence_ref": simulation_evidence_ref,
+        "reconstruction_revision": reconstruction_revision,
+        "created_at_unix_seconds": created_at_unix_seconds,
+    }
+    report_checksum = compute_report_checksum(payload)
+    payload["report_checksum"] = report_checksum
+    return T109ExperimentManifest(
+        version=MANIFEST_VERSION_T109,
+        run_id=run_id,
+        chain_id=metrics.chain_id,
+        pool_key_id=metrics.pool_key_id,
+        block_range_start=block_range_start,
+        block_range_end=block_range_end,
+        interval_seconds=metrics.interval_seconds,
+        dataset_version=dataset_version,
+        dataset_schema_version=dataset_schema_version,
+        dataset_decode_version=dataset_decode_version,
+        dataset_content_hash=dataset_content_hash,
+        reporting_numeraire=reporting_numeraire,
+        valuation_qualification=valuation_qualification,
+        code_revision=code_revision,
+        dependency_revisions=dict(sorted(dependency_revisions.items())),
+        strategy_identity=strategy_binding.strategy_identity,
+        strategy_version=strategy_binding.strategy_version,
+        registry_version=strategy_binding.registry_version,
+        registry_checksum=strategy_binding.registry_checksum,
+        parameter_schema_version=strategy_binding.parameter_schema_version,
+        parameter_schema_checksum=strategy_binding.parameter_schema_checksum,
+        code_provenance_module=strategy_binding.code_provenance_module,
+        code_provenance_revision=strategy_binding.code_provenance_revision,
+        code_provenance_symbol=strategy_binding.code_provenance_symbol,
+        strategy_params=dict(sorted(binding_parameter_dict(strategy_binding).items())),
+        seed=seed,
+        clock_assumption=clock_assumption,
+        fill_assumption=fill_assumption,
+        cost_assumption=cost_assumption,
+        quote_assumption=quote_assumption,
+        latency_units=latency_units,
+        latency_ms_estimate=latency_ms_estimate,
+        decisions_checksum=decisions_checksum,
+        ledger_checksum=ledger_snapshot.ledger_checksum,
+        metrics_checksum=metrics.metrics_checksum,
+        coverage_checksum=coverage.coverage_checksum,
+        report_checksum=report_checksum,
+        metrics_version=METRICS_VERSION,
+        dataset_partition_refs=sorted_partitions,
+        dataset_event_count=dataset_event_count,
+        simulation_evidence_ref=simulation_evidence_ref,
+        reconstruction_revision=reconstruction_revision,
+        created_at_unix_seconds=created_at_unix_seconds,
+    )
+
+
+def t109_experiment_manifest_from_dict(payload: Mapping[str, Any]) -> T109ExperimentManifest:
+    """Reconstruct a :class:`T109ExperimentManifest` from a JSON-friendly dict."""
+    if not isinstance(payload, Mapping):
+        raise InvalidManifestFieldError(
+            f"t109_experiment_manifest_from_dict: payload must be Mapping, "
+            f"got {type(payload).__name__}"
+        )
+    try:
+        raw_partitions = payload["dataset_partition_refs"]
+    except KeyError as exc:
+        raise InvalidManifestFieldError(
+            f"t109_experiment_manifest_from_dict: missing key {exc.args[0]!r}"
+        ) from exc
+    if not isinstance(raw_partitions, list):
+        raise InvalidManifestFieldError(
+            "t109_experiment_manifest_from_dict: dataset_partition_refs must be a list"
+        )
+    try:
+        manifest = T109ExperimentManifest(
+            version=str(payload["version"]),
+            run_id=str(payload["run_id"]),
+            chain_id=int(payload["chain_id"]),
+            pool_key_id=str(payload["pool_key_id"]),
+            block_range_start=int(payload["block_range_start"]),
+            block_range_end=int(payload["block_range_end"]),
+            interval_seconds=int(payload["interval_seconds"]),
+            dataset_version=str(payload["dataset_version"]),
+            dataset_schema_version=int(payload["dataset_schema_version"]),
+            dataset_decode_version=int(payload["dataset_decode_version"]),
+            dataset_content_hash=str(payload["dataset_content_hash"]),
+            reporting_numeraire=str(payload["reporting_numeraire"]),
+            valuation_qualification=str(payload["valuation_qualification"]),
+            code_revision=str(payload["code_revision"]),
+            dependency_revisions=dict(payload["dependency_revisions"]),
+            strategy_identity=str(payload["strategy_identity"]),
+            strategy_version=str(payload["strategy_version"]),
+            registry_version=str(payload["registry_version"]),
+            registry_checksum=str(payload["registry_checksum"]),
+            parameter_schema_version=str(payload["parameter_schema_version"]),
+            parameter_schema_checksum=str(payload["parameter_schema_checksum"]),
+            code_provenance_module=str(payload["code_provenance_module"]),
+            code_provenance_revision=str(payload["code_provenance_revision"]),
+            code_provenance_symbol=str(payload["code_provenance_symbol"]),
+            strategy_params=dict(payload["strategy_params"]),
+            seed=int(payload["seed"]),
+            clock_assumption=str(payload["clock_assumption"]),
+            fill_assumption=str(payload["fill_assumption"]),
+            cost_assumption=str(payload["cost_assumption"]),
+            quote_assumption=str(payload["quote_assumption"]),
+            latency_units=int(payload["latency_units"]),
+            latency_ms_estimate=int(payload["latency_ms_estimate"]),
+            decisions_checksum=str(payload["decisions_checksum"]),
+            ledger_checksum=str(payload["ledger_checksum"]),
+            metrics_checksum=str(payload["metrics_checksum"]),
+            coverage_checksum=str(payload["coverage_checksum"]),
+            report_checksum=str(payload["report_checksum"]),
+            metrics_version=str(payload["metrics_version"]),
+            dataset_partition_refs=tuple(str(x) for x in raw_partitions),
+            dataset_event_count=int(payload["dataset_event_count"]),
+            simulation_evidence_ref=str(payload["simulation_evidence_ref"]),
+            reconstruction_revision=str(payload["reconstruction_revision"]),
+            created_at_unix_seconds=int(payload["created_at_unix_seconds"]),
+        )
+    except KeyError as exc:
+        raise InvalidManifestFieldError(
+            f"t109_experiment_manifest_from_dict: missing key {exc.args[0]!r}"
+        ) from exc
+    # Verify the recorded report checksum matches the canonical serialisation.
+    recomputed = compute_report_checksum(manifest.to_dict())
+    if recomputed != manifest.report_checksum:
+        raise InvalidManifestFieldError(
+            f"t109_experiment_manifest_from_dict: report_checksum "
+            f"mismatch (recorded={manifest.report_checksum} "
+            f"recomputed={recomputed})"
+        )
+    return manifest
 
 
 def serialised_event_from_dict(payload: Mapping[str, Any]) -> SerialisedEvent:
@@ -1111,8 +1651,10 @@ def build_strategy_binding(
 
 __all__ = [
     "MANIFEST_VERSION",
+    "MANIFEST_VERSION_T109",
     "RegistryBindingError",
     "StrategyBinding",
+    "T109ExperimentManifest",
     "UNKNOWN_CODE_REVISION",
     "UNKNOWN_DEPENDENCY_REVISION",
     "VALID_CLOCK_ASSUMPTIONS",
@@ -1131,8 +1673,10 @@ __all__ = [
     "bind_strategy_to_registry",
     "build_experiment_manifest",
     "build_strategy_binding",
+    "build_t109_experiment_manifest",
     "compute_report_checksum",
     "experiment_manifest_from_dict",
     "manifest_checksum",
     "serialised_event_from_dict",
+    "t109_experiment_manifest_from_dict",
 ]
