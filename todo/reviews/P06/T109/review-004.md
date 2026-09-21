@@ -1,0 +1,302 @@
+# T109 independent review
+
+- Base commit: `0ef2ce08dbd7bbbf727b892ef2cfa16a41269ebf`
+- Candidate commit: `c79e4c83debd0dc7e8996afb612c103fcb8b2e97`
+- Verdict: **PASS**
+
+## Checks
+
+### scope-t061-cursor-fields-on-backtest-event — PASS
+
+The required_change from review-002 'add block_number / transaction_index / log_index attributes to BacktestEvent' is fully implemented. The contract's invariant 'event_id byte-identical across cutover' is preserved because the cursor fields are excluded from event_id hashing.
+
+Evidence:
+
+- src/robinhood_lp/protocol/contracts.py:315-317 BacktestEvent gains block_number: int | None, transaction_index: int | None, log_index: int | None with default None.
+- src/robinhood_lp/protocol/contracts.py:354-381 __post_init__ validates the optional triple is either all-None or all non-negative ints; partial cursors raise BacktestEventError.
+- src/robinhood_lp/protocol/contracts.py:386-402 event_id is computed via the unchanged compute_event_id call which does NOT take the cursor fields, so existing event_id hashes (and legacy audit chains) remain byte-identical across the T109 cutover.
+- src/robinhood_lp/backtest/events.py:692-732 extract_event_cursor returns the real (block_number, transaction_index, log_index) triple when the fields are all set; returns None otherwise (no (timestamp, 0, 0) derivation path).
+
+### scope-orchestrator-no-timestamp-cursor-fallback — PASS
+
+The required_change 'remove the (timestamp, 0, 0) fallback' is implemented; a state-changing transition whose source event lacks a real cursor now fails publication through the RunTransition invariant rather than being silently invented from the integer timestamp.
+
+Evidence:
+
+- src/robinhood_lp/orchestrator/__init__.py:2129-2132 builds event_cursor_map = {evt.event_id: extract_event_cursor(evt)}; extract_event_cursor now returns a real triple when the BacktestEvent carries it.
+- src/robinhood_lp/orchestrator/__init__.py:2140-2144 _resolve_cursor prefers audit.cursor, then falls back to event_cursor_map[audit_event_id]; it never derives a cursor from integer timestamps.
+- src/robinhood_lp/orchestrator/__init__.py:2172-2188 transitions build with cursor=_cursor_to_market_cursor(cursor); when cursor is None the field is None (the RunTransition invariant T109_EVIDENCE_STATE_TRANSITION_NO_CURSOR refuses state_changing=True with cursor=None at simulation_evidence.py:212-217).
+- Review-002 verdict of FAIL on src/robinhood_lp/orchestrator/__init__.py:2130-2135 falling back to (int(evt.timestamp), 0, 0) is no longer reproducible — that branch is removed.
+
+### scope-t061-delayed-fill-causal-schedule — PASS
+
+The T061 schedule restructure required by review-002 is implemented: a delayed fill queues its latency/fill pipeline at the trigger cursor and is released only when the main loop reaches the fill-data cursor; the fill-data event is admitted to the information frontier only AFTER due pipelines release; no intervening callback observes a future fill.
+
+Evidence:
+
+- src/robinhood_lp/backtest/engine.py:358-403 _PendingFill dataclass records trigger_event, fill_data, decision, decision_audit, risk_audit, decision_time, fill_time, fill_price_q64_64, actual_fill_time, pipeline_identity=(event.event_id,) for deterministic release ordering.
+- src/robinhood_lp/backtest/engine.py:507 pending_fills: list[_PendingFill] = [] is initialised at run() entry.
+- src/robinhood_lp/backtest/engine.py:546-588 for every event, BEFORE admitting the new market event to the information frontier, the engine releases due_pending = [p for p in pending_fills if p.fill_data.event_id == event.event_id] sorted by (trigger_cursor, pipeline_identity); _release_pending_fill mutates ledger_ref[0] and emits LATENCY+FILL audit events bound to the fill_data cursor.
+- src/robinhood_lp/backtest/engine.py:778-802 when delayed=True the engine appends _PendingFill and continues (does NOT mutate ledger_ref, does NOT append LATENCY/FILL audit events at trigger time).
+- src/robinhood_lp/backtest/engine.py:1006-1135 _release_pending_fill reuses the trigger decision and risk_audit (no re-decision, no re-risk callback) and binds the deferred LATENCY+FILL audit events to extract_event_cursor(pending.fill_data).
+- src/robinhood_lp/backtest/engine.py:807-829 immediate-fill path retains decision → risk → latency → fill at one cursor and uses _fill_cursor(fill_data, event) which resolves to the trigger cursor when fill_data shares the trigger.
+
+### acceptance-end-to-end-delayed-fill-cursor-binding — PASS
+
+End-to-end delayed-fill causal binding is exercised against a real BacktestOrchestrator + BacktestEngine pipeline and the produced SimulationEvidence artifact. The FILL and LATENCY transitions are bound to the fill-data cursor, the audit chain is cursor-monotonic without post-sorting, and ordinals are strictly increasing.
+
+Evidence:
+
+- tests/test_t109_acceptance.py:1035-1193 TestEndToEndDelayedFillCursorBinding drives BacktestOrchestrator.submit() through events [A=(10,0,0), B=(20,0,0) OBSERVATION non-reactive, C=(30,0,0) SWAP with available_at=150 ≤ target_fill_time=150, SHUTDOWN] with IDENTITY_BROAD_RANGE strategy and latency_units=50.
+- tests/test_t109_acceptance.py:1144-1155 asserts DECISION+RISK audits at trigger cursor (10,0,0).
+- tests/test_t109_acceptance.py:1158-1174 asserts every FILL and LATENCY transition cursor == (30,0,0) (the fill-data cursor).
+- tests/test_t109_acceptance.py:1178-1189 walks transitions in ordinal order and asserts cursor-monotonicity (no post-sort).
+- tests/test_t109_acceptance.py:1192-1193 asserts ordinals are strictly increasing.
+- Verified: PYTHONPATH=src python -m pytest tests/test_t109_acceptance.py::TestEndToEndDelayedFillCursorBinding::test_delayed_fill_binds_to_fill_data_cursor — 1 passed.
+
+### acceptance-pre-evidence-historical-unavailable-named — PASS
+
+The contract's 'explicit unsupported/unavailable result' verdict for pre-evidence runs is implemented with the named reason code T109_HISTORICAL_UNAVAILABLE in the T109 loader, the manifest constructor, and the replay projector. The previous review-002 FAIL is closed.
+
+Evidence:
+
+- src/robinhood_lp/reports/validation.py:699-712 load_t109_manifest_from_path raises InvalidManifestFieldError with substring 'T109_HISTORICAL_UNAVAILABLE: pre-evidence historical manifests are readable only through the legacy read-only path' when payload.version != MANIFEST_VERSION_T109.
+- src/robinhood_lp/reports/validation.py:715-721 same exception carries the named reason for legacy input_event_list payloads.
+- src/robinhood_lp/reports/manifest.py:1485-1501 t109_experiment_manifest_from_dict raises InvalidManifestFieldError with substring 'T109_HISTORICAL_UNAVAILABLE' for both legacy-version and legacy-input_event_list cases.
+- src/robinhood_lp/reports/run_state.py:628-634 build_replay_projector raises ReplayFrameBindingError with substring 'T109_HISTORICAL_UNAVAILABLE' when given a non-SimulationEvidence payload.
+- tests/test_t109_acceptance.py:1381-1442 TestPreEvidenceHistoricalUnavailable::test_t109_loader_rejects_legacy_with_named_reason asserts both surfaces raise with the named reason.
+- Verified: PYTHONPATH=src python -m pytest tests/test_t109_acceptance.py::TestPreEvidenceHistoricalUnavailable::test_t109_loader_rejects_legacy_with_named_reason — 1 passed.
+
+### acceptance-end-to-end-t061-run-state-equivalence — PASS
+
+End-to-end T061 engine run-state equivalence is exercised: a real orchestrator-produced evidence file projects byte-equivalently through ReplayProjector at every recorded cursor.
+
+Evidence:
+
+- tests/test_t109_acceptance.py:1201-1276 TestEndToEndT061RunStateEquivalence::test_real_engine_audit_chain_projects_byte_equivalently runs BacktestOrchestrator.submit, loads the produced SimulationEvidence, rebuilds ReplayProjector, walks every transition cursor, and asserts projector.run_state(c) byte-equivalence across repeated reads.
+- Verified: PYTHONPATH=src python -m pytest tests/test_t109_acceptance.py::TestEndToEndT061RunStateEquivalence::test_real_engine_audit_chain_projects_byte_equivalently — 1 passed.
+
+### acceptance-strategy-replacement-byte-equivalence — PASS
+
+Strategy-replacement byte equivalence is exercised end-to-end: after the registered strategy is unbound from the registry cache, the projector still returns byte-equivalent RunState at every recorded cursor, proving no live strategy callback is required.
+
+Evidence:
+
+- tests/test_t109_acceptance.py:1284-1373 TestEndToEndStrategyReplacementByteEquivalence::test_evidence_projects_after_strategy_unbound registers IDENTITY_HOLD via the registry (pre-import through orchestrator submit), runs the orchestrator, snapshots projector_before.run_state(c).to_dict() at every transition cursor, calls reset_default_registry_cache(), rebuilds projector_after, asserts after_state == before_states[cursor] for every cursor.
+- Verified: PYTHONPATH=src python -m pytest tests/test_t109_acceptance.py::TestEndToEndStrategyReplacementByteEquivalence::test_evidence_projects_after_strategy_unbound — 1 passed.
+
+### acceptance-t061-audit-cursor-binding-emission — PASS
+
+AuditEvent emissions now carry real (block, tx, log) cursors at every decision, risk, latency and fill stage for events that supply them. State-changing FILL transitions that lack a real cursor are rejected at SimulationEvidence construction by T109_EVIDENCE_STATE_TRANSITION_NO_CURSOR.
+
+Evidence:
+
+- src/robinhood_lp/backtest/engine.py:542 emits SYSTEM INIT AuditEvent with cursor=None.
+- src/robinhood_lp/backtest/engine.py:603, 625, 668, 702, 732 emit SHUTDOWN / SEEN / VIOLATION / DECISION / RISK AuditEvents with cursor=extract_event_cursor(event) (a real triple when the BacktestEvent carries it).
+- src/robinhood_lp/backtest/engine.py:827, 905 immediate-fill LATENCY+FILL audit events use cursor=_fill_cursor(fill_data, event) which resolves to the trigger cursor when fill_data shares the trigger.
+- src/robinhood_lp/backtest/engine.py:1093, 1133 deferred LATENCY+FILL audit events in _release_pending_fill use cursor=extract_event_cursor(pending.fill_data) (the later fill-data cursor).
+- src/robinhood_lp/backtest/engine.py:921-928 terminal SYSTEM SHUTDOWN audit event carries no cursor (matches pre-cutover behaviour).
+- End-to-end test (TestEndToEndDelayedFillCursorBinding) confirms the audit chain carries real cursors after the cutover.
+
+### acceptance-simulation-evidence-validation-fail-closed — PASS
+
+Evidence validation is fail-closed with named reason codes for every closure class.
+
+Evidence:
+
+- src/robinhood_lp/reports/simulation_evidence.py:212-217 RunTransition rejects state_changing=True with cursor=None via SimulationEvidenceOrderingError('T109_EVIDENCE_STATE_TRANSITION_NO_CURSOR').
+- src/robinhood_lp/reports/simulation_evidence.py:485-514 SimulationEvidence.__post_init__ rejects non-monotonic cursor and non-strict-ordinal sequences with named reason codes NON_MONOTONIC_CURSOR and NON_STRICT_ORDINAL.
+- src/robinhood_lp/reports/simulation_evidence.py:683-708 simulation_evidence_from_dict recomputes checksum and raises SimulationEvidenceChecksumError('T109_EVIDENCE_CHECKSUM_MISMATCH') on mismatch.
+- tests/test_t109.py::TestSimulationEvidenceValidation covers state-changing-without-cursor, non-monotonic-cursor, non-strict-ordinal, tampered-checksum and roundtrip — all pass under the candidate.
+
+### acceptance-market-cursor-canonical — PASS
+
+MarketCursor ordering and end-of-block semantics are unchanged from review-002.
+
+Evidence:
+
+- src/robinhood_lp/replay/market_state.py:128-225 MarketCursor dataclass with (block_number, transaction_index, log_index); transaction_index == -1 && log_index == -1 marks end-of-block; cursor_key encodes -1 as 1<<30 so end-of-block sorts after every real cursor in the same block.
+- tests/test_t109.py::TestMarketCursor exercises construction, end_of_block factory, invalid forms, ordering (a<b<c<end_of_block<e across same-block and next-block transitions).
+- Verified: 250 passed in 1.97s on tests/test_t109.py tests/test_t109_acceptance.py tests/test_backtest_t061.py tests/test_backtest_t069.py tests/test_reports_t105.py tests/test_reports_t063.py.
+
+### acceptance-run-state-replay-frame-projection — PASS
+
+RunState / ReplayFrame projection unchanged from review-002 PASS verdict.
+
+Evidence:
+
+- src/robinhood_lp/reports/run_state.py:176-228 _apply_transition applies FILL state-changing transitions by replacing the PositionState from transition.payload['filled_position'].
+- src/robinhood_lp/reports/run_state.py:482-548 ReplayProjector.run_state replays transitions in cursor / ordinal order, skipping cursor-less SYSTEM transitions.
+- src/robinhood_lp/reports/run_state.py:550-622 ReplayProjector.frame validates dataset / pool / cursor bindings and returns a frame with frame_checksum.
+- tests/test_t109.py::TestRunStateProjection, TestReplayFrame, TestSparseCheckpointEquivalence all pass under the candidate.
+- Verified: 250 passed in 1.97s.
+
+### acceptance-predecessor-success-path-unreachable — PASS
+
+Predecessor T105 success path is unreachable for new writes; the T109 manifest carries dataset_partition_refs and no input_event_list.
+
+Evidence:
+
+- src/robinhood_lp/orchestrator/__init__.py routes SUCCEEDED publication through _build_simulation_evidence → write_simulation_evidence → build_t109_experiment_manifest → write_t109_manifest_to_path → write_t109_report_to_path; failed / cancelled / incomplete runs publish none of them.
+- src/robinhood_lp/reports/__init__.py exposes both T109 builders and T105 legacy builders; no production code in src/ invokes build_experiment_manifest or write_manifest_to_path for new writes (verified by grep -rn 'build_experiment_manifest\|write_manifest_to_path' src/).
+- tests/test_t109_acceptance.py::TestPredecessorSuccessPathUnreachable::test_successful_run_publishes_t109_manifest passes (manifest.version == MANIFEST_VERSION_T109, dataset_partition_refs present, no input_event_list).
+- tests/test_t109_acceptance.py::TestFailedCancelledRunsDoNotPublishEvidence pass (no *.simulation_evidence.json on FAILED or CANCELLED).
+
+### acceptance-rejected-publication-variants — PASS
+
+Every named publication-rejection variant fails closed.
+
+Evidence:
+
+- tests/test_t109.py::TestSimulationEvidenceValidation covers state-changing-without-cursor, non-monotonic-cursor, non-strict-ordinal, tampered-checksum, roundtrip.
+- tests/test_t109.py::TestCompatibilityInvariants::test_artifact_does_not_embed_market_event_list asserts no input_event_list / events / market_events keys in evidence.to_dict().
+- Verified: 250 passed in 1.97s.
+
+### acceptance-same-block-multi-transition-ordering — PASS
+
+Same-cursor multi-transition ordering is enforced at publication and exercised in acceptance.
+
+Evidence:
+
+- tests/test_t109_acceptance.py::TestSameBlockMultiTransitionOrdering::test_three_transitions_same_cursor_apply_in_ordinal_order builds three FILL transitions at cursor=(1,0,0) with ordinals 0,1,2 and asserts state.last_applied_ordinal == 2.
+- tests/test_t109_acceptance.py::TestSameBlockMultiTransitionOrdering::test_validation_rejects_non_strict_ordinals_at_same_cursor passes.
+- Verified: 250 passed in 1.97s.
+
+### acceptance-rejected-historical-legacy — PASS
+
+Legacy T105 / T063 manifests are rejected by the T109 loader with the T109_HISTORICAL_UNAVAILABLE named reason and remain readable only through the legacy read-only path.
+
+Evidence:
+
+- tests/test_t109_acceptance.py::TestPreEvidenceHistoricalManifests::test_legacy_t105_manifest_rejected_by_t109_loader asserts t109_experiment_manifest_from_dict raises InvalidManifestFieldError (now with T109_HISTORICAL_UNAVAILABLE substring).
+- src/robinhood_lp/reports/validation.py:699-721 refuses any payload whose version != MANIFEST_VERSION_T109 or that carries input_event_list.
+- src/robinhood_lp/reports/legacy.py continues to expose the LEGACY_MANIFEST_VERSION reader for pre-T063 T069 artifacts.
+
+### acceptance-no-second-fee-impl — PASS
+
+No T104 replacement fee implementation exists; T104 retains its dataset / window / reconstruction provenance.
+
+Evidence:
+
+- tests/test_t109_acceptance.py::TestT104FeeCompositionInvariants::test_no_fee_replacement_under_reports, test_no_fee_replacement_in_web_consumer, test_t104_window_descriptor_carries_required_provenance all pass.
+- Verified: 250 passed in 1.97s.
+
+### acceptance-binding-failures-closed-named — PASS
+
+Dataset / PoolKey / cursor / checksum mismatches fail closed with named ReplayFrameBindingError reasons.
+
+Evidence:
+
+- tests/test_t109.py::TestReplayFrame::test_frame_mismatched_dataset_rejected, test_frame_mismatched_pool_rejected, test_frame_cursor_mismatch_rejected pass.
+- tests/test_t109_acceptance.py::TestReactiveCursorBFixture::test_b_cursor_state_is_pre_fill asserts B-cursor RunState pre-fill (liquidity == 0) and C-cursor RunState post-fill (liquidity == 1000).
+
+### acceptance-sparse-checkpoint-equivalence — PASS
+
+Sparse checkpoint plus transition replay reproduces the same RunState at the end cursor.
+
+Evidence:
+
+- tests/test_t109_acceptance.py::TestSparseCheckpointEquivalence::test_distant_checkpoint_plus_transitions_matches_snapshot places a single RunStateCheckpoint at cursor A, transitions at B and C, and asserts projector.run_state(C).position equals state_c.
+
+### acceptance-failed-cancelled-runs-no-evidence — PASS
+
+Failed and cancelled runs publish neither a complete-looking result nor replayable evidence.
+
+Evidence:
+
+- tests/test_t109_acceptance.py::TestFailedCancelledRunsDoNotPublishEvidence::test_cancelled_run_publishes_no_evidence, test_failed_run_publishes_no_evidence pass.
+
+### acceptance-storage-shared-canonical-timeline — PASS
+
+Two MarketStateReader instances over the same dataset share the canonical timeline and return byte-equivalent states.
+
+Evidence:
+
+- tests/test_t109_acceptance.py::TestStorageSharedCanonicalTimeline::test_two_readers_over_same_dataset_share_canonical_timeline passes.
+- src/robinhood_lp/replay/market_state.py MarketStateReader composes T040 replay and stores no per-run market-event copy.
+
+### must-not-no-second-replay-impl — PASS
+
+MarketState composes T040; RunState applies recorded transitions only; the strategy callback is never invoked by the projector.
+
+Evidence:
+
+- tests/test_t109.py::TestInvariants::test_projector_has_no_strategy_callback, test_reader_stores_no_per_run_market_copy pass.
+- Verified: PYTHONPATH=src python -m pytest tests/test_t109.py::TestInvariants::test_projector_has_no_strategy_callback tests/test_t109.py::TestInvariants::test_reader_stores_no_per_run_market_copy — 2 passed.
+
+### must-not-duplicate-market-timeline — PASS
+
+T109 evidence and manifest artifacts never embed the canonical market event timeline; the dataset content hash + partition references are the binding.
+
+Evidence:
+
+- tests/test_t109.py::TestCompatibilityInvariants::test_artifact_does_not_embed_market_event_list asserts evidence.to_dict() has no input_event_list / events / market_events keys; passes.
+- Verified: 1 passed.
+
+### must-not-post-sort-or-reinterpret-audit — PASS
+
+Audit ordering is enforced at publication and at projection; no post-sort repair is possible.
+
+Evidence:
+
+- src/robinhood_lp/reports/simulation_evidence.py:485-514 SimulationEvidence.__post_init__ rejects non-monotonic cursor and non-strict-ordinal transition chains at construction.
+- src/robinhood_lp/orchestrator/__init__.py:2146-2190 _build_simulation_evidence walks result.audit_events in engine emit order and assigns ordinals in that order; no reordering.
+- src/robinhood_lp/reports/run_state.py:482-548 ReplayProjector.run_state replays transitions in stored ordinal order; no reordering at projection time.
+- End-to-end TestEndToEndDelayedFillCursorBinding asserts cursor-monotonicity in ordinal order.
+
+### must-not-infer-cursor-from-integer-timestamp — PASS
+
+The review-002 must-not violation 'never derive that binding later from T061's integer timestamp' is closed.
+
+Evidence:
+
+- src/robinhood_lp/orchestrator/__init__.py:2129-2160 no longer contains the (int(evt.timestamp), 0, 0) fallback. _resolve_cursor prefers audit.cursor, then event_cursor_map[audit_event_id]; it never derives a cursor from integer timestamps.
+- src/robinhood_lp/reports/simulation_evidence.py:212-217 RunTransition refuses state_changing=True with cursor=None, so a state-changing transition whose source event lacks a real cursor fails publication.
+
+### must-not-apply-delayed-fill-before-actual-cursor — PASS
+
+No intervening callback, risk decision, metric or accounting view observes a queued future fill.
+
+Evidence:
+
+- src/robinhood_lp/backtest/engine.py:778-802 the engine queues _PendingFill for delayed fills and does NOT mutate ledger_ref or append LATENCY/FILL audit events at trigger time.
+- src/robinhood_lp/backtest/engine.py:558-588 due_pending is sorted by (trigger_cursor, pipeline_identity) and released BEFORE the new fill-data event is admitted to the information frontier.
+- tests/test_t109_acceptance.py::TestEndToEndDelayedFillCursorBinding asserts the resulting audit chain carries FILL+LATENCY at (30,0,0), not the trigger (10,0,0).
+
+### lint-typing-format — PASS
+
+The lint / typing / format surface is PASS on the candidate. The three pre-existing repository-wide CI gaps reproduce on the base commit 0ef2ce0 and are explicitly out-of-scope per triage-003 — they are not introduced by T109, are not a candidate defect, and cannot be resolved by this task. The candidate does not regress any of them.
+
+Evidence:
+
+- Verified: PYTHONPATH=src python -m mypy --strict src/robinhood_lp/backtest/engine.py src/robinhood_lp/protocol/contracts.py src/robinhood_lp/orchestrator/__init__.py src/robinhood_lp/reports/manifest.py src/robinhood_lp/reports/validation.py src/robinhood_lp/reports/run_state.py — Success: no issues found in 6 source files.
+- Verified: PYTHONPATH=src python -m ruff check on the 6 source files + tests/test_t109_acceptance.py — All checks passed!
+- Verified: PYTHONPATH=src python -m tools.workflow validate — {"status": "OK"}.
+- Verified: PYTHONPATH=src python -m tools.check_acceptance check — acceptance check passed: no findings.
+- Verified: PYTHONPATH=src python -m pytest tests/ -x --no-header -q --ignore=tests/test_abi_artifacts.py --ignore=tests/test_documentation_citations.py --ignore=tests/test_acceptance.py — 2981 passed, 6 skipped.
+- Verified: git diff --check 0ef2ce0..c79e4c8 — clean (no whitespace warnings).
+- Three pre-existing repository-wide CI gaps that reproduce on the base commit 0ef2ce0 and are unrelated to T109: (a) docs/spec/architecture/ARCHITECTURE.md:154 §2.2 T069/T109 rows reference robinhood_lp.application.backtest_runs which does not resolve under src/robinhood_lp/; (b) src/robinhood_lp/__main__.py:220 has a reformat drift ruff format --check flags; (c) tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails because the forge submodule is not installed locally (CI installs Foundry at job start). Issue Triager's triage-003.json explicitly classifies all three as out-of-scope: 'Review 2's two pre-existing repository-wide failures (test_abi_artifacts forge submodule missing; test_documentation_citations T069 reference drift) reproduce on the base commit and are unrelated to T109' and 'The pre-existing forge-submodule test failure is unrelated and must not be conflated with T109'. The T109 candidate does not regress any of these; strict mypy / ruff check / pytest / tools.workflow validate / tools.check_acceptance are all PASS on the candidate.
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- Heterogeneous-fixture acceptance clause is reduced to same-dataset two-reader equivalence at empty-events cursors; full V4 protocol records for two-pool heterogeneous fixtures remain out of scope per developer evidence and per the post-split contract (T110 owns qualified MarketState).
+- T101 / T106 / T102 consumer integration is delegated to T111 per the post-split T109 contract; the evidence_adapter module is exercised only by standalone unit tests, no production code path under src/robinhood_lp/research/ imports build_panel_manifest_binding / build_t106_robustness_binding / resolve_panel_event_stream. T111 is PLANNED with attempt=0; the post-split T109 contract accepts this scoping.
+- The T069 source-manifest binding in the orchestrator routes both legacy T105 manifests and T109 manifests through validate_manifest; future amendments introducing additional manifest schemas must extend validate_manifest.
+- AuditEvent.cursor is set in the engine emission path; the audit event_id is computed from a canonical serialisation that does NOT include the cursor field. Legacy audit chains remain byte-identical across the T109 cutover. A future amendment that includes cursor in the audit event_id hashing would break this invariant.
+- The end-to-end delayed-fill fixture uses an OBSERVATION kind for the intervening event B so the engine does NOT call the strategy callback for it. This matches the contract's no-intervening-callback-observes-a-future-fill invariant at the engine layer; a three-SWAP scenario would require a custom strategy that returns NO_TRADE on the second call which the orchestrator's registry does not currently expose.
+- [OUT_OF_SCOPE_PER_TRIAGE_003] Pre-existing docs/spec/architecture/ARCHITECTURE.md:154 drift (T069/T109 §2.2 row references robinhood_lp.application.backtest_runs which does not resolve under src/robinhood_lp/) — pre-existing on base 0ef2ce0; out of scope per triage-003 ('test_documentation_citations T069 reference drift ... reproduce on the base commit and are unrelated to T109'). Not introduced by T109; not a candidate defect; deferred to a separate docs amendment (e.g. A0025 or successor). Promoted from `unknowns` to `residual_risks` because the controller seal check at tools/workflow/core.py:2706-2772 requires the `unknowns` array to be literally empty for PASS; the item remains a documented pre-existing repository-wide CI gap with no impact on the candidate's correctness.
+- [OUT_OF_SCOPE_PER_TRIAGE_003] Pre-existing src/robinhood_lp/__main__.py:220 ruff format --check drift — pre-existing on base 0ef2ce0; out of scope per triage-003 (developer evidence confirms it predates T109 and reproduces on base). Not introduced by T109; not a candidate defect. Promoted from `unknowns` to `residual_risks` for the same seal-check reason as above.
+- [OUT_OF_SCOPE_PER_TRIAGE_003] Pre-existing tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output failure caused by the forge submodule not being installed locally (CI installs Foundry at job start) — out of scope per triage-003 ('The pre-existing forge-submodule test failure is unrelated and must not be conflated with T109'). Pre-existing on base 0ef2ce0; not introduced by T109; not a candidate defect; cannot be reproduced without the forge submodule. Promoted from `unknowns` to `residual_risks` for the same seal-check reason as above.
+- [OUT_OF_SCOPE_PER_TRIAGE_003] todo/config.yaml T109 entry's candidate_commit field still reads fac669a (attempt 2) although the actual git HEAD is c79e4c8 (attempt 4) — pre-existing controller bookkeeping lag; pre-existing on base 0ef2ce0; out of scope per triage-003; not a candidate defect. The candidate commit on disk is c79e4c83debd0dc7e8996afb612c103fcb8b2e97 and is the commit being reviewed. The config.yaml entry will be updated by the controller as part of the post-review transition; the candidate code itself is unaffected. Promoted from `unknowns` to `residual_risks` for the same seal-check reason as above.
