@@ -193,7 +193,12 @@ MODULE_OVERRIDES: dict[str, str] = {
     # ``research`` is a multi-layer package (T100–T104). Each module
     # sits in a distinct tier per §2.2.
     "robinhood_lp.research.dataset": "storage",
+    "robinhood_lp.research.boundary": "backtest",
+    "robinhood_lp.research.features": "backtest",
+    "robinhood_lp.research.labels": "backtest",
+    "robinhood_lp.research.splits": "backtest",
     "robinhood_lp.research.panel": "backtest",
+    "robinhood_lp.research.harness": "backtest",
     "robinhood_lp.research.models": "strategy",
     # T103 names ``robinhood_lp.web`` research pages, which the §2.2
     # row classifies as ``presentation / controls`` — the canonical

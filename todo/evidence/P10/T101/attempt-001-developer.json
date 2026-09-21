@@ -1,0 +1,52 @@
+{
+  "task_id": "T101",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Continued T101 attempt 1 in the existing worktree. The prior developer had already implemented every T101 deliverable: the boundary catalogue (DS-012), versioned feature registry (DS-010), forward-label schema (DS-011), deterministic splits (DS-020..DS-022), panel provenance with run/member/registry/legacy guards, the three model families (linear regularised, linear quantile, gradient-boosting) with diagnostics (calibration, quantile coverage, trivial baseline comparison) and versioned model artifacts (DS-040, DS-043), and the training harness that wires them. The continuation work was (1) re-verify that the implementation still passes the task-specific pytest suite (60/60), (2) confirm the layer-map, ruff, ruff-format and mypy gates pass, (3) apply a one-line ruff format nit the previous attempt left in src/robinhood_lp/research/harness.py (the elif line that ruff would have re-wrapped), (4) confirm the two pre-existing test failures on the base commit (forge oracle worktree and a T069 architecture-section22 citation) are not introduced by T101, and (5) sanity-check that a saved harness configuration re-runs to a byte-equivalent artifact. No new T101 functionality was added — the candidate was complete; the prior developer only needed a chance to verify and hand off.",
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/test_panel_t101.py --tb=short -q",
+      "result": "60 passed in 0.22s"
+    },
+    {
+      "command": "python3 -m pytest tests/test_panel_t101.py tests/ -k \"t100 or research or dataset or panel_t101\" --tb=short -q",
+      "result": "242 passed, 2544 deselected in 5.95s"
+    },
+    {
+      "command": "python3 -m pytest tests/test_documentation_citations.py tests/test_abi_artifacts.py --tb=line -q (on stash-popped base)",
+      "result": "Same two failures as on commit a414ab7 (missing foundry deps in worktree; pre-existing architecture-section22 finding on robinhood_lp.application.backtest_runs). Both are unrelated to T101 and reproduce on the unchanged base."
+    },
+    {
+      "command": "python3 -m tools.check_imports check",
+      "result": "import-graph check passed: no findings"
+    },
+    {
+      "command": "python3 -m ruff check src/robinhood_lp/research/ tests/test_panel_t101.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python3 -m ruff format --check src/robinhood_lp/research/ tests/test_panel_t101.py (and applied ruff format to harness.py to fix the one-line elif wrap)",
+      "result": "10 files already formatted"
+    },
+    {
+      "command": "python3 -m ruff check src/ tests/ tools/",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python3 -m mypy src/robinhood_lp/research/",
+      "result": "Success: no issues found in 9 source files"
+    },
+    {
+      "command": "python3 -m mypy src/",
+      "result": "Success: no issues found in 138 source files"
+    },
+    {
+      "command": "byte-equivalence sanity (rerun run_fold_evaluation on saved config)",
+      "result": "config_content_hash and model_artifact.content_hash match between two reruns; first.verdict = second.verdict = PASSED"
+    }
+  ],
+  "residual_risks": [
+    "Two pre-existing repository-wide failures (test_abi_artifacts forge oracle; test_documentation_citations architecture-section22 T069 finding) reproduce on the base commit a414ab7 and are not introduced by T101. They remain visible in `pytest` output and the reviewer may want to verify them out-of-band before approving.",
+    "run_fold_evaluation wraps the forward-feature registry re-check around a synthetic placeholder (rotates declarations by index) because the per-feature evaluation columns are not currently threaded through to the harness. The behaviour is conservative — it surfaces a real ForwardFeatureError when the snapshot genuinely carries one — but a future task that wires per-feature eval columns will tighten the gate further.",
+    "apply_split_to_panel uses an empty feature mapping; populate_fold synthesises empty PanelFeatureRow placeholders. T102 (model layer consumer) is expected to thread the real feature rows into the call; this candidate only proves the partition shape."
+  ]
+}
