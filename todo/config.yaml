@@ -12,7 +12,7 @@
   },
   "active_phase": "P10",
   "active_task": "T101",
-  "workflow_state": "AWAITING_REVIEW",
+  "workflow_state": "APPROVED",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -1088,7 +1088,7 @@
     },
     "T101": {
       "phase": "P10",
-      "status": "AWAITING_REVIEW",
+      "status": "APPROVED",
       "depends_on": [
         "T050",
         "T069",
@@ -1099,9 +1099,9 @@
       "task_file": "todo/phases/P10-research-and-models/T101.md",
       "attempt": 2,
       "base_commit": "a414ab7a48a81ffe32a954c1abdb050e2d436161",
-      "candidate_commit": "3c5da67516f8a5ca35113298c4b4f579bd611a54",
-      "approved_commit": null,
-      "latest_review": "todo/reviews/P10/T101/review-001.json"
+      "candidate_commit": "b89e8259f2fcb530e49bca278ac3f076983d8e96",
+      "approved_commit": "b89e8259f2fcb530e49bca278ac3f076983d8e96",
+      "latest_review": "todo/reviews/P10/T101/review-002.json"
     },
     "T102": {
       "phase": "P10",
