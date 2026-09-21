@@ -1,0 +1,4 @@
+{
+  "task_id": "T069",
+  "decision": "Reading B: 'one run identity' refers to shared dataset version, reporting numeraire and valuation qualification across separate RunRequests. One RunRequest carries exactly one pool_key_id and publishes exactly one manifest (consistent with the deliverables' singular 'the pool and block range' phrasing and with T105's contract that multi-pool is one run identity per dataset version/numeraire with one manifest per member pool, which T069 is not required to implement). Update T069 acceptance clause to make the B reading explicit and remove the 'one manifest per member pool under one run identity' phrasing in favor of wording consistent with the deliverables."
+}

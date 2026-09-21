@@ -12,7 +12,7 @@
   },
   "active_phase": "P06",
   "active_task": "T069",
-  "workflow_state": "OWNER_DECISION_REQUIRED",
+  "workflow_state": "PLANNING",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -738,7 +738,7 @@
     },
     "T069": {
       "phase": "P06",
-      "status": "OWNER_DECISION_REQUIRED",
+      "status": "PLANNING",
       "depends_on": [
         "T041",
         "T053",
