@@ -616,7 +616,22 @@ class ReplayProjector:
 def build_replay_projector(
     evidence: SimulationEvidence,
 ) -> ReplayProjector:
-    """Build a :class:`ReplayProjector` for ``evidence``."""
+    """Build a :class:`ReplayProjector` for ``evidence``.
+
+    The function is bound to a :class:`SimulationEvidence` only; a
+    legacy T105 manifest (or any non-evidence payload) fails closed
+    with the contract's named
+    ``T109_HISTORICAL_UNAVAILABLE`` reason so a caller can present
+    the historical artifact as readable but explicitly unavailable
+    for exact replay through the T109 projector surface.
+    """
+    if not isinstance(evidence, SimulationEvidence):
+        raise ReplayFrameBindingError(
+            f"build_replay_projector: evidence must be SimulationEvidence, "
+            f"got {type(evidence).__name__}; T109_HISTORICAL_UNAVAILABLE: "
+            f"pre-evidence historical artifacts are readable only through "
+            f"the legacy read-only path"
+        )
     return ReplayProjector(evidence=evidence)
 
 

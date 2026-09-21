@@ -697,16 +697,27 @@ def load_t109_manifest_from_path(
             f"load_t109_manifest_from_path: {target_path} root must be a JSON object"
         )
     if payload_obj.get("version") != MANIFEST_VERSION_T109:
+        # The contract's explicit "pre-evidence historical unavailable"
+        # verdict: a legacy T105 (or T063 / pre-evidence) manifest
+        # passed to a T109 reader surfaces the named reason code
+        # ``T109_HISTORICAL_UNAVAILABLE`` so the caller can present
+        # the historical artifact as readable but explicitly
+        # unavailable for exact replay.
+        legacy_version = payload_obj.get("version")
         raise InvalidManifestFieldError(
             f"load_t109_manifest_from_path: {target_path} declares version="
-            f"{payload_obj.get('version')!r}, expected {MANIFEST_VERSION_T109!r}"
+            f"{legacy_version!r}, expected {MANIFEST_VERSION_T109!r}; "
+            f"T109_HISTORICAL_UNAVAILABLE: pre-evidence historical manifests "
+            f"are readable only through the legacy read-only path"
         )
     # The T109 schema carries dataset_partition_refs; refuse to load a
     # legacy payload that still embeds the complete input_event_list.
     if "input_event_list" in payload_obj:
         raise InvalidManifestFieldError(
             f"load_t109_manifest_from_path: {target_path} carries a legacy "
-            f"input_event_list; the T109 schema requires dataset_partition_refs"
+            f"input_event_list; the T109 schema requires dataset_partition_refs; "
+            f"T109_HISTORICAL_UNAVAILABLE: pre-evidence historical manifests "
+            f"are readable only through the legacy read-only path"
         )
     manifest = t109_experiment_manifest_from_dict(payload_obj)
     validate_manifest(manifest, dataset_qualification=dataset_qualification)

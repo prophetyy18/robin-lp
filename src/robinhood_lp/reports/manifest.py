@@ -1474,6 +1474,31 @@ def t109_experiment_manifest_from_dict(payload: Mapping[str, Any]) -> T109Experi
             f"t109_experiment_manifest_from_dict: payload must be Mapping, "
             f"got {type(payload).__name__}"
         )
+    # Pre-evidence historical availability verdict: a legacy T105 (or
+    # earlier) payload that omits the T109 ``version`` or
+    # ``dataset_partition_refs`` is readable only through the legacy
+    # read-only path. The T109 loader surfaces the named reason code
+    # ``T109_HISTORICAL_UNAVAILABLE`` so the caller can present the
+    # historical artifact as readable but explicitly unavailable for
+    # exact replay. This is the contract's "explicit unsupported /
+    # unavailable result" verdict for pre-evidence runs.
+    declared_version = payload.get("version")
+    if declared_version != MANIFEST_VERSION_T109:
+        raise InvalidManifestFieldError(
+            f"t109_experiment_manifest_from_dict: payload declares "
+            f"version={declared_version!r}, expected "
+            f"{MANIFEST_VERSION_T109!r}; T109_HISTORICAL_UNAVAILABLE: "
+            f"pre-evidence historical manifests are readable only "
+            f"through the legacy read-only path"
+        )
+    if "input_event_list" in payload:
+        raise InvalidManifestFieldError(
+            "t109_experiment_manifest_from_dict: payload still carries a "
+            "legacy input_event_list; the T109 schema requires "
+            "dataset_partition_refs; T109_HISTORICAL_UNAVAILABLE: "
+            "pre-evidence historical manifests are readable only "
+            "through the legacy read-only path"
+        )
     try:
         raw_partitions = payload["dataset_partition_refs"]
     except KeyError as exc:

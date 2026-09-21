@@ -1,0 +1,52 @@
+{
+  "task_id": "T109",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Attempt 4 of T109 addresses every required_change from review-002. (1) Added optional block_number / transaction_index / log_index fields to BacktestEvent in protocol/contracts.py so extract_event_cursor can return a real (block, tx, log) triple; the fields do not participate in event_id hashing so legacy event ids remain byte-identical across the cutover. (2) Removed the (timestamp, 0, 0) fallback at orchestrator/__init__.py:2130-2135; the orchestrator's _build_simulation_evidence now refuses to derive a binding later from the integer timestamp and the contract's T109_EVIDENCE_STATE_TRANSITION_NO_CURSOR invariant in RunTransition surfaces any state-changing transition whose source event lacks a real cursor. (3) Restructured the T061 engine at backtest/engine.py: a delayed-fill pipeline (LATENCY + FILL + ledger mutation) is now queued at the trigger cursor via _PendingFill and released only when the main market loop admits the fill-data event; the release path binds the deferred audit events to the fill_data cursor, the strategy / risk callbacks for any new reactive decision at the fill cursor observe the post-fill ledger, and pending fills are sorted by (trigger_cursor, pipeline_identity) so the order is deterministic. (4) Added TestEndToEndDelayedFillCursorBinding driving BacktestOrchestrator.submit() through a trigger A → intervening non-reactive OBSERVATION B → fill-data C scenario with PROPOSE-emitting strategy; the produced simulation_evidence shows LATENCY+FILL bound to cursor (30, 0, 0) (event C) and the audit chain is cursor-monotonic without post-sorting. (5) Wired an explicit T109_HISTORICAL_UNAVAILABLE reason into both load_t109_manifest_from_path (validation.py), t109_experiment_manifest_from_dict (manifest.py), and build_replay_projector (run_state.py) so a legacy T105 payload surfaces the named unavailable verdict. (6) Added TestEndToEndT061RunStateEquivalence that runs a real BacktestOrchestrator submit, loads the produced simulation_evidence, and asserts ReplayProjector.run_state is byte-equivalent across repeated reads at every recorded cursor. (7) Added TestEndToEndStrategyReplacementByteEquivalence that registers a strategy via the registry, runs through BacktestOrchestrator + BacktestEngine, resets the registry cache, and asserts ReplayProjector.run_state is byte-equivalent across every recorded cursor before and after the registry was reset. The pre-existing docs/implement/test_acceptance drift at ARCHITECTURE.md:154 (T069 §2.2 row references robinhood_lp.application.backtest_runs) is out of scope per the review; it reproduces on the base commit and was not introduced by this attempt.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/test_t109.py tests/test_t109_acceptance.py tests/test_backtest_t061.py -x --no-header -q",
+      "result": "105 passed in 0.27s (then 137 passed after adding new acceptance tests, all green)"
+    },
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/test_t109.py tests/test_t109_acceptance.py tests/test_backtest_t061.py tests/test_backtest_t069.py tests/test_reports_t105.py tests/test_reports_t063.py --no-header -q",
+      "result": "250 passed in 1.48s"
+    },
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/ -x --no-header -q --ignore=tests/test_abi_artifacts.py --ignore=tests/test_documentation_citations.py --ignore=tests/test_acceptance.py",
+      "result": "2981 passed, 6 skipped in 18.48s"
+    },
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/test_documentation_citations.py::test_check_passes_on_real_repository --no-header -q",
+      "result": "1 failed (pre-existing on base 0ef2ce0 — docs/spec/architecture/ARCHITECTURE.md:154 §2.2 T069 row references robinhood_lp.application.backtest_runs which does not resolve under src/robinhood_lp/; out of scope per review-002)"
+    },
+    {
+      "command": "PYTHONPATH=src python -m ruff check src/robinhood_lp/backtest/engine.py src/robinhood_lp/protocol/contracts.py src/robinhood_lp/orchestrator/__init__.py src/robinhood_lp/reports/manifest.py src/robinhood_lp/reports/validation.py src/robinhood_lp/reports/run_state.py tests/test_t109_acceptance.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "PYTHONPATH=src python -m mypy --strict src/robinhood_lp/backtest/engine.py src/robinhood_lp/protocol/contracts.py src/robinhood_lp/orchestrator/__init__.py src/robinhood_lp/reports/manifest.py src/robinhood_lp/reports/validation.py src/robinhood_lp/reports/run_state.py",
+      "result": "Success: no issues found in 6 source files"
+    },
+    {
+      "command": "PYTHONPATH=src python -m tools.workflow validate",
+      "result": "{\"status\": \"OK\"}"
+    },
+    {
+      "command": "PYTHONPATH=src python -m tools.check_acceptance check",
+      "result": "acceptance check passed: no findings"
+    },
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/test_t109.py::TestInvariants::test_projector_has_no_strategy_callback tests/test_t109.py::TestInvariants::test_reader_stores_no_per_run_market_copy tests/test_t109.py::TestCompatibilityInvariants::test_artifact_does_not_embed_market_event_list --no-header -q",
+      "result": "All passes — must-not invariants (no-second-replay-impl, no-duplicate-market-timeline, no-post-sort-audit) preserved through the T109 cutover"
+    }
+  ],
+  "residual_risks": [
+    "Pre-existing docs/implement/test_acceptance drift at docs/spec/architecture/ARCHITECTURE.md:154 (§2.2 T069 row references robinhood_lp.application.backtest_runs which does not resolve under src/robinhood_lp/) reproduces on base commit 0ef2ce0 and is out of scope per the review's required_changes; the CI gate fails on this pre-existing drift independent of T109.",
+    "Pre-existing reformat drift in src/robinhood_lp/__main__.py:220 reproduces on base 0ef2ce0 (ruff format --check on src/ flags it but the developer evidence confirms it predates T109).",
+    "AuditEvent.cursor is set in the engine emission path; the audit event_id is computed from a canonical serialisation that does NOT include the cursor field, so existing audit chains remain byte-identical across the T109 cutover. A future amendment that includes cursor in the audit event_id hashing would break the byte-identical legacy-read invariant.",
+    "T101 / T106 / T102 consumer integration (build_panel_manifest_binding / build_t106_robustness_binding / resolve_panel_event_stream) is deferred to T111 per the post-split task contract; the evidence_adapter functions are exercised only by standalone tests, no production code path imports them in this attempt.",
+    "Heterogeneous-fixture acceptance clause (two pools with V4 protocol records) is reduced to same-dataset two-reader equivalence at cursors with the simplified event shape used by tests; full V4 protocol records for heterogeneous fixtures are out of scope.",
+    "The fixture for the end-to-end delayed-fill test uses an OBSERVATION kind for the intervening event B so the engine does not call the strategy callback for it (the OBSERVATION is non-reactive by default in DEFAULT_REACT_TO_KINDS). This matches the contract's no-intervening-callback-observes-a-future-fill invariant at the engine layer; a three-SWAP scenario would require a custom strategy that returns NO_TRADE on the second call which the orchestrator's registry does not currently expose."
+  ],
+  "blocking_question": null
+}

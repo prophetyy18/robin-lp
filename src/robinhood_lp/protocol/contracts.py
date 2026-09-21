@@ -287,6 +287,18 @@ class BacktestEvent:
     A :class:`BacktestEvent` with ``kind == KIND_SHUTDOWN`` is a
     cooperative shutdown request: the engine stops processing events at
     or after this event. The engine never silently stops.
+
+    The T109 contract adds three optional canonical-cursor fields —
+    ``block_number`` / ``transaction_index`` / ``log_index`` — that
+    bind the event to its on-chain position. The fields default to
+    ``None`` for legacy input events that carry only an integer
+    timestamp; the engine treats such events as cursor-less and the
+    evidence layer treats their transitions as cursor-less system
+    markers. The fields do **not** participate in ``event_id``
+    hashing so legacy event ids remain byte-identical across the
+    T109 cutover; they are observable via
+    :func:`robinhood_lp.backtest.events.extract_event_cursor` and
+    via ``extract_event_cursor`` is the canonical source.
     """
 
     version: str
@@ -300,6 +312,9 @@ class BacktestEvent:
     available_at: int
     payload: tuple[tuple[str, int | str | bool], ...] = field(default_factory=tuple)
     event_id: str = ""
+    block_number: int | None = None
+    transaction_index: int | None = None
+    log_index: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.version, str) or not self.version:
@@ -336,6 +351,34 @@ class BacktestEvent:
                 f"BacktestEvent.available_at={self.available_at} must be >= "
                 f"observed_at={self.observed_at}"
             )
+        # Optional T109 canonical-cursor fields. Either all three are
+        # supplied or all three are ``None``; partial cursors are
+        # rejected so the cursor is either an exact canonical binding
+        # or absent. The fields do not participate in event_id
+        # hashing so legacy event ids remain stable.
+        cursor_triple = (
+            self.block_number,
+            self.transaction_index,
+            self.log_index,
+        )
+        cursor_values = [v for v in cursor_triple if v is not None]
+        if cursor_values:
+            if not all(v is not None for v in cursor_triple):
+                raise BacktestEventError(
+                    f"BacktestEvent: cursor fields must be supplied as a "
+                    f"triple or all be None, got block_number="
+                    f"{self.block_number!r}, transaction_index="
+                    f"{self.transaction_index!r}, log_index={self.log_index!r}"
+                )
+            for field_name, value in (
+                ("block_number", self.block_number),
+                ("transaction_index", self.transaction_index),
+                ("log_index", self.log_index),
+            ):
+                assert value is not None
+                _require_non_negative_int(
+                    value, field=f"BacktestEvent.{field_name}"
+                )
         # Normalise the payload once at construction time so two equivalent
         # payloads hash to the same id regardless of insertion order.
         normalised = _normalise_payload(self.payload)

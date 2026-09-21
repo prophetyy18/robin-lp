@@ -2120,18 +2120,15 @@ def _build_simulation_evidence(
     """
     # Build an event-id → (block, tx, log) cursor map so we can
     # resolve cursors for transitions that did not carry one
-    # through the AuditEvent. The engine emits cursor through the
-    # optional field; if the source BacktestEvent lacks the
-    # block_number / transaction_index / log_index triple, we
-    # fall back to ``(timestamp, 0, 0)`` so the artifact remains
-    # complete (the contract requires cursor binding for
-    # state-changing transitions; this fallback covers engine
-    # inputs that carry only the integer timestamp).
+    # through the AuditEvent. The contract forbids deriving a
+    # binding later from the integer timestamp; events whose
+    # BacktestEvent lacks the block_number / transaction_index /
+    # log_index triple stay cursor-less and the resulting
+    # transitions are checked against the
+    # "state-changing requires cursor" invariant below.
     event_cursor_map: dict[str, tuple[int, int, int] | None] = {}
     for evt in events:
         cursor = extract_event_cursor(evt)
-        if cursor is None and getattr(evt, "timestamp", None) is not None:
-            cursor = (int(evt.timestamp), 0, 0)
         event_cursor_map[evt.event_id] = cursor
 
     def _resolve_cursor(

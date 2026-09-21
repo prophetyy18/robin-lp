@@ -304,6 +304,9 @@ def _normalise_input_events(
                 observed_at=evt.observed_at,
                 available_at=evt.available_at,
                 payload=evt.payload,
+                block_number=evt.block_number,
+                transaction_index=evt.transaction_index,
+                log_index=evt.log_index,
             )
         )
     rebuilt.sort(key=lambda evt: (evt.timestamp, evt.sequence, evt.source_priority))
@@ -350,6 +353,59 @@ def _fill_cursor(
         if cursor is not None:
             return cursor
     return extract_event_cursor(trigger)
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingFill:
+    """A queued latency / fill pipeline awaiting its fill-data event.
+
+    The T109 deliverable binds a delayed fill to the later canonical
+    cursor that supplied fill data: the engine cannot mutate the
+    ledger or append ``LATENCY`` / ``FILL`` audit events at trigger
+    time when the fill data sits at a future cursor. The
+    :class:`_PendingFill` records everything the deferred release
+    needs to rebuild the same ``LATENCY`` + ``FILL`` audit events the
+    original synchronous schedule would have emitted, at the cursor
+    of the matching fill-data event.
+
+    Fields:
+
+    - ``trigger_event`` — the :class:`BacktestEvent` whose reactive
+      decision produced this pipeline.
+    - ``fill_data`` — the future :class:`BacktestEvent` whose cursor
+      binds the deferred LATENCY / FILL audit events.
+    - ``decision`` — the strategy's :class:`StrategyDecision` for the
+      trigger.
+    - ``decision_audit`` — the already-appended ``DECISION`` audit
+      event (used as the parent for the deferred ``LATENCY`` event).
+    - ``risk_audit`` — the already-appended ``RISK`` audit event.
+    - ``decision_time`` — the trigger event's timestamp.
+    - ``fill_time`` — ``decision_time + model_bundle.latency_units``.
+    - ``fill_price_q64_64`` — the price extracted from
+      ``fill_data.payload``; pre-computed so the release path
+      does not re-read the event.
+    - ``actual_fill_time`` — ``fill_data.timestamp``.
+    - ``delayed`` — ``True`` (this struct is only constructed for
+      delayed fills).
+    - ``pipeline_identity`` — deterministic sort key for releases
+      at the same fill cursor; ``(trigger_event.event_id,)`` makes
+      the order agree with the engine's append-only audit emission.
+    """
+
+    trigger_event: BacktestEvent
+    fill_data: BacktestEvent
+    decision: StrategyDecision
+    decision_audit: AuditEvent
+    risk_audit: AuditEvent
+    decision_time: int
+    fill_time: int
+    fill_price_q64_64: int
+    actual_fill_time: int
+    pipeline_identity: tuple[str, ...]
+
+    def trigger_cursor(self) -> tuple[int, int, int] | None:
+        """Return the trigger event's canonical cursor (or ``None``)."""
+        return extract_event_cursor(self.trigger_event)
 
 
 # ---------------------------------------------------------------------------
@@ -433,8 +489,34 @@ class BacktestEngine:
 
         # 2. Initial state.
         ledger = self.initial_ledger
+        # The release helper receives the working ledger through a
+        # single-element list so it can replace the ledger when a
+        # deferred fill mutates the position. The frozen dataclass
+        # itself never mutates in place; the helper assigns a new
+        # value to ``ledger_ref[0]`` and the outer scope reads it
+        # back at the top of each loop iteration.
+        ledger_ref: list[PositionState] = [ledger]
         audit_chain: list[AuditEvent] = []
         counters: dict[str, int] = {}
+        # Queued delayed fills whose ``LATENCY`` / ``FILL`` audit
+        # events will be emitted at the cursor of the matching
+        # ``fill_data`` event. The engine processes this queue in
+        # deterministic order (trigger-cursor, pipeline-identity)
+        # every time a new fill-data event is admitted to the main
+        # loop. See :class:`_PendingFill`.
+        pending_fills: list[_PendingFill] = []
+
+        def _sync_ledger() -> PositionState:
+            """Pull the current ledger out of ``ledger_ref``.
+
+            The engine mutates the ledger only via ``with_updates``
+            (which returns a new frozen dataclass). The release
+            helper assigns the new ledger to ``ledger_ref[0]``;
+            this helper reads it back into the local ``ledger``
+            binding so the rest of the loop body sees the latest
+            value.
+            """
+            return ledger_ref[0]
 
         def _next_seq(stage: str) -> int:
             n = counters.get(stage, 0)
@@ -463,6 +545,47 @@ class BacktestEngine:
 
         # 3. Walk the sorted events.
         for event in sorted_events:
+            # Sync the ledger so any deferred fill released in a
+            # previous iteration is visible here.
+            ledger = _sync_ledger()
+            # Release every pending fill whose ``fill_data`` event
+            # is the one we are about to admit to the information
+            # frontier. The release order is deterministic:
+            # (trigger-cursor, pipeline-identity). The trigger
+            # cursor is the canonical cursor the engine emitted at
+            # trigger time; the pipeline identity is the trigger
+            # event's event id, which is content-deterministic.
+            due_pending = [
+                p for p in pending_fills if p.fill_data.event_id == event.event_id
+            ]
+            if due_pending:
+                # Sort by (trigger_cursor_key, pipeline_identity).
+                # ``None`` cursors sort to the beginning so they
+                # release first when multiple fills share an
+                # unreachable-cursor marker (the contract treats
+                # them as system-bound, not run-binding).
+                def _release_key(p: _PendingFill) -> tuple[int | str, ...]:
+                    cursor = p.trigger_cursor()
+                    cursor_key: tuple[int, int, int] = (
+                        cursor if cursor is not None else (-1, -1, -1)
+                    )
+                    return (*cursor_key, *p.pipeline_identity)
+
+                due_pending.sort(key=_release_key)
+                for p in due_pending:
+                    _release_pending_fill(
+                        p,
+                        model_bundle=self.model_bundle,
+                        audit_chain=audit_chain,
+                        ledger_ref=ledger_ref,
+                        counters=counters,
+                    )
+                    pending_fills.remove(p)
+                # Sync the local ``ledger`` binding to the post-
+                # release state so any new reactive decision at this
+                # cursor (after the deferred fills are released)
+                # observes the post-fill ledger.
+                ledger = _sync_ledger()
             if event.is_shutdown_marker():
                 shutdown_payload = (
                     ("final_ledger_hash", ledger.ledger_hash()),
@@ -631,6 +754,56 @@ class BacktestEngine:
             actual_fill_time = fill_data.timestamp if fill_data is not None else fill_time
             delayed = fill_data is not None and fill_data.timestamp > fill_time
 
+            # The engine refuses to fill using the trigger price when
+            # no fill data is available at the declared fill time.
+            # This is the contract's "must-not fill using the price
+            # that triggered a decision unless the declared model
+            # proves availability" rule.
+            if fill_data is None:
+                raise FutureDataViolation(
+                    event_id=event.event_id,
+                    available_at=actual_fill_time,
+                    decision_time=decision_time,
+                )
+
+            # Pre-compute the fill price the release path needs so we
+            # do not re-read ``fill_data`` when the deferred pipeline
+            # is finally released at the fill-data cursor.
+            fill_price_q64_64 = 0
+            for key, value in fill_data.payload:
+                if key == "price_q64_64":
+                    fill_price_q64_64 = int(value)
+                    break
+
+            if delayed:
+                # T109: a delayed fill queues its latency / fill
+                # pipeline at the trigger cursor and the engine does
+                # NOT mutate the ledger or append LATENCY / FILL
+                # audit events here. The deferred release happens
+                # before the main loop admits the future fill-data
+                # event to the information frontier. The DECISION
+                # and RISK audit events emitted above remain bound
+                # to the trigger cursor so the audit chain is
+                # cursor-monotonic in the trigger-time order.
+                pending_fills.append(
+                    _PendingFill(
+                        trigger_event=event,
+                        fill_data=fill_data,
+                        decision=decision,
+                        decision_audit=decision_audit,
+                        risk_audit=risk_audit,
+                        decision_time=decision_time,
+                        fill_time=fill_time,
+                        fill_price_q64_64=fill_price_q64_64,
+                        actual_fill_time=actual_fill_time,
+                        pipeline_identity=(event.event_id,),
+                    )
+                )
+                continue
+
+            # Immediate fill path: the fill_data shares the trigger
+            # cursor so ``decision → risk → latency → fill`` happen
+            # at one cursor.
             latency_payload = (
                 ("decision_time", decision_time),
                 ("fill_time", actual_fill_time),
@@ -675,32 +848,6 @@ class BacktestEngine:
                 fill_status = STATUS_FILL_FILLED
                 filled_liquidity = decision.liquidity
 
-            fill_price_q64_64 = 0
-            if fill_data is not None:
-                for key, value in fill_data.payload:
-                    if key == "price_q64_64":
-                        fill_price_q64_64 = int(value)
-                        break
-            else:
-                # No fill data — the engine cannot fill at the trigger
-                # price. The contract explicitly forbids filling at the
-                # trigger price unless the model proves availability;
-                # with no data at ``fill_time``, the engine records a
-                # zero fill price and the failure mode is visible.
-                fill_price_q64_64 = 0
-
-            # The engine refuses to fill using the trigger price when
-            # no fill data is available at the declared fill time.
-            # This is the contract's "must-not fill using the price
-            # that triggered a decision unless the declared model
-            # proves availability" rule.
-            if fill_data is None:
-                raise FutureDataViolation(
-                    event_id=event.event_id,
-                    available_at=actual_fill_time,
-                    decision_time=decision_time,
-                )
-
             gas_units = self.model_bundle.gas.gas_units(action_kind=event.kind)
             fee_pips_value = self.model_bundle.fee.fee_pips(
                 pool_key_id=event.pool_key_id,
@@ -725,6 +872,10 @@ class BacktestEngine:
                     principal_token1=ledger.principal_token1,
                     last_accrual_time=actual_fill_time,
                 )
+                # Push the mutated ledger into the shared reference
+                # so the loop body sees it on the next iteration and
+                # the post-loop final ledger is correct.
+                ledger_ref[0] = ledger
 
             fill_payload = (
                 ("delayed", int(delayed)),
@@ -850,6 +1001,138 @@ def _find_fill_data(
             continue
         return evt
     return None
+
+
+def _release_pending_fill(
+    pending: _PendingFill,
+    *,
+    model_bundle: ModelBundle,
+    audit_chain: list[AuditEvent],
+    ledger_ref: list[PositionState],
+    counters: dict[str, int],
+) -> None:
+    """Release a queued :class:`_PendingFill` at the fill-data cursor.
+
+    The function emits the deferred ``LATENCY`` and ``FILL`` audit
+    events at the pending fill-data event's timestamp and cursor, and
+    mutates ``ledger_ref[0]`` in place when the outcome is
+    state-changing. The function never invokes a strategy or risk
+    callback; the release is a deterministic replay of the
+    computations the engine performed at queue time.
+
+    The function is the contract's "release due pipelines in
+    deterministic trigger-cursor and pipeline-identity order" rule.
+    The caller has already sorted the pending fills into the right
+    order; this function is a single release step.
+    """
+    decision = pending.decision
+    trigger_event = pending.trigger_event
+    decision_time = pending.decision_time
+    actual_fill_time = pending.actual_fill_time
+    fill_price_q64_64 = pending.fill_price_q64_64
+
+    def _next_seq(stage: str) -> int:
+        n = counters.get(stage, 0)
+        counters[stage] = n + 1
+        return n
+
+    # Classify the outcome at the actual fill cursor; the failure
+    # model is consulted again so the recorded outcome matches the
+    # state at the fill-data event the evidence layer will see.
+    outcome = model_bundle.failure.classify(
+        pool_key_id=trigger_event.pool_key_id,
+        chain_id=trigger_event.chain_id,
+        event_time=actual_fill_time,
+        requested_liquidity=decision.liquidity,
+    )
+    if outcome == FillOutcome.REJECTED:
+        fill_status = STATUS_FILL_REJECTED
+        filled_liquidity = 0
+    elif outcome == FillOutcome.PARTIAL:
+        fill_status = STATUS_FILL_PARTIAL
+        filled_liquidity = max(1, decision.liquidity // 2)
+    elif outcome == FillOutcome.DELAYED:
+        fill_status = STATUS_FILL_DELAYED
+        filled_liquidity = decision.liquidity
+    else:
+        fill_status = STATUS_FILL_FILLED
+        filled_liquidity = decision.liquidity
+
+    gas_units = model_bundle.gas.gas_units(action_kind=trigger_event.kind)
+    fee_pips_value = model_bundle.fee.fee_pips(
+        pool_key_id=trigger_event.pool_key_id,
+        chain_id=trigger_event.chain_id,
+        event_time=actual_fill_time,
+    )
+    impact_bps = model_bundle.slippage.price_impact_bps(
+        pool_key_id=trigger_event.pool_key_id,
+        chain_id=trigger_event.chain_id,
+        event_time=actual_fill_time,
+        size_q64_64=decision.capital_q64_64,
+    )
+
+    # The latency audit event is emitted at the fill-data event's
+    # cursor; its timestamp is the actual fill time. The parent is
+    # the already-recorded RISK audit event for the same trigger.
+    latency_payload = (
+        ("decision_time", decision_time),
+        ("fill_time", actual_fill_time),
+        ("latency_units", model_bundle.latency_units),
+        ("delayed", 1),
+        ("event_id", trigger_event.event_id),
+    )
+    latency_audit = AuditEvent.build(
+        stage=STAGE_LATENCY,
+        pool_key_id=trigger_event.pool_key_id,
+        chain_id=trigger_event.chain_id,
+        timestamp=actual_fill_time,
+        sequence=_next_seq(STAGE_LATENCY),
+        parent_event_ids=(pending.risk_audit.event_id,),
+        payload=latency_payload,
+        ledger_hash_after=ZERO_LEDGER_HASH,
+        cursor=extract_event_cursor(pending.fill_data),
+    )
+    audit_chain.append(latency_audit)
+
+    # Mutate the ledger only at the FILL stage for state-changing
+    # outcomes. The ledger_ref list carries the engine's working
+    # ledger; mutating element [0] keeps the rest of the engine
+    # unchanged because the outer scope already passed the ledger by
+    # value at function entry.
+    if outcome in (FillOutcome.FILLED, FillOutcome.PARTIAL, FillOutcome.DELAYED):
+        ledger_ref[0] = ledger_ref[0].with_updates(
+            tick_lower=decision.tick_lower,
+            tick_upper=decision.tick_upper,
+            liquidity=filled_liquidity,
+            principal_token0=ledger_ref[0].principal_token0,
+            principal_token1=ledger_ref[0].principal_token1,
+            last_accrual_time=actual_fill_time,
+        )
+
+    fill_payload = (
+        ("delayed", 1),
+        ("event_id", trigger_event.event_id),
+        ("fee_pips", fee_pips_value),
+        ("fill_price_q64_64", fill_price_q64_64),
+        ("filled_liquidity", filled_liquidity),
+        ("fill_status", fill_status),
+        ("gas_units", gas_units),
+        ("impact_bps", impact_bps),
+        ("outcome", str(outcome)),
+        ("requested_liquidity", decision.liquidity),
+    )
+    fill_audit = AuditEvent.build(
+        stage=STAGE_FILL,
+        pool_key_id=trigger_event.pool_key_id,
+        chain_id=trigger_event.chain_id,
+        timestamp=actual_fill_time,
+        sequence=_next_seq(STAGE_FILL),
+        parent_event_ids=(latency_audit.event_id,),
+        payload=fill_payload,
+        ledger_hash_after=ledger_ref[0].ledger_hash(),
+        cursor=extract_event_cursor(pending.fill_data),
+    )
+    audit_chain.append(fill_audit)
 
 
 # ---------------------------------------------------------------------------

@@ -968,3 +968,475 @@ class TestPredecessorSuccessPathUnreachable:
         assert "dataset_partition_refs" in payload
         assert payload["dataset_partition_refs"]
         assert "input_event_list" not in payload
+
+
+# ---------------------------------------------------------------------------
+# 13. End-to-end T061 delayed-fill cursor binding through the orchestrator
+# ---------------------------------------------------------------------------
+
+
+def _swap_event_with_cursor(
+    *,
+    timestamp: int,
+    chain_id: int = CHAIN_ID_A,
+    pool_key_id: str = POOL_KEY_A,
+    price_q64_64: int = 1 << 64,
+    block_number: int,
+    transaction_index: int,
+    log_index: int,
+    available_at: int | None = None,
+    kind: str = KIND_SWAP,
+) -> BacktestEvent:
+    if available_at is None:
+        available_at = timestamp
+    return BacktestEvent(
+        version="t061.backtest_event.v1",
+        timestamp=timestamp,
+        sequence=0,
+        source_priority=SOURCE_PRIORITY_DATA,
+        kind=kind,
+        pool_key_id=pool_key_id,
+        chain_id=chain_id,
+        observed_at=available_at,
+        available_at=available_at,
+        payload=(("price_q64_64", price_q64_64),),
+        block_number=block_number,
+        transaction_index=transaction_index,
+        log_index=log_index,
+    )
+
+
+def _shutdown_event_with_cursor(
+    *,
+    timestamp: int,
+    chain_id: int = CHAIN_ID_A,
+    pool_key_id: str = POOL_KEY_A,
+    block_number: int,
+    transaction_index: int,
+    log_index: int,
+) -> BacktestEvent:
+    return BacktestEvent(
+        version="t061.backtest_event.v1",
+        timestamp=timestamp,
+        sequence=0,
+        source_priority=SOURCE_PRIORITY_SYSTEM,
+        kind=KIND_SHUTDOWN,
+        pool_key_id=pool_key_id,
+        chain_id=chain_id,
+        observed_at=timestamp,
+        available_at=timestamp,
+        payload=(),
+        block_number=block_number,
+        transaction_index=transaction_index,
+        log_index=log_index,
+    )
+
+
+class TestEndToEndDelayedFillCursorBinding:
+    """BacktestOrchestrator + BacktestEngine emit a delayed fill bound to the
+    fill-data cursor, with the audit chain cursor-monotonic without post-sorting.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_registry(self) -> Iterable[None]:
+        reset_default_registry_cache()
+        yield
+        reset_default_registry_cache()
+
+    def test_delayed_fill_binds_to_fill_data_cursor(self, tmp_path: Path) -> None:
+        """A trigger at cursor A queues its pipeline; the FILL transition
+        is emitted at the later fill-data cursor C. The audit chain is
+        cursor-monotonic without post-sorting.
+        """
+        # Three market events: A is the trigger (reactive SWAP); B is
+        # an intervening non-reactive OBSERVATION that the engine
+        # emits a SEEN audit for; C is the fill-data SWAP. C has an
+        # ``available_at`` earlier than its timestamp so the engine's
+        # fill-data search can locate it at ``target_fill_time``.
+        # event_b is non-reactive so the engine does NOT call the
+        # strategy callback for it; the queued fill from A is the
+        # only one released at C.
+        event_a = _swap_event_with_cursor(
+            timestamp=100, block_number=10, transaction_index=0, log_index=0
+        )
+        event_b = _swap_event_with_cursor(
+            timestamp=200,
+            block_number=20,
+            transaction_index=0,
+            log_index=0,
+            kind="OBSERVATION",
+        )
+        event_c = _swap_event_with_cursor(
+            timestamp=300,
+            block_number=30,
+            transaction_index=0,
+            log_index=0,
+            # Available at 150 (target_fill_time); the engine's
+            # fill-data search includes events whose
+            # ``available_at <= target_fill_time``.
+            available_at=150,
+        )
+        shutdown = _shutdown_event_with_cursor(
+            timestamp=400, block_number=40, transaction_index=0, log_index=0
+        )
+
+        events = [event_a, event_b, event_c, shutdown]
+        resolver = _StaticResolver()
+        resolver.add(
+            dataset_version="ds.t109-delayed.v1",
+            chain_id=CHAIN_ID_A,
+            pool_key_id=POOL_KEY_A,
+            covered_start=1,
+            covered_end=1000,
+        )
+        store = RunStateStore(runs_root=tmp_path / "runs")
+        orchestrator = BacktestOrchestrator(
+            store=store,
+            dataset_resolver=resolver,
+            event_source=_FixedSource(events),
+        )
+        request = _build_full_request("delayed-fill-001", "ds.t109-delayed.v1")
+        from robinhood_lp.strategy.registry import IDENTITY_BROAD_RANGE
+
+        request = RunRequest(
+            **{
+                **{k: getattr(request, k) for k in request.__dataclass_fields__},
+                "strategy_identity": IDENTITY_BROAD_RANGE,
+                "strategy_parameters": {
+                    "tick_spacing": 60,
+                    "liquidity": 1_000,
+                    "capital_q64_64": 1 << 64,
+                },
+                # latency_units=50 → fill_time=150. event_c at
+                # timestamp=300 has available_at=150 ≤ target_fill_time
+                # so it qualifies as fill_data, and ``delayed`` is
+                # True because 300 > 150.
+                "latency_units": 50,
+            }
+        )
+
+        record = orchestrator.submit(request)
+        assert record.state == RunState.SUCCEEDED
+        assert record.simulation_evidence_path is not None
+
+        evidence_path = Path(record.simulation_evidence_path)
+        payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+        transitions = payload["transitions"]
+
+        def _cursor_tuple(cursor_dict: Any) -> tuple[int, int, int]:
+            assert isinstance(cursor_dict, dict), (
+                f"cursor must be dict with block_number/transaction_index/log_index, "
+                f"got {type(cursor_dict).__name__}"
+            )
+            return (
+                int(cursor_dict["block_number"]),
+                int(cursor_dict["transaction_index"]),
+                int(cursor_dict["log_index"]),
+            )
+
+        # The DECISION / RISK transitions bind to the trigger cursor A.
+        # Subsequent DECISION audits may appear at later cursors when
+        # the strategy is consulted again after a fill is released;
+        # those audits represent the WAIT decision at the new cursor
+        # and are not the trigger's binding. The contract binds the
+        # LATENCY+FILL pair to the fill-data cursor, not the
+        # DECISION+RISK pair.
+        trigger_decisions = [
+            tr for tr in transitions
+            if tr["stage"] == "DECISION"
+            and _cursor_tuple(tr["cursor"]) == (10, 0, 0)
+        ]
+        trigger_risks = [
+            tr for tr in transitions
+            if tr["stage"] == "RISK"
+            and _cursor_tuple(tr["cursor"]) == (10, 0, 0)
+        ]
+        assert trigger_decisions, "engine must emit DECISION audit at trigger cursor A"
+        assert trigger_risks, "engine must emit RISK audit at trigger cursor A"
+
+        # The LATENCY + FILL transitions bind to the fill-data cursor C.
+        fill_transitions = [tr for tr in transitions if tr["stage"] == "FILL"]
+        assert fill_transitions, "engine must emit FILL audit"
+        for tr in fill_transitions:
+            cursor = _cursor_tuple(tr["cursor"])
+            assert cursor == (30, 0, 0), (
+                f"FILL transition cursor={cursor} must bind to event "
+                f"C's canonical (30, 0, 0) cursor, not the trigger cursor"
+            )
+
+        latency_transitions = [tr for tr in transitions if tr["stage"] == "LATENCY"]
+        assert latency_transitions, "engine must emit LATENCY audit"
+        for tr in latency_transitions:
+            cursor = _cursor_tuple(tr["cursor"])
+            assert cursor == (30, 0, 0), (
+                f"LATENCY transition cursor={cursor} must bind to event "
+                f"C's canonical (30, 0, 0) cursor"
+            )
+
+        # The audit chain is cursor-monotonic (no post-sort) when read
+        # in ordinal order.
+        last_cursor: tuple[int, int, int] | None = None
+        for tr in transitions:
+            cursor_dict = tr["cursor"]
+            if cursor_dict is None:
+                continue
+            cursor_tuple = _cursor_tuple(cursor_dict)
+            if last_cursor is not None:
+                assert cursor_tuple >= last_cursor, (
+                    f"cursor-monotonicity violated at ordinal={tr['ordinal']}: "
+                    f"{cursor_tuple} < {last_cursor}"
+                )
+            last_cursor = cursor_tuple
+
+        # Ordinal strictly increasing.
+        ordinals = [tr["ordinal"] for tr in transitions]
+        assert ordinals == sorted(ordinals) and len(set(ordinals)) == len(ordinals)
+
+
+# ---------------------------------------------------------------------------
+# 14. End-to-end T061 run-state equivalence (captured chain → projector)
+# ---------------------------------------------------------------------------
+
+
+class TestEndToEndT061RunStateEquivalence:
+    """A real BacktestEngine.run() audit chain projects byte-equivalently
+    through the ReplayProjector at every recorded cursor.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_registry(self) -> Iterable[None]:
+        reset_default_registry_cache()
+        yield
+        reset_default_registry_cache()
+
+    def test_real_engine_audit_chain_projects_byte_equivalently(
+        self, tmp_path: Path
+    ) -> None:
+        event_a = _swap_event_with_cursor(
+            timestamp=100, block_number=10, transaction_index=0, log_index=0
+        )
+        event_c = _swap_event_with_cursor(
+            timestamp=300, block_number=30, transaction_index=0, log_index=0
+        )
+        shutdown = _shutdown_event_with_cursor(
+            timestamp=400, block_number=40, transaction_index=0, log_index=0
+        )
+
+        events = [event_a, event_c, shutdown]
+        resolver = _StaticResolver()
+        resolver.add(
+            dataset_version="ds.t109-capture.v1",
+            chain_id=CHAIN_ID_A,
+            pool_key_id=POOL_KEY_A,
+            covered_start=1,
+            covered_end=1000,
+        )
+        store = RunStateStore(runs_root=tmp_path / "runs")
+        orchestrator = BacktestOrchestrator(
+            store=store,
+            dataset_resolver=resolver,
+            event_source=_FixedSource(events),
+        )
+        request = _build_full_request("capture-001", "ds.t109-capture.v1")
+        record = orchestrator.submit(request)
+        assert record.state == RunState.SUCCEEDED
+        assert record.simulation_evidence_path is not None
+
+        # Load the produced evidence and rebuild the projector. The
+        # projector must reproduce the engine's recorded state at
+        # every cursor in the audit chain. Repeated reads at the same
+        # cursor are byte-equivalent.
+        from robinhood_lp.reports.run_state import build_replay_projector
+        from robinhood_lp.reports.simulation_evidence import (
+            simulation_evidence_from_dict,
+        )
+
+        evidence_payload = json.loads(
+            Path(record.simulation_evidence_path).read_text(encoding="utf-8")
+        )
+        evidence = simulation_evidence_from_dict(evidence_payload)
+        projector = build_replay_projector(evidence)
+
+        # Repeated reads at every transition cursor are byte-equivalent.
+        from robinhood_lp.replay.market_state import MarketCursor
+
+        for tr in evidence_payload["transitions"]:
+            cursor_dict = tr["cursor"]
+            if cursor_dict is None:
+                continue
+            market_cursor = MarketCursor(
+                int(cursor_dict["block_number"]),
+                int(cursor_dict["transaction_index"]),
+                int(cursor_dict["log_index"]),
+            )
+            first = projector.run_state(market_cursor)
+            second = projector.run_state(market_cursor)
+            assert first.to_dict() == second.to_dict(), (
+                f"projector.run_state({market_cursor}) must be byte-equivalent across reads"
+            )
+
+
+# ---------------------------------------------------------------------------
+# 15. Strategy replacement / removal: projector byte equivalence
+# ---------------------------------------------------------------------------
+
+
+class TestEndToEndStrategyReplacementByteEquivalence:
+    """A BacktestOrchestrator-produced evidence projects byte-equivalently
+    even after the strategy callback is unbound from the registry.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_registry(self) -> Iterable[None]:
+        reset_default_registry_cache()
+        yield
+        reset_default_registry_cache()
+
+    def test_evidence_projects_after_strategy_unbound(
+        self, tmp_path: Path
+    ) -> None:
+        event_a = _swap_event_with_cursor(
+            timestamp=100, block_number=10, transaction_index=0, log_index=0
+        )
+        event_b = _swap_event_with_cursor(
+            timestamp=200, block_number=20, transaction_index=0, log_index=0
+        )
+        event_c = _swap_event_with_cursor(
+            timestamp=300, block_number=30, transaction_index=0, log_index=0
+        )
+        shutdown = _shutdown_event_with_cursor(
+            timestamp=400, block_number=40, transaction_index=0, log_index=0
+        )
+
+        events = [event_a, event_b, event_c, shutdown]
+        resolver = _StaticResolver()
+        resolver.add(
+            dataset_version="ds.t109-unbind.v1",
+            chain_id=CHAIN_ID_A,
+            pool_key_id=POOL_KEY_A,
+            covered_start=1,
+            covered_end=1000,
+        )
+        store = RunStateStore(runs_root=tmp_path / "runs")
+        orchestrator = BacktestOrchestrator(
+            store=store,
+            dataset_resolver=resolver,
+            event_source=_FixedSource(events),
+        )
+        request = _build_full_request("unbind-001", "ds.t109-unbind.v1")
+        record = orchestrator.submit(request)
+        assert record.state == RunState.SUCCEEDED
+
+        # Snapshot RunState at every cursor before unbinding.
+        from robinhood_lp.replay.market_state import MarketCursor
+        from robinhood_lp.reports.run_state import build_replay_projector
+        from robinhood_lp.reports.simulation_evidence import (
+            simulation_evidence_from_dict,
+        )
+
+        evidence_payload_before = json.loads(
+            Path(record.simulation_evidence_path).read_text(encoding="utf-8")
+        )
+        evidence_before = simulation_evidence_from_dict(evidence_payload_before)
+        projector_before = build_replay_projector(evidence_before)
+        cursors: set[MarketCursor] = set()
+        before_states: dict[MarketCursor, dict[str, Any]] = {}
+        for tr in evidence_payload_before["transitions"]:
+            cursor_dict = tr["cursor"]
+            if cursor_dict is None:
+                continue
+            market_cursor = MarketCursor(
+                int(cursor_dict["block_number"]),
+                int(cursor_dict["transaction_index"]),
+                int(cursor_dict["log_index"]),
+            )
+            cursors.add(market_cursor)
+            before_states[market_cursor] = projector_before.run_state(
+                market_cursor
+            ).to_dict()
+
+        # Unbind the registered strategy. The projector must still
+        # return byte-equivalent RunState at every recorded cursor.
+        reset_default_registry_cache()
+        evidence_after = simulation_evidence_from_dict(
+            json.loads(
+                Path(record.simulation_evidence_path).read_text(encoding="utf-8")
+            )
+        )
+        projector_after = build_replay_projector(evidence_after)
+        for market_cursor in cursors:
+            after_state = projector_after.run_state(market_cursor).to_dict()
+            assert after_state == before_states[market_cursor], (
+                f"projector.run_state({market_cursor}) diverges after "
+                f"the strategy registry was reset; the projector must "
+                f"not depend on the live strategy implementation"
+            )
+
+
+# ---------------------------------------------------------------------------
+# 16. Pre-evidence historical manifests: explicit unavailable verdict
+# ---------------------------------------------------------------------------
+
+
+class TestPreEvidenceHistoricalUnavailable:
+    """A pre-evidence historical manifest returns an explicit
+    T109_HISTORICAL_UNAVAILABLE verdict through the T109 reader surface.
+    """
+
+    def test_t109_loader_rejects_legacy_with_named_reason(self) -> None:
+        from robinhood_lp.reports.manifest import (
+            InvalidManifestFieldError,
+            t109_experiment_manifest_from_dict,
+        )
+        from robinhood_lp.reports.run_state import (
+            ReplayFrameBindingError,
+            build_replay_projector,
+        )
+        from robinhood_lp.reports.simulation_evidence import (
+            SimulationEvidence,
+        )
+
+        # A legacy T105 manifest is refused by the T109 loader with a
+        # named reason code. The contract's "explicit unavailable
+        # result" verdict is the
+        # ``T109_HISTORICAL_UNAVAILABLE`` named reason the loader
+        # embeds in the ``InvalidManifestFieldError`` message.
+        manifest_payload = {
+            "version": MANIFEST_VERSION,
+            "run_id": "legacy-historical-001",
+            "chain_id": CHAIN_ID_A,
+            "pool_key_id": POOL_KEY_A,
+            "block_range_start": 1,
+            "block_range_end": 100,
+            "dataset_version": "legacy-ds",
+            "dataset_content_hash": "0x" + "aa" * 32,
+            "registry_version": "t068.strategy_registry.v1",
+            "registry_checksum": "0x" + "00" * 32,
+            "strategy_identity": IDENTITY_HOLD,
+            "strategy_version": "t062.baseline_strategy.v1",
+            "report_checksum": "0x" + "00" * 32,
+            "input_event_list": [],
+            "code_revision": "0x" + "00" * 40,
+        }
+        with pytest.raises(InvalidManifestFieldError) as exc_info:
+            t109_experiment_manifest_from_dict(manifest_payload)
+        assert "T109_HISTORICAL_UNAVAILABLE" in str(exc_info.value), (
+            f"T109 loader must surface T109_HISTORICAL_UNAVAILABLE; "
+            f"got {exc_info.value!r}"
+        )
+
+        # The ReplayProjector surfaces the same named reason when a
+        # legacy payload attempts to bypass the T109 loader: the
+        # projector is bound to ``SimulationEvidence`` only and any
+        # other payload shape raises a closed-failure binding error
+        # whose message carries the unavailable reason.
+        with pytest.raises(ReplayFrameBindingError) as exc_info2:
+            build_replay_projector(manifest_payload)  # type: ignore[arg-type]
+        assert "T109_HISTORICAL_UNAVAILABLE" in str(exc_info2.value), (
+            f"projector must surface T109_HISTORICAL_UNAVAILABLE; "
+            f"got {exc_info2.value!r}"
+        )
+
+        # Sanity check: the typing contract forbids a non-evidence
+        # payload from reaching the projector.
+        assert not isinstance(manifest_payload, SimulationEvidence)
