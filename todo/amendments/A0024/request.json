@@ -1,0 +1,11 @@
+{
+  "amendment_id": "A0024",
+  "task_ids": [
+    "T069",
+    "T105"
+  ],
+  "layer": "SUPERSEDE",
+  "target_status": "APPROVED",
+  "summary": "retire predecessor run and manifest writers in favor of T109",
+  "owner_direction": "After approved A0022 and A0023, annotate T069 and T105 as superseded by T109. Preserve both approved contracts, status, attempts, commits, reviews and artifacts byte-identical; change only each superseded_by field and resolve the two remaining A0022 impacts."
+}

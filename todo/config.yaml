@@ -747,6 +747,7 @@
         "T105"
       ],
       "task_file": "todo/phases/P06-backtesting-and-strategy/T069.md",
+      "superseded_by": "T109",
       "attempt": 3,
       "base_commit": "75a7e5446a9f431c424c715c743ed3bf48f68124",
       "candidate_commit": "4731b626a25fbb2747e3cadb920e98db47df8193",
@@ -1159,6 +1160,7 @@
         "T063"
       ],
       "task_file": "todo/phases/P06-backtesting-and-strategy/T105.md",
+      "superseded_by": "T109",
       "attempt": 1,
       "base_commit": "8b9108125d599e5bbb09eff9b87b77c294e1ddd3",
       "candidate_commit": "f913d44bcc3a0e99d716aac532334e3cd6358c9e",

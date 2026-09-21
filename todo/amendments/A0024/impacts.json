@@ -1,0 +1,9 @@
+{
+  "amendment_id": "A0024",
+  "layer": "SUPERSEDE",
+  "raised": [],
+  "resolves": [
+    "A0022:T069:replace-final-only-run-publication",
+    "A0022:T105:replace-embedded-market-input-publication"
+  ]
+}

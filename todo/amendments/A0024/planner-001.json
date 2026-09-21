@@ -1,0 +1,23 @@
+{
+  "amendment_id": "A0024",
+  "outcome": "AMENDMENT_READY",
+  "summary": "Annotated the approved T069 product-run authority and approved T105 manifest/report authority as superseded by T109. The change is strictly annotation-only: each target gained only superseded_by: T109, while both approved contracts, dependencies, status, attempts, commit identities, evidence and review pointers remain unchanged. This closes the two A0022 predecessor-retirement impacts after A0023 repointed every planned direct consumer.",
+  "rationale": "A0022 created T109 as the integrated successor to T069 and T105, supplied the required replacement and migration contract, and recorded these two stable retirement impacts. Approved A0023 then repointed all eight planned consumers to T109 and passed independent review. The SUPERSEDE route can therefore record retirement without rewriting immutable approved history. Historical T069/T105 implementations and artifacts remain reachable as preserved predecessor evidence; T109 becomes the named current authority only when its own task is implemented and independently approved.",
+  "unresolved_questions": [],
+  "impact_assessment": {
+    "intent": "No Intent file or product meaning changed. The annotations record the successor relationship already approved in A0022.",
+    "specification": "No Spec file changed. A0022's canonical MarketState, exact RunState, ReplayFrame, causality and T104 boundaries remain authoritative and untouched.",
+    "contracts": "T069.md, T105.md, T109.md and every other task contract remain byte-identical. The only contract-level effect is the machine-readable retirement annotation on the two approved predecessor task records.",
+    "dependencies": "No depends_on or replaces field changed. T109 already declares replaces T069 and T105 and depends on both; A0023 already repointed all planned direct consumers. The dependency graph remains unchanged and workflow validation passes.",
+    "implementation": "No implementation or test file changed. Existing T069/T105 code is preserved as predecessor implementation until T109's separately reviewed delivery performs the contracted runtime cutover; this amendment grants no implementation claim.",
+    "data": "No run, manifest, report, evidence, dataset or review artifact changed. Historical T069/T105 artifacts remain byte-identical, read-only predecessor history and remain exact-RunState unavailable as specified by T109.",
+    "operations": "The annotation prevents T069/T105 from being treated as the current authorities in future planning while preserving their lifecycle and artifact history. It does not start T109, change task readiness, publish an artifact or alter a runtime path.",
+    "security": "No signer, execution, approval, paper, live or secret-handling authority changed. Retirement annotations grant no runtime permission and preserve all existing security evidence.",
+    "verification": "The diff contains exactly two added superseded_by fields in todo/config.yaml. A parsed before/after comparison proved every other field of T069 and T105 unchanged and every non-target task record unchanged. tools.workflow validate passed and git diff --check passed. Independent Plan Review must verify the annotation-only scope and exact impact resolution."
+  },
+  "affected_existing_tasks": [],
+  "resolved_task_impacts": [
+    "A0022:T069:replace-final-only-run-publication",
+    "A0022:T105:replace-embedded-market-input-publication"
+  ]
+}
