@@ -12,10 +12,10 @@ T068's registry is the identity source for every strategy a run can execute; T10
 are the designated registry-bound successors for the manifest, robustness,
 candidate-lock and authoring-guide paths; and T069's
 product-level run entry point turns a registered strategy, its parameters and a data range
-into a reproducible manifest and report with observable run state; T109 adds dataset-addressed
-historical market state and immutable run evidence sufficient for exact historical run replay
-without another replay, backtest or accounting engine, and composes rather than replaces T104's
-fee-growth/range-fee projection; T107 produces an
+into a reproducible manifest and report with observable run state; T109 adds causally bound,
+dataset-addressed run evidence and atomic current publication, T110 qualifies exact historical
+market/run state and replay frames while composing rather than replacing T104, and T111 cuts the
+approved research consumers over to that current artifact chain; T107 produces an
 explicitly provisional candidate marked `EXPERIMENTAL_NOT_LIVE_APPROVED`, or an honest
 `NO_TRADE`. Neither is live approval.
 
@@ -38,4 +38,6 @@ parameter selection on held-out data, or profitability-based acceptance.
 - [T106 — Constrain robustness analysis to registered parameter schemas](T106.md)
 - [T107 — Lock candidate identity, schema and registry revision](T107.md)
 - [T108 — Update the strategy authoring guide for registered identity](T108.md)
-- [T109 — Preserve exact historical market and strategy-run replay](T109.md)
+- [T109 — Publish causally bound strategy-run evidence](T109.md)
+- [T110 — Qualify exact historical market and run-state replay](T110.md)
+- [T111 — Cut approved research consumers over to replay artifacts](T111.md)

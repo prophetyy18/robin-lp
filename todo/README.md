@@ -11,10 +11,12 @@ Last plan review: **2026-09-14**. Network and deployment facts are mutable;
 the links in this file are evidence sources, not values that may be copied into
 code without the verification required by T024.
 
-Plan structure revision: **A0022** (2026-09-21). This names the last Owner amendment
-that changed the plan's structure, and it moves even when `intent_revision` and
-`spec_revision` do not, so a change that only adds tasks stays legible. Every PROPHET
-change updates it.
+Plan structure revision: **OWNER_BOOTSTRAP_T109_SPLIT_2026_09_21**. This names the last
+Owner-authorized plan-structure change. The bootstrap retained T109's active causal evidence and
+publication work and moved its replay qualification and approved-consumer cutover into T110 and
+T111 after the finite Developer continuation budget was exhausted. It did not change Intent or
+Spec requirements; the audit record is
+[`evidence/workflow-bootstrap/2026-09-21-t109-split.md`](evidence/workflow-bootstrap/2026-09-21-t109-split.md).
 
 ## 1. Product boundary and final delivery standard
 
