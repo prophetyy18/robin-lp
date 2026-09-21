@@ -1,0 +1,189 @@
+{
+  "task_id": "T102",
+  "base_commit": "c963c717aaf4b391e74ee07b5731c4501f736a14",
+  "candidate_commit": "ca0ff4eb4be616c3ec53b5d871abbca09f1b80a1",
+  "verdict": "PASS",
+  "checks": [
+    {
+      "id": "registry-registers-t102-identity",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/strategy/registry.py:1607",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestRegisteredIdentity::test_model_backed_identity_is_registered",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_strategy_t068.py::TestRegistryEnumeration::test_registry_lists_seven_identities"
+      ],
+      "finding": "The T068 registry now registers `t102.model_backed.v1` with `MODEL_BACKED_STRATEGY_VERSION`, an 8-parameter schema (model_artifact_id, staleness_seconds, require_pool_set_membership, ood_prediction_variance_q64_64, regime_confidence_floor_q64_64, fee_opportunity_floor_q64_64, bootstrap_iterations, bootstrap_seed) carrying units and bounds, and code provenance pointing to `robinhood_lp.strategy.model_backed:ModelBackedStrategy`. Tests `test_model_backed_identity_is_registered`, `test_model_backed_schema_declares_units`, and the new 7-identity count assertion confirm the addition; existing 80 T060 tests and 341 dep-related (T068, T106, T101, T105) tests still pass, so substituting the model identity changes no other contract."
+    },
+    {
+      "id": "model-backed-registry-factory-and-wrapper",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/strategy/registry.py:1170-1207",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/strategy/model_backed.py",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestRegisteredIdentity::test_model_backed_factory_builds_strategy",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_layer_direction_t007.py::test_strategy_module_does_not_import_backtest[robinhood_lp.strategy.model_backed]"
+      ],
+      "finding": "The new factory `_model_backed_factory` builds a `ModelBackedStrategy` via `ModelBackedEvaluationParameters`; the wrapper module imports only the strategy base, satisfies the layer-purity test (`test_strategy_module_does_not_import_backtest[robinhood_lp.strategy.model_backed]` passes), and the factory's identity/version/schema/code provenance match the binding the `from_registry_entry` factory constructs. The wrapper's `__post_init__` validates `pool_key_id` (non-empty str), `chain_id` (positive int, not bool), `parameters` (typed), `component_version` (non-empty str), and `q64_scale` (positive int, not bool)."
+    },
+    {
+      "id": "validated-manifest-binding",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:455-560",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestValidatedManifestBinding"
+      ],
+      "finding": "`ValidatedManifestBinding.from_registry_entry` reads the registry's closed-vocabulary entry for `identity` and copies `version`, `REGISTRY_VERSION`, `registry_checksum`, per-identity `parameter_schema_checksum`, `code_provenance_module/revision/symbol`. An unregistered identity raises `UnregisteredEvaluationIdentityError`; empty run_id / identity raise `EvaluationError`. The `__post_init__` enforces non-empty str on every binding field."
+    },
+    {
+      "id": "per-identity-parameter-schema-rejection",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:2426-2509",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:815-871",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestParameterValidation",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestModelEvaluationSurface::test_surface_rejects_undeclared_axis",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestModelEvaluationSurface::test_surface_rejects_out_of_range_value",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestModelEvaluationSurface::test_surface_rejects_wrong_type_value"
+      ],
+      "finding": "`validate_parameters_against_schema` delegates to the registry's `validate_parameters` (so `RegistryError` surfaces as `EvaluationError`); the helper rejects an unregistered identity via `is_registered`, an undeclared parameter, a missing parameter, an out-of-range value (`staleness_seconds=-1` raises), and a wrong-type value. `build_model_evaluation_surface` calls `build_schema_bound_surface` (T106) which rejects undeclared axes, out-of-range values, wrong-type values via `validate_axis_value` (T106); a binding whose strategy_identity disagrees with the schema-bound surface produces `IncompatibleManifestBindingError`. Tests `test_surface_rejects_undeclared_axis`, `test_surface_rejects_out_of_range_value`, `test_surface_rejects_wrong_type_value` exercise the surface path; tests `test_validate_rejects_undeclared_parameter`, `test_validate_rejects_missing_parameter`, `test_validate_rejects_out_of_range_staleness` exercise the registry path."
+    },
+    {
+      "id": "heterogeneous-identities-and-shared-axis-rejection",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestHeterogeneousRegisteredIdentities",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestSchemaBoundAxisRejection",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:815-871"
+      ],
+      "finding": "`TestHeterogeneousRegisteredIdentities` parametrizes `build_model_evaluation_surface` over both `IDENTITY_FIXED_WIDTH` and `IDENTITY_ADAPTIVE_RANGE`; both build deterministic schema-bound surfaces, each recording its own registry / schema identity, version and checksum. `test_fixed_width_rejects_adaptive_only_axis` confirms that an axis declared only by the T065 adaptive schema (`five_minute_window_seconds`) is refused by the T062 fixed-width schema via T106's `UndeclaredAxisError`; `test_adaptive_accepts_axis_shared_with_baselines` confirms a shared axis (`tick_spacing`) is accepted on both. So a point one schema declares is refused for the schema that does not declare it."
+    },
+    {
+      "id": "walk-forward-fold-boundaries",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:1675-1735",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestWalkForwardFold"
+      ],
+      "finding": "`WalkForwardFold` records `train_start_decision_time`, `train_end_decision_time`, `eval_start_decision_time`, `eval_end_decision_time`, `purge_plus_embargo_seconds` (all non-negative ints). The `__post_init__` rejects `train_end <= train_start`, `eval_end <= eval_start`, and a `gap < purge_plus_embargo_seconds`. Point-in-time, machine-recorded folds are reproducible from the input — `to_dict()` exposes every boundary; `WalkForwardEvaluationInputs` carries the fold tuple alongside the binding identity and surface checksum."
+    },
+    {
+      "id": "deterministic-bootstrap-and-breakdown",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:2028-2145",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:2153-2191",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestBootstrapIntervals::test_intervals_are_deterministic",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestBootstrapIntervals::test_intervals_compute_for_balanced_episodes",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestRegimeConditionalBreakdown::test_breakdown_covers_all_regime_labels"
+      ],
+      "finding": "`compute_episode_bootstrap_intervals` returns four rows (`rule.net_return_q64_64`, `model.net_return_q64_64`, `delta.net_return_q64_64`, `ratio.net_return_q64_64`) using a deterministic LCG seeded by `parameters.bootstrap_seed` and `parameters.bootstrap_iterations`; the percentile bounds helper uses the symmetric Q64.64 alpha. `test_intervals_are_deterministic` confirms repeated calls return identical `lower_q64_64` / `upper_q64_64`. `compute_regime_conditional_breakdown` always emits one row per `REGIME_LABELS_FOR_BREAKDOWN` label (`RANGE`, `UP_TREND`, `DOWN_TREND`, `JUMP_RISK`) with zero counts when episodes are absent, so a favourable aggregate cannot hide a loss concentrated in one market state and a losing pool/regime/fold is not dropped."
+    },
+    {
+      "id": "rejection-record-on-prediction-up-economics-down",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:2199-2297",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestRejectionRecord"
+      ],
+      "finding": "`build_rejection_record` returns a `RejectionRecord` whose `reason_code` is `PREDICTION_UP_ECONOMICS_DOWN` when the prediction metric improves (LOWER_IS_BETTER) but the LP-economics mean (`net_return_q64_64`) does not; when both improve it returns `None`. A zero-episode fold yields `None` (no rejection), but `parameters_min_episodes_default()` is 5 and `ECONOMICS_DOWN_EPISODE_UNDERFLOW` fires when the floor is below the observation count. The verdict comes from simulated LP economics (`net_return_q64_64` mean), not from a prediction metric."
+    },
+    {
+      "id": "ood-gate-detects-missing-stale-unversioned-constant",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:910-1017",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestOutOfDistributionGate"
+      ],
+      "finding": "`evaluate_out_of_distribution` returns `VERDICT_UNCERTAIN` (with no position emitted) when (a) `handle is None`, (b) `schema_revision` / `code_revision` / `registry_checksum` are empty or `UNKNOWN`, (c) `trained_at_unix_seconds + staleness_seconds < evaluation_decision_time` (when `staleness_seconds > 0`), (d) `evaluation_pool_key_id` is disjoint from `training_pool_set` (when `require_pool_set_membership=True`), and (e) `predictions` is constant (`unique_values <= ood_prediction_variance_q64_64`). When `predictions is None` the gate skips (e). The model-backed regime and fee-opportunity components translate the verdict into a `RegimeAssessment.uncertain(...)` / `FeeOpportunityAssessment.uncertain(...)` whose `model_version` is `MODEL_COMPONENT_VERSION`; no position / size / tick range is emitted by the model layer."
+    },
+    {
+      "id": "model-backed-components-satisfy-t060-contract",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:1091-1335",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestModelBackedRegimeModel",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestModelBackedFeeOpportunityModel",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_strategy_t060.py"
+      ],
+      "finding": "`ModelBackedRegimeModel.assess` and `ModelBackedFeeOpportunityModel.assess` consume the same T060 `MarketSnapshot`/`PortfolioSnapshot` inputs as the rule implementations, never mutate them, and return a `RegimeAssessment` / `FeeOpportunityAssessment` carrying the contract's `version` and the `MODEL_COMPONENT_VERSION`. When the OOD gate yields `UNCERTAIN` the components emit `RegimeAssessment.uncertain(...)` / `FeeOpportunityAssessment.uncertain(...)` with the gate's reason in `notes`; when the rule fallback is supplied AND the handle is `None` the rule's assessment is returned unchanged; the rule fallback is never consulted as a second authority over the model's own verdict. All 80 T060 tests still pass, so the same dependency and interface tests that protect the rule implementation continue to pass."
+    },
+    {
+      "id": "robustness-evidence-fail-closed",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:630-740",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestRobustnessEvidenceGate"
+      ],
+      "finding": "`check_robustness_evidence` accepts `None` (returns `MISSING`), a `ParameterSurface` carrying `LEGACY_SURFACE_MARKER` (returns `LEGACY_ONLY`), or a `SchemaBoundParameterSurface` (compares its binding identity against the run's `ValidatedManifestBinding`). A mismatch returns `REVISION_MISMATCH`. An unregistered-identity binding against a schema-bound surface returns `REVISION_MISMATCH` because `is_schema_bound_surface_identity` checks `is_registered(strategy_identity)`. The unbound T064 builder (`build_parameter_surface`) is rejected by the gate (`test_t064_surface_yields_legacy_only_status`). The walk-forward orchestrator only emits a rejection record when `RobustnessEvidenceStatus.CURRENT`, otherwise the rejection record is `None` — so missing, legacy-only or revision-mismatched evidence blocks publication of the robustness conclusion rather than substituting the unrestricted T064 surface."
+    },
+    {
+      "id": "schema-bound-surface-builds-deterministic-per-identity",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:815-871",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:742-765",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestModelEvaluationSurface::test_surface_checksum_is_deterministic",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestHeterogeneousRegisteredIdentities"
+      ],
+      "finding": "`build_model_evaluation_surface` returns a `ModelEvaluationSurface` whose `surface_checksum` is the T106 surface's `checksum()`; the surface's `binding_identity` is the T106 `surface_identity`. Repeated construction over the same `surface_id`, `binding`, and `axes` returns the same `surface_checksum` (`test_surface_checksum_is_deterministic`). `test_surface_builds_for_fixed_width` and `test_surface_builds_for_adaptive` show each surface records its own `binding.strategy_identity` and registry checksum; a registry / schema revision produces a different binding identity and a different checksum."
+    },
+    {
+      "id": "legacy-migration-fixture-byte-identical",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:2517-2566",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestLegacyRobustnessFixture"
+      ],
+      "finding": "`LegacyRobustnessFixture` accepts only legacy `ParameterSurface` instances carrying the explicit `LEGACY_SURFACE_MARKER` (enforced by `is_legacy_surface` and the marker check); the fixture's `to_legacy_dict()` returns `self.legacy_surface.to_dict()` (byte-identical across calls); a fixture with the wrong marker raises `EvaluationError`. The T102 robustness gate accepts legacy surfaces only as `LEGACY_ONLY` evidence (the artifact cannot be consumed as current robustness evidence); T106 schema-bound surfaces are not merged with the legacy artifact."
+    },
+    {
+      "id": "old-path-unreachable",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestOldPathUnreachable",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:675-740"
+      ],
+      "finding": "Current evaluation never calls `build_parameter_surface` (the T064 builder). The only path that accepts a surface is `check_robustness_evidence`, and a T064 `ParameterSurface` (legacy marker on by construction) returns `LEGACY_ONLY`. The schema-bound surface builder (`build_model_evaluation_surface`) requires a registered identity and `is_registered` enforces the closed vocabulary. So current evaluation cannot construct a parameter surface through the unrestricted T064 builder; a legacy artifact offered as current evaluation evidence is refused."
+    },
+    {
+      "id": "top-level-walk-forward-evaluation",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:2317-2418",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestWalkForwardEvaluation"
+      ],
+      "finding": "`walk_forward_evaluate_model` validates inputs, calls `check_robustness_evidence` first (so missing/legacy/mismatched evidence is recorded before any fold runs), then iterates folds calling `rule_runner` and `model_runner` (both `EpisodeRunner` callables; the orchestrator rejects non-tuple returns), aggregates episodes, computes bootstrap intervals and the regime breakdown, emits the rejection record only when `RobustnessEvidenceStatus.CURRENT`, and returns a `ModelEvaluationReport` carrying the binding identity, surface checksum, fold list, episode counts, intervals, breakdowns, rejection, and robustness check. `test_evaluation_with_current_robustness`, `test_evaluation_with_missing_robustness_blocks_publication`, `test_evaluation_with_revision_mismatch_blocks_publication`, and `test_evaluation_rejects_non_tuple_runner_return` exercise the happy path, the two block-publication paths, and the runner-validation path respectively."
+    },
+    {
+      "id": "layer-purity-and-no-execution-authority",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:182-196",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tests/test_evaluation_t102.py::TestLayerPurity",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/tools/check_imports/layer_map.py:202-204",
+        "/home/lpdev/lp-worktrees/review-t102-attempt-001/src/robinhood_lp/research/evaluation.py:1138-1219,1270-1334"
+      ],
+      "finding": "`_FORBIDDEN_EVAL_ROBINHOOD_MODULES` enumerates every higher-tier module (config, discovery, execution, ingestion, presentation, qualification, quality, replay, risk, rpc, signer, storage, web). The ten layer-purity tests in `TestLayerPurity` walk the live module graph and confirm none of those subpackages is reachable from `robinhood_lp.research.evaluation`. The new layer_map entries (`robinhood_lp.research.evaluation: backtest`, `robinhood_lp.strategy.model_backed: strategy`) keep the import-graph check green. The model-backed components return `RegimeAssessment` / `FeeOpportunityAssessment` only — no position, size or tick range, and no `HOLD` / `LP` / `AUTO_SWAP` authority."
+    },
+    {
+      "id": "test-ruff-imports-and-deps",
+      "status": "PASS",
+      "evidence": [
+        "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/research/evaluation.py src/robinhood_lp/strategy/model_backed.py src/robinhood_lp/strategy/registry.py src/robinhood_lp/strategy/__init__.py src/robinhood_lp/research/__init__.py tests/test_evaluation_t102.py tests/test_strategy_t068.py tests/test_reports_t105.py",
+        "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.check_imports check",
+        "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_strategy_t068.py tests/test_evaluation_t102.py tests/test_robustness_t106.py tests/test_panel_t101.py tests/test_reports_t105.py tests/test_backtest_t061.py tests/test_backtest_t069.py tests/test_strategy_t060.py tests/test_strategy_t065.py tests/test_experiments_t066.py tests/test_layer_direction_t007.py tests/test_workflow_contracts.py tests/test_smoke.py tests/test_lockfile.py tests/test_no_signing_paths.py",
+        "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ --ignore=tests/test_abi_artifacts.py --ignore=tests/test_documentation_citations.py"
+      ],
+      "finding": "Ruff reports no findings on the eight changed files. The import-graph check reports no findings. The 757 targeted tests (T102 + every direct dep T068/T106/T101/T105/T061/T069/T060/T065/T066 plus layer-direction, workflow-contracts, smoke, lockfile, and no-signing-paths) all pass; the full pytest sweep (2945 passed, 6 skipped) also passes when the two pre-existing environment failures are skipped."
+    }
+  ],
+  "must_not_violations": [],
+  "unknowns": [],
+  "required_changes": [],
+  "residual_risks": [
+    "Pre-existing environment-only pytest failures `tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output` (forge v4-core missing) and `tests/test_documentation_citations.py::test_check_passes_on_real_repository` (ARCHITECTURE.md T069 row references `robinhood_lp.application.backtest_runs`) reproduce on the base commit and are unrelated to T102 — left in `residual_risks` per the T101 reviewer guidance.",
+    "The model-backed regime/fee-opportunity components translate a continuous predictor output to a closed regime-state sentinel and a Q64.64 fee-edge integer through heuristic maps (`_prediction_to_regime_state`, `_prediction_to_fee_edge_q64_64`); production runs consuming real T101 model artifacts must verify the mapping against their target label distribution before publication (developer-flagged risk; not a contract defect).",
+    "The schema's `model_artifact_id` default is the literal sentinel `RULE_FALLBACK` (the registry rejects empty strings for `ParameterType.STR`); a registration that uses a different sentinel must add the sentinel to the OOD gate's unversioned / missing-handle path (developer-flagged risk; not a contract defect).",
+    "The walk-forward orchestrator accepts an `EpisodeRunner` callable; production code must inject a runner built on the T061 event-driven engine and the T070 central risk gate and must not pass evaluation inputs that fabricate episodes from non-engine sources (developer-flagged risk; not a contract defect)."
+  ]
+}
