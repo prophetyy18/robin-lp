@@ -12,7 +12,7 @@
   },
   "active_phase": "P06",
   "active_task": "T106",
-  "workflow_state": "AWAITING_REVIEW",
+  "workflow_state": "APPROVED",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -1165,7 +1165,7 @@
     },
     "T106": {
       "phase": "P06",
-      "status": "AWAITING_REVIEW",
+      "status": "APPROVED",
       "depends_on": [
         "T064",
         "T068",
@@ -1177,9 +1177,9 @@
       "task_file": "todo/phases/P06-backtesting-and-strategy/T106.md",
       "attempt": 1,
       "base_commit": "caf0fad729df8803d2a2650a0d3f3fb9053b5211",
-      "candidate_commit": null,
-      "approved_commit": null,
-      "latest_review": null
+      "candidate_commit": "482a4c9c6da75d1d57aedcfd9cd7e5ab299d6686",
+      "approved_commit": "482a4c9c6da75d1d57aedcfd9cd7e5ab299d6686",
+      "latest_review": "todo/reviews/P06/T106/review-001.json"
     },
     "T107": {
       "phase": "P06",
