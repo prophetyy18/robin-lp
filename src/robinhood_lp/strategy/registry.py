@@ -1167,6 +1167,48 @@ def _adaptive_factory(
     )
 
 
+def _model_backed_factory(
+    *,
+    parameters: Mapping[str, int | bool | str],
+    pool_key_id: str,
+    chain_id: int,
+) -> object:
+    """The factory for :data:`IDENTITY_MODEL_BACKED`.
+
+    The factory is the registry's binding to the T102 model-backed
+    strategy surface; it returns a
+    :class:`robinhood_lp.strategy.model_backed.ModelBackedStrategy`
+    instance bound to the registered identity's parameter schema. The
+    strategy occupies the replaceable regime and fee-opportunity
+    interfaces the strategy contract already defines (T060); the
+    model artifact the strategy loads is recorded on the resulting
+    instance so a later evaluation can resolve it.
+    """
+    from robinhood_lp.strategy.model_backed import (
+        MODEL_COMPONENT_VERSION,
+        ModelBackedEvaluationParameters,
+        ModelBackedStrategy,
+    )
+
+    params = ModelBackedEvaluationParameters(
+        model_artifact_id=str(parameters["model_artifact_id"]),
+        staleness_seconds=int(parameters["staleness_seconds"]),
+        require_pool_set_membership=bool(parameters["require_pool_set_membership"]),
+        ood_prediction_variance_q64_64=int(parameters["ood_prediction_variance_q64_64"]),
+        regime_confidence_floor_q64_64=int(parameters["regime_confidence_floor_q64_64"]),
+        fee_opportunity_floor_q64_64=int(parameters["fee_opportunity_floor_q64_64"]),
+        bootstrap_iterations=int(parameters["bootstrap_iterations"]),
+        bootstrap_seed=int(parameters["bootstrap_seed"]),
+    )
+    return ModelBackedStrategy(
+        pool_key_id=pool_key_id,
+        chain_id=chain_id,
+        parameters=params,
+        component_version=MODEL_COMPONENT_VERSION,
+        q64_scale=1 << 64,
+    )
+
+
 #: The closed identity vocabulary a backtest or paper run may execute.
 #: T068 publishes the registry with these six identities (the five
 #: T062 baselines plus the T065 adaptive-Range strategy). The set is
@@ -1179,6 +1221,7 @@ IDENTITY_FIXED_WIDTH: Final[str] = "t062.fixed_width.v1"
 IDENTITY_VOLATILITY_WIDTH: Final[str] = "t062.volatility_width.v1"
 IDENTITY_OUT_OF_RANGE_REBALANCE: Final[str] = "t062.out_of_range_rebalance.v1"
 IDENTITY_ADAPTIVE_RANGE: Final[str] = "t065.adaptive_range.v1"
+IDENTITY_MODEL_BACKED: Final[str] = "t102.model_backed.v1"
 
 #: Module name each registered strategy's implementation lives in.
 #: The registry captures the module at construction time so a
@@ -1186,6 +1229,7 @@ IDENTITY_ADAPTIVE_RANGE: Final[str] = "t065.adaptive_range.v1"
 #: checksum change.
 _MODULE_BASELINES: Final[str] = "robinhood_lp.strategy.baselines"
 _MODULE_ADAPTIVE: Final[str] = "robinhood_lp.strategy.adaptive"
+_MODULE_MODEL_BACKED: Final[str] = "robinhood_lp.strategy.model_backed"
 
 
 def _build_default_registry_entries() -> tuple[RegisteredStrategy, ...]:
@@ -1558,6 +1602,108 @@ def _build_default_registry_entries() -> tuple[RegisteredStrategy, ...]:
                 "Replaceable regime / fee-opportunity components; "
                 "downside-asymmetric trend / jump filter; complete "
                 "out-of-Range lifecycle."
+            ),
+        ),
+        RegisteredStrategy(
+            identity=IDENTITY_MODEL_BACKED,
+            version="t102.model_evaluation.v1",
+            parameter_schemas=(
+                ParameterSchema(
+                    name="model_artifact_id",
+                    type=ParameterType.STR,
+                    unit="identifier",
+                    default="RULE_FALLBACK",
+                    description=(
+                        "Identifier of the model artifact the components load; "
+                        "the literal sentinel ``RULE_FALLBACK`` yields the "
+                        "deterministic rule fallback (no artifact, no "
+                        "inferred or default identity)."
+                    ),
+                ),
+                ParameterSchema(
+                    name="staleness_seconds",
+                    type=ParameterType.NON_NEGATIVE_INT,
+                    unit="seconds",
+                    default=7 * 24 * 60 * 60,
+                    description=(
+                        "Maximum age (seconds) of the model artifact before "
+                        "the OOD gate treats it as stale; ``0`` disables the "
+                        "staleness check."
+                    ),
+                ),
+                ParameterSchema(
+                    name="require_pool_set_membership",
+                    type=ParameterType.BOOL,
+                    unit="bool",
+                    default=True,
+                    description=(
+                        "When ``True``, an evaluation pool disjoint from the "
+                        "artifact's ``training_pool_set`` is treated as "
+                        "out-of-distribution."
+                    ),
+                ),
+                ParameterSchema(
+                    name="ood_prediction_variance_q64_64",
+                    type=ParameterType.Q64_64,
+                    unit="Q64.64",
+                    default=1,
+                    description=(
+                        "Minimum prediction variance the artifact must "
+                        "produce across a fold; a variance below this "
+                        "floor triggers the OOD gate."
+                    ),
+                ),
+                ParameterSchema(
+                    name="regime_confidence_floor_q64_64",
+                    type=ParameterType.STRICT_Q64_64,
+                    unit="Q64.64",
+                    default=_Q64_SCALE // 100,
+                    description=(
+                        "Minimum confidence the model-backed regime model "
+                        "must produce for an ``ASSESSED`` outcome."
+                    ),
+                ),
+                ParameterSchema(
+                    name="fee_opportunity_floor_q64_64",
+                    type=ParameterType.Q64_64,
+                    unit="Q64.64",
+                    default=0,
+                    description=(
+                        "Minimum expected fee edge the model-backed "
+                        "fee-opportunity model must produce for an "
+                        "``ASSESSED`` outcome."
+                    ),
+                ),
+                ParameterSchema(
+                    name="bootstrap_iterations",
+                    type=ParameterType.POSITIVE_INT,
+                    unit="iterations",
+                    default=1000,
+                    description=(
+                        "Number of bootstrap resamples the evaluation "
+                        "uses for episode-level confidence intervals."
+                    ),
+                ),
+                ParameterSchema(
+                    name="bootstrap_seed",
+                    type=ParameterType.NON_NEGATIVE_INT,
+                    unit="seed",
+                    default=0,
+                    description=("Deterministic seed the bootstrap resampler consumes."),
+                ),
+            ),
+            code_provenance=CodeProvenance(
+                module=_MODULE_MODEL_BACKED,
+                revision="t102.model_evaluation.v1",
+                symbol="ModelBackedStrategy",
+            ),
+            factory=_AdapterFactory(_model_backed_factory),
+            description=(
+                "T102 model-backed strategy. Replaceable regime and "
+                "fee-opportunity components consume a registered "
+                "model artifact with deterministic rule fallback; the "
+                "verdict comes from simulated LP economics through "
+                "the T061 event-driven engine."
             ),
         ),
     ]

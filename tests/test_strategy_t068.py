@@ -116,6 +116,7 @@ EXPECTED_IDENTITIES: Final[tuple[str, ...]] = (
     "t062.out_of_range_rebalance.v1",
     "t062.volatility_width.v1",
     "t065.adaptive_range.v1",
+    "t102.model_backed.v1",
 )
 
 
@@ -131,10 +132,11 @@ class TestRegistryEnumeration:
         identities = registered_identities()
         assert identities == EXPECTED_IDENTITIES
 
-    def test_registry_lists_six_identities(self) -> None:
+    def test_registry_lists_seven_identities(self) -> None:
         # T062 ships five baselines; T065 adds the adaptive-Range
-        # strategy. The closed vocabulary is therefore six.
-        assert len(default_registry()) == 6
+        # strategy; T102 adds the model-backed strategy. The closed
+        # vocabulary is therefore seven.
+        assert len(default_registry()) == 7
 
     def test_hold_is_registered(self) -> None:
         assert is_registered(IDENTITY_HOLD)
@@ -684,7 +686,7 @@ class TestDeterministicEnumeration:
         assert identities_from_iter == EXPECTED_IDENTITIES
 
     def test_registry_supports_len(self) -> None:
-        assert len(default_registry()) == 6
+        assert len(default_registry()) == 7
 
 
 # ---------------------------------------------------------------------------

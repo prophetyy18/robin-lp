@@ -1379,11 +1379,11 @@ class TestRegistryBindingHelpers:
         # underlying validator agree on the schema surface.
         assert validate_parameters(IDENTITY_BROAD_RANGE, params) == params
 
-    def test_default_registry_supplies_six_identities(self) -> None:
-        # T068 binds six identities (five T062 baselines + the T065
-        # adaptive-Range strategy); the T105 publication path binds
-        # all six.
-        assert len(default_registry()) == 6
+    def test_default_registry_supplies_seven_identities(self) -> None:
+        # T068 binds seven identities (five T062 baselines + the T065
+        # adaptive-Range strategy + the T102 model-backed strategy);
+        # the T105 publication path binds all seven.
+        assert len(default_registry()) == 7
 
     def test_legacy_kind_to_identity_mapping_is_total(self) -> None:
         # Every T063 hard-coded ``strategy_kind`` has a registered

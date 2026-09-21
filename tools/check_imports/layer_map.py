@@ -200,6 +200,8 @@ MODULE_OVERRIDES: dict[str, str] = {
     "robinhood_lp.research.panel": "backtest",
     "robinhood_lp.research.harness": "backtest",
     "robinhood_lp.research.models": "strategy",
+    "robinhood_lp.research.evaluation": "backtest",
+    "robinhood_lp.strategy.model_backed": "strategy",
     # T103 names ``robinhood_lp.web`` research pages, which the §2.2
     # row classifies as ``presentation / controls`` — the canonical
     # alias for ``presentation / reports``.
