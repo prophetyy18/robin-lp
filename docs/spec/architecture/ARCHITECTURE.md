@@ -151,8 +151,10 @@ application / backtest orchestration
 | 3 | T038 (retired; superseded by T039) | `robinhood_lp.qualification.{second_pool,two_pool,two_pool_window,two_pool_failure_paths,two_pool_runbook}` | presentation / reports |
 | 5 | T049 | `robinhood_lp.protocol.sizing` | protocol/domain |
 | 6 | T068 | `robinhood_lp.strategy.registry` (registered strategy identities, parameter schemas and code provenance) | strategy |
-| 6 | T069 | `robinhood_lp.application.backtest_runs` (product-level run entry point over stored data, replay, features, the engine and the manifest) | application / orchestration |
-| 6 | T105 | `robinhood_lp.reports.{manifest,validation,rerun,run_identity,metrics}` (artifact-rerun entry extended through the application / orchestration CLI surface that T097 maps) | backtest / research |
+| 6 | T069 (superseded by T109) | `robinhood_lp.application.backtest_runs` (predecessor product-level run entry point over stored data, replay, features, the engine and the manifest) | application / orchestration |
+| 6 | T105 (superseded by T109) | `robinhood_lp.reports.{manifest,validation,rerun,run_identity,metrics}` (predecessor registry-bound manifest and artifact-rerun delivery) | backtest / research |
+| 6 | T109 | `robinhood_lp.application.{backtest_runs,historical_replay}` (product-run lifecycle, persisted run evidence and replay-frame composition) | application / orchestration |
+| 6 | T109 | `robinhood_lp.reports.{manifest,validation,rerun,run_identity,metrics,evidence}` (canonical-dataset manifest/report/evidence publication) | backtest / research |
 | 6 | T106 | `robinhood_lp.robustness` (schema-bound surfaces, splits, scenarios, runner and reports) | backtest / research |
 | 6 | T107 | `robinhood_lp.experiments` (search, candidate lock, harness, distributions and stability) | backtest / research |
 | 6 | T108 | `docs/implement/strategy/AUTHORING_GUIDE.md`, its example and drift tests | none (implementation guidance and repository verification) |

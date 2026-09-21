@@ -53,6 +53,7 @@
 | `G-RECON-01` | T033、T071、T072、T081、T091、T092、T095 | 重启、RPC、nonce、replacement、reorg 与账本核对测试 |
 | `G-BACKTEST-RUN-01` | T061、T063、T068、T069、T087、T105 | 运行入口、运行身份、状态/进度/取消与 registry-bound 可复现 manifest |
 | `G-BACKTEST-RESULT-01` | T063、T069、T088、T105–T107 | 分层结果页、事件标记、归因残差、覆盖缺口、manifest 身份与稳健性/候选证据 |
+| `G-HISTORICAL-REPLAY-01`、`G-RUN-REPLAY-01` | T040、T041、T052、T061、T069、T088、T100、T103、T105、T109 | 数据集寻址的市场状态、完成运行的不可变模拟证据、按游标的运行状态与组合回放帧；T109 复用既有重建、回测和会计路径 |
 | `G-STRATEGY-REGISTRY-01` | T060、T062、T063、T065、T068、T087、T105–T108 | 注册身份、参数 schema、代码来源、manifest/robustness/candidate-lock 绑定与作者指引 |
 | `G-PERM-WRITE-01` | T025、T073、T085、T097 | Web 提权版本化路径与 reduce-only CLI 边界 |
 | `G-PAPER-AUTHORIZE-01` | T025、T073 | 池选择、`HOLD`/`LP` 审批与 preliminary paper 授权记录 |
@@ -66,7 +67,7 @@
 | `ECO-*` | T049、T050–T053、T060–T066、T070、T105–T107 |
 | `CTRL-*` | T070、T080、T081、T085、T090–T095、T097 |
 | `M-*`（LP 指标字典） | T052、T101、T102、T103 |
-| `DS-*`（研究数据集与模型评估） | T100–T104 |
+| `DS-*`（研究数据集与模型评估） | T100–T104、T109 |
 
 ## 更新要求
 

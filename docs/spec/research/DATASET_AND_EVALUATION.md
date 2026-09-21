@@ -41,6 +41,33 @@
 成员池未达到 `backtest` support level 的数据集不得被回放、回测或用于训练。低于该
 等级必须给出具名原因，而不是静默排除。
 
+### `DS-005` — 历史市场状态
+
+`MarketCursor` 使用规范事件顺序 `(block_number, transaction_index, log_index)`；只给出
+区块号时表示该区块结束。`MarketState(dataset_version, pool_key_id, cursor)` 是该数据集
+在该游标上的历史市场事实，由数据集所引用的规范分区通过既有 replay 与 tick
+重建路径产生，不依赖策略或模拟运行。可持久化与数据集内容哈希及重建修订绑定的稀疏
+checkpoint 或投影以加速查询，但它们不是第二个事实来源，多个运行不得各自复制完整
+历史市场事件时间线。
+
+### `DS-006` — 已完成运行的历史状态
+
+成功的历史模拟发布不可变、版本化且带内容校验和的运行专属 simulation evidence。
+该证据绑定 `run_id`、数据集版本及内容哈希、PoolKey、运行区间、策略注册身份、引擎、
+会计与证据 schema 修订，并记录足以恢复该次运行实际决策、生命周期、仓位、原始 token
+数量、liquidity、费用、成本、净值与归因状态的有序状态转移；可以使用稀疏完整 checkpoint
+加其间的确定性转移，不要求每个游标保存完整快照。`RunState(run_id, cursor)` 从这些已保存
+事实投影，不得重新调用策略代码，也不得建立第二套 backtest 或会计逻辑。失败或取消的
+运行不得发布看似完整的 simulation evidence。
+
+### `DS-007` — 组合回放帧
+
+`ReplayFrame(run_id, cursor)` 是读取时组合，不是另一份持久化时间线：它通过运行记录解析
+不可变数据集引用，取得同一 PoolKey 与游标上的 `MarketState` 和 `RunState`，验证数据集
+内容哈希、游标范围、重建/引擎/会计/证据修订及各自校验和一致后返回两者。任何绑定缺失、
+不匹配、超出覆盖或证据损坏都必须 fail closed，不能用当前链状态、当前策略重跑、插值或
+最新 checkpoint 冒充目标游标的状态。
+
 ## 3. 特征与标签
 
 ### `DS-010` — 时点正确性

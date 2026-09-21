@@ -11,7 +11,7 @@ Last plan review: **2026-09-14**. Network and deployment facts are mutable;
 the links in this file are evidence sources, not values that may be copied into
 code without the verification required by T024.
 
-Plan structure revision: **A0020** (2026-09-20). This names the last Owner amendment
+Plan structure revision: **A0022** (2026-09-21). This names the last Owner amendment
 that changed the plan's structure, and it moves even when `intent_revision` and
 `spec_revision` do not, so a change that only adds tasks stays legible. Every PROPHET
 change updates it.
@@ -48,6 +48,9 @@ The current product is delivered only when all of these statements are true:
   tokens/decimals/fees/tick spacing/hooks; one must use native currency or a
   nonzero hook);
 - a saved experiment manifest reproduces the same decisions, ledger, and metrics;
+- canonical dataset history can reconstruct market state at any supported historical cursor,
+  and a completed backtest preserves checksummed run-specific evidence sufficient to replay its
+  exact strategy, position and accounting state at the same cursor without rerunning strategy code;
 - a user can choose a registered strategy, its schema-constrained parameters and a data
   range, trigger a reproducible backtest run, follow or cancel it, and read its result —
   including its coverage gaps and its unexplained PnL residual — in the console;

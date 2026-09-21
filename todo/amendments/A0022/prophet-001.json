@@ -1,0 +1,168 @@
+{
+  "amendment_id": "A0022",
+  "outcome": "AMENDMENT_READY",
+  "summary": "Recorded the Owner-directed split between canonical historical market truth and exact completed-run simulation state. Added G-HISTORICAL-REPLAY-01 and G-RUN-REPLAY-01; specified DS-005 MarketState, DS-006 persisted simulation evidence and RunState, and DS-007 ReplayFrame; bound WEB-PAGE-009 to market-only replay and WEB-PAGE-013 to completed-run replay; added one PLANNED successor, T109, replacing T069 and T105 while preserving their lifecycle, manifest, provenance, compatibility and artifact-rerun obligations; updated architecture, traceability, phase/plan collateral, plan-structure revision, intent_revision and spec_revision. No existing task contract, implementation code, test, workflow mechanism, status, attempt or approval evidence was modified.",
+  "rationale": "The existing reconstruction and simulation paths already contain the required primitives but not the required durable product contract. ReplayOutput stores one PoolCheckpoint per replayed event (src/robinhood_lp/replay/output.py:36-60), replay_state_at_height selects the last checkpoint at or below a height (src/robinhood_lp/replay/state_comparison.py:1065-1091), and T041 supplies tick reconstruction, so MarketState can be a dataset-addressed composition rather than a new engine. T100 already references immutable underlying partitions instead of copying events. The T061 BacktestResult holds an ordered audit_events tuple and final PositionState (src/robinhood_lp/backtest/engine.py:210-223), but T069 publication reduces decisions to checksums, constructs only a final LedgerSnapshot (src/robinhood_lp/orchestrator/__init__.py:1774-1790), and the report builder receives only metrics, coverage and that terminal snapshot (same file:2052-2067); those artifacts cannot recover arbitrary historical strategy/position/accounting state. The current T105 manifest also embeds input_event_list for rerun (src/robinhood_lp/reports/manifest.py:468-469), duplicating the canonical market input in each result. The smallest coherent change is therefore one integrated successor, not another replay or backtest engine: T109 retains T069's only product-run lifecycle and T105's only manifest/report/artifact-rerun authority, moves new manifest input identity to immutable T100 dataset/partition references, persists only run-specific simulation evidence with sparse checkpoints plus deterministic transitions, and composes ReplayFrame at read time. One successor replaces both approved contracts because successful publication, manifest input identity and atomic evidence publication are one cutover; splitting them would create an interval with two incompatible success definitions or two publishers. Historical predecessor records remain byte-identical and explicitly non-replayable when evidence is absent. The Owner direction fully decides the product semantics, so no Owner question remains.",
+  "unresolved_questions": [],
+  "impact_assessment": {
+    "intent": "PROJECT_GOALS.md adds exactly two goals. G-HISTORICAL-REPLAY-01 defines MarketState(t) as reusable canonical historical truth independent of a strategy. G-RUN-REPLAY-01 defines RunState(run_id,t) as exact saved evidence from one completed simulation and ReplayFrame as same-cursor composition, forbidding strategy rerun, per-run market copies, parallel engines and a full snapshot at every point. intent_revision advances to v1-2026-09-21-historical-and-run-replay. No execution, risk, strategy-selection, support-level or live-promotion goal changes.",
+    "specification": "DATASET_AND_EVALUATION.md adds DS-005 through DS-007: the canonical event cursor, dataset-addressed MarketState, immutable checksummed simulation evidence, sparse checkpoint plus transition RunState, and validated read-time ReplayFrame composition. WEB_CONSOLE.md makes WEB-PAGE-009's market replay consume MarketState while keeping its position hypothetical, and makes WEB-PAGE-013 consume ReplayFrame for exact completed-run history. ARCHITECTURE.md assigns T109 the existing application/backtest-runs and reports paths plus historical-replay/evidence integration and pre-annotates T069/T105 as superseded by T109 for the later SUPERSEDE route. spec_revision advances to v1-2026-09-21-historical-and-run-replay.",
+    "contracts": "No existing contract changed. One new contract, T109, replaces T069 and T105 and preserves all of their accepted obligations while adding the missing evidence and read contracts. It expressly retains one product-run lifecycle, one registry-bound manifest/report publisher, one stateless artifact-rerun boundary, T063 legacy compatibility, atomic publication and all prior fail-closed behavior. Ten existing contracts are recorded below: the two approved predecessors require annotation-only retirement after rewiring, and eight PLANNED consumers require CONTRACT amendments before they may run.",
+    "dependencies": "T109 depends on T041, T052, T061, T069, T100 and T105, is PLANNED at attempt 0, and declares replaces=[T069,T105]. The graph validates and is acyclic. Direct PLANNED consumers that must be repointed before retirement are T087/T088 for T069 and T073/T084/T107/T108 for T105. T103 needs a new direct T109 edge for MarketState despite its current transitive research-run path, and T096 needs T109 directly so the two new goals and successor evidence enter the final gate. Approved T101/T106 dependencies remain immutable historical evidence and do not need contract rewriting. The later safe order is CONTRACT-rewire the eight PLANNED tasks, SUPERSEDE T069 and T105 to T109, then implement/review T109.",
+    "implementation": "No application or test code changed. T109 authorizes adaptation of the existing T040/T041 reconstruction, T061 engine/accounting, T052 attribution, T069 orchestration, T100 dataset registry and T105 publication paths. Market checkpoints remain projections/caches, simulation evidence stores run-specific facts only, and ReplayFrame is a read-model composition. The old successful-publication path must become unreachable after cutover; no second replay, backtest, accounting, manifest, strategy or lifecycle implementation is permitted.",
+    "data": "Canonical market events remain in T031 partitions addressed through immutable T100 dataset versions and content hashes. New manifests reference that canonical input rather than embedding a complete input_event_list. Each new successful run atomically publishes immutable versioned simulation evidence containing ordered run-specific transitions and optional sparse complete checkpoints, with dataset/pool/range/strategy/engine/accounting/schema bindings and checksums. Existing T069/T105/T063 run records, manifests, reports, checksums and review artifacts remain byte-identical and readable; runs without the new evidence return explicitly unavailable RunState and are never regenerated with current strategy code.",
+    "operations": "T109 preserves queued/running/failed/cancelled/succeeded state, progress, reason codes, restart recovery, cancellation, CLI operation without Web and linked product reruns. Cutover is atomic across manifest, report and simulation evidence: all three publish successfully or the run cannot appear succeeded. Rollback restores an evidence-capable release or disables new successful publication, never the predecessor's complete-looking success path. WEB-PAGE-009 remains market-only/hypothetical; WEB-PAGE-013 becomes the exact completed-run scrubber; failed, cancelled, incomplete, legacy-only or binding-mismatched frames fail closed.",
+    "security": "The change adds read/evidence semantics only. Dataset, manifest and evidence identities confer no strategy registration, risk, approval, signer, execution, paper or live authority. Evidence excludes credentials, endpoint secrets and key material, Web authentication remains governed by existing console contracts, and no signer/execution/risk path or permission boundary changed.",
+    "verification": "Author-side investigation only, not approval evidence: tools.workflow validate returned OK; tools.check_imports returned no findings; tools.check_acceptance returned no findings; git diff --check is clean. The focused documentation/workflow suite produced 69 passed and one failure, tests/test_documentation_citations.py::test_check_passes_on_real_repository, caused by the pre-existing unresolved T069 architecture module path robinhood_lp.application.backtest_runs. The same single citation finding is present in the untouched main/base checkout, so A0022 adds no citation finding; after removing a newly introduced literal module citation from T109, the candidate citation result is exactly that baseline finding. T109 acceptance requires two heterogeneous pools, beginning/intra-block/end-of-block/range-end market queries, lifecycle cursor equality to original T061 state, no callback after strategy change/removal, sparse-checkpoint equivalence, checksum/binding failures, legacy unavailable behavior, atomic failure/cancellation behavior, one shared market timeline, and both predecessor success paths unreachable. Independent plan review remains required."
+  },
+  "affected_existing_tasks": [
+    {
+      "impact_id": "A0022:T069:replace-final-only-run-publication",
+      "task_id": "T069",
+      "reason": "T069's accepted contract defines successful publication as exactly the T105 manifest and reports and contains no durable arbitrary-cursor simulation evidence. G-RUN-REPLAY-01 and DS-006 now require every new successful historical simulation to publish checksummed evidence sufficient for RunState without strategy rerun, so treating T069 as the current complete product-run contract would mislead a reader into publishing final-only results.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "OPERATIONS",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT: T109 preserves every T069 lifecycle obligation and replaces its final-only success definition. DEPENDENCY: repoint every PLANNED direct consumer to T109 before retirement. IMPLEMENTATION: adapt the existing run path; no parallel runner. DATA/OPERATIONS: preserve old records read-only, make pre-evidence RunState unavailable, and atomically publish new evidence with successful results. SECURITY: no authority change. VERIFICATION: retain all T069 tests and prove old successful publication is unreachable. SUPERSEDE: after consumer rewiring, annotate T069 superseded_by T109 without editing its contract or evidence."
+    },
+    {
+      "impact_id": "A0022:T105:replace-embedded-market-input-publication",
+      "task_id": "T105",
+      "reason": "T105 preserves the current manifest/artifact-rerun path, whose implemented schema embeds input_event_list, while G-HISTORICAL-REPLAY-01 and DS-005 require one reusable canonical market timeline rather than a complete per-result copy; T105 also names T069 as the current lifecycle owner after T109 takes over. Leaving T105 current would mislead implementers into retaining duplicated market input and a split publication authority.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "OPERATIONS",
+        "SECURITY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT: T109 preserves T105 registry/schema/provenance/checksum/rerun/legacy obligations while replacing new-write market input with T100 dataset/partition references and adding evidence. DEPENDENCY: repoint all PLANNED direct consumers before retirement. IMPLEMENTATION: adapt the one reports publisher and keep artifact rerun stateless. DATA: preserve old embedded-event manifests byte-identical behind a legacy reader; never backfill them. OPERATIONS: cut over atomically with T109 runs. SECURITY: manifests/evidence grant no authority and contain no secrets. VERIFICATION: retain T105 coverage, add reference resolution/no-copy/migration and old-publisher-unreachable tests. SUPERSEDE: annotate T105 superseded_by T109 only after rewiring."
+    },
+    {
+      "impact_id": "A0022:T073:consume-t109-current-evidence",
+      "task_id": "T073",
+      "reason": "T073 directly depends on T105 and presents current backtest evidence during Owner authorization. Once T109 becomes the current manifest/evidence authority, the existing dependency can present predecessor evidence that lacks replay evidence and canonical dataset references.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "OPERATIONS",
+        "SECURITY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT/DEPENDENCY: replace T105 with T109 and require current evidence provenance while preserving all authorization semantics. IMPLEMENTATION/DATA: read T109 artifacts; retain T105 artifacts as labelled history only. OPERATIONS: missing/mismatched evidence blocks authorization display. SECURITY: replay evidence grants no approval. VERIFICATION: current, legacy, mismatch and unavailable cases."
+    },
+    {
+      "impact_id": "A0022:T084:present-t109-replay-provenance",
+      "task_id": "T084",
+      "reason": "T084 directly depends on T105 for console provenance. The new governing spec makes T109 the current canonical-dataset manifest/evidence authority, so retaining T105 would leave the console shell describing predecessor provenance and no simulation-evidence availability state.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "SECURITY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT/DEPENDENCY: replace T105 with T109 and expose current dataset/evidence provenance and explicit legacy/unavailable state. IMPLEMENTATION: read only, with no duplicate projection. DATA: preserve old artifacts visibly historical. OPERATIONS: not otherwise applicable beyond fail-closed availability. SECURITY: no approval or execution authority. VERIFICATION: current, legacy, mismatch, unavailable and no-secret rendering."
+    },
+    {
+      "impact_id": "A0022:T087:trigger-t109-and-link-replay",
+      "task_id": "T087",
+      "reason": "T087 directly depends on and repeatedly triggers T069, while the new plan makes T109 the sole current run entry and requires completed runs to expose exact replay evidence. Its current run list has no obligation to distinguish replayable from legacy-unavailable results or link a successful run to its replay surface.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "OPERATIONS",
+        "SECURITY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT/DEPENDENCY: replace T069 with T109; preserve registry/range/lifecycle/cancellation behavior and add replay-evidence availability plus a link from successful replayable runs to T088. IMPLEMENTATION/DATA: use T109 records, never infer evidence for legacy runs. OPERATIONS: failed/cancelled/incomplete remain non-results. SECURITY: link grants no authority. VERIFICATION: trigger/observe/cancel, replayable link, legacy unavailable and mismatch cases."
+    },
+    {
+      "impact_id": "A0022:T088:consume-replay-frame",
+      "task_id": "T088",
+      "reason": "T088 directly depends on T069 and describes charts sourced from a decision stream and final artifacts, but WEB-PAGE-013 now requires arbitrary-cursor ReplayFrame(run_id,cursor), with exact saved RunState and dataset-bound MarketState and no strategy rerun. The present contract does not define that data source or historical scrubbing behavior.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "OPERATIONS",
+        "SECURITY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT/DEPENDENCY: replace T069 with T109 and make ReplayFrame the source for completed-run historical inspection while retaining every chart/layer/checksum obligation. IMPLEMENTATION: presentation composes no state itself. DATA: legacy runs show unavailable, not reconstructed summaries. OPERATIONS: cursor/binding/checksum failures block the frame. SECURITY: read-only and no authority. VERIFICATION: scrub multiple cursors, exact market/run alignment, no callback, legacy/failure/tamper cases."
+    },
+    {
+      "impact_id": "A0022:T103:consume-market-state",
+      "task_id": "T103",
+      "reason": "T103's WEB-PAGE-009 contract asks for reconstructed pool state at a chosen block and cites T040/T041 directly, but DS-005 now establishes the dataset-addressed MarketState contract and makes it distinct from completed-run replay. Without amendment, T103 can assemble an ad hoc second read path and blur hypothetical position inspection with actual RunState.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "OPERATIONS",
+        "SECURITY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT/DEPENDENCY: add T109 directly and require WEB-PAGE-009 to consume MarketState while keeping its position explicitly hypothetical; do not add RunState or duplicate T088. IMPLEMENTATION: use the one query contract. DATA: bind dataset/pool/cursor and show gaps. OPERATIONS: unavailable/mismatch fail closed. SECURITY: read-only, no execution authority. VERIFICATION: market-only operation with no strategy/run, exact cursor, hypothetical-label and no-second-path tests."
+    },
+    {
+      "impact_id": "A0022:T107:consume-t109-manifest-authority",
+      "task_id": "T107",
+      "reason": "T107 directly depends on T105 for the current registry-bound manifest used by candidate locking. T109 replaces that publisher and changes new manifests to canonical dataset references plus simulation evidence; retaining T105 would strand a PLANNED consumer and allow candidate evidence to omit the new run-evidence binding.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "OPERATIONS",
+        "SECURITY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT/DEPENDENCY: replace T105 with T109 and bind candidate evidence to the current dataset-reference manifest/evidence checksum. IMPLEMENTATION: consume, do not republish. DATA: old locks/artifacts remain history and are not upgraded. OPERATIONS: missing/legacy/mismatched evidence blocks current locking. SECURITY: no permission follows from replay evidence. VERIFICATION: current, legacy, mismatch and old-authority-unreachable cases."
+    },
+    {
+      "impact_id": "A0022:T108:teach-t109-publication",
+      "task_id": "T108",
+      "reason": "T108 directly depends on and teaches T105 as the current manifest authority. After T109 replaces it, the planned guide would direct authors to the predecessor publisher and omit the rule that completed-run replay uses saved evidence without strategy callbacks.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "SECURITY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT/DEPENDENCY: replace T105 with T109 and teach canonical dataset references, atomic evidence publication, and the no-strategy-rerun boundary while preserving all authoring and identity guidance. IMPLEMENTATION: guide/example only, no new authority. DATA: do not rewrite historical examples/artifacts. OPERATIONS: not applicable. SECURITY: registration/evidence grants no permission. VERIFICATION: guide/example drift tests reject predecessor publication and callback-based replay guidance."
+    },
+    {
+      "impact_id": "A0022:T096:include-replay-goals-and-t109-evidence",
+      "task_id": "T096",
+      "reason": "T096's final matrix explicitly names T069 and T105 and its dependency closure assertion requires them, but it does not name G-HISTORICAL-REPLAY-01, G-RUN-REPLAY-01, DS-005 through DS-007 or T109. It could therefore declare every V1 goal covered without evidence for canonical market replay or exact completed-run replay.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "OPERATIONS",
+        "SECURITY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT/DEPENDENCY: add T109 directly, replace current-authority references to T069/T105 with T109 while retaining both as predecessor history, and map both new goals plus DS-005-DS-007 to T109's independent evidence. IMPLEMENTATION/DATA: final matrix links real market/run/frame tests and immutable predecessor records. OPERATIONS: missing or unapproved T109 blocks final acceptance. SECURITY: record that replay evidence grants no execution authority. VERIFICATION: dependency-closure assertion and positive, negative, migration, no-copy, no-callback and old-path-unreachable evidence."
+    }
+  ],
+  "resolved_task_impacts": []
+}

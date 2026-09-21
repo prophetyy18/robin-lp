@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0022",
+  "task_ids": [],
+  "layer": "PROPHET",
+  "target_status": null,
+  "summary": "define historical market and exact strategy-run replay semantics",
+  "owner_direction": "Preserve MarketState(t) as canonical historical market truth, RunState(run_id,t) as the exact persisted state of one completed historical simulation without rerunning strategy code, and ReplayFrame(run_id,t) as their composition. Reuse canonical datasets, existing replay, backtest and accounting; do not duplicate full market timelines per run or create parallel engines. Add the smallest successor task and planning/spec updates required; do not implement application code."
+}
