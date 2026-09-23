@@ -276,6 +276,28 @@ class RunAlreadyExistsError(BacktestRunError):
         )
 
 
+class FixedEmptyEventSourceError(BacktestRunError):
+    """The T069 product-run entry observed an event source that returned the empty list.
+
+    The T112 contract binds the product backtest entry path to refuse
+    the fixed empty event source that the approved T109 implementation
+    could reach. A T112 (or T069) run whose event source returns the
+    empty event list fails closed with the named reason code; no
+    manifest, evidence, or report is published. The T112 entry path
+    raises :class:`robinhood_lp.orchestrator.t112.FixedEmptyEventSourceError`
+    upstream; the T069 entry path surfaces the same refusal here so
+    the fixed empty event source is no longer reachable as a current
+    entry through either path.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            f"{_REASON_PREFIX}FIXED_EMPTY_EVENT_SOURCE_REFUSED: the product "
+            f"backtest entry refuses the fixed empty event source; the run "
+            f"must load events from real T100 partitions"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Run state enum
 # ---------------------------------------------------------------------------
@@ -1944,7 +1966,18 @@ class BacktestOrchestrator:
         request: RunRequest,
         cancel_token: CancelToken,
     ) -> list[BacktestEvent]:
-        """Load input events through the injected event source."""
+        """Load input events through the injected event source.
+
+        The T112 contract binds the product backtest entry path to
+        refuse the fixed empty event source the approved T109
+        implementation could reach. When the source returns the
+        empty list the T069 entry path surfaces the named reason
+        code ``T069_FIXED_EMPTY_EVENT_SOURCE_REFUSED`` and writes a
+        ``FAILED`` terminal record; no manifest, evidence or report
+        is published. The check runs after the cancellation gate so
+        a cancelled source still raises :class:`RunCancelled` and
+        surfaces a ``CANCELLED`` terminal record.
+        """
         events = self.event_source.load_events(
             chain_id=request.chain_id,
             pool_key_id=request.pool_key_id,
@@ -1953,6 +1986,8 @@ class BacktestOrchestrator:
             cancel_token=cancel_token,
         )
         cancel_token.raise_if_cancelled()
+        if not events:
+            raise FixedEmptyEventSourceError()
         return events
 
     def _update_record(

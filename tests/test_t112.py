@@ -72,15 +72,19 @@ from robinhood_lp.backtest.events import (
     PositionState,
 )
 from robinhood_lp.orchestrator import (
+    BacktestOrchestrator,
     DatasetCoverage,
     DatasetResolver,
+    EventSource,
     RunRequest,
+    RunState,
     RunStateStore,
 )
 from robinhood_lp.orchestrator.t112 import (
     BacktestOrchestratorT112,
     FixedEmptyEventSourceError,
     PartitionRefMismatchError,
+    PartitionReplayEventSource,
     StaticPartitionEventSource,
     T100PartitionResolutionError,
     T112DatasetPartitionResolver,
@@ -1943,3 +1947,489 @@ class TestBuildThenReadRoundTrip:
         loaded_evidence = t112_simulation_evidence_from_dict(evidence_payload)
         assert loaded_manifest.simulation_evidence_checksum == loaded_evidence.evidence_checksum
         assert loaded_evidence.manifest_checksum == loaded_manifest.report_checksum
+
+
+# ---------------------------------------------------------------------------
+# 16. Negative invariant: no T109 artifacts / no T109 SUCCEEDED on T112 submit
+# ---------------------------------------------------------------------------
+
+
+class TestT112SubmitDoesNotEmitT109Artifacts:
+    """The T112 entry path must not invoke the defective T109 writer.
+
+    The T112 contract binds the new entry path to be the only current
+    product-run writer; a successful T112 submit must not write any
+    T109 manifest / evidence / report file, and must not transition a
+    run record to ``SUCCEEDED`` through the T109 path. The class pins
+    the negative invariant the prior candidate violated.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_registry(self) -> Iterable[None]:
+        reset_default_registry_cache()
+        yield
+        reset_default_registry_cache()
+
+    def test_t112_submit_does_not_write_t109_manifest(self, tmp_path: Path) -> None:
+        """A successful T112 submit must not produce a T109 manifest.json file."""
+        events = [
+            _swap_event(timestamp=100, block_number=10, transaction_index=0, log_index=0),
+            _shutdown_event(timestamp=200, block_number=40, transaction_index=0, log_index=0),
+        ]
+        orchestrator = _build_orchestrator(events=events, tmp_path=tmp_path)
+        outcome = orchestrator.submit(_build_full_request())
+        runs_root = tmp_path / "runs"
+        # No T109 manifest with the unversioned filename.
+        t109_manifests = list(runs_root.glob("*.manifest.json"))
+        assert t109_manifests == [], (
+            f"T112 submit must not write any T109 manifest files; "
+            f"found {[p.name for p in t109_manifests]}"
+        )
+        # The T112 manifest is present at the .manifest.t112.json path.
+        assert outcome.manifest_path is not None
+        assert outcome.manifest_path.name.endswith(".manifest.t112.json")
+
+    def test_t112_submit_does_not_write_t109_evidence(self, tmp_path: Path) -> None:
+        """A successful T112 submit must not produce a T109 evidence file."""
+        events = [
+            _swap_event(timestamp=100, block_number=10, transaction_index=0, log_index=0),
+            _shutdown_event(timestamp=200, block_number=40, transaction_index=0, log_index=0),
+        ]
+        orchestrator = _build_orchestrator(events=events, tmp_path=tmp_path)
+        outcome = orchestrator.submit(_build_full_request())
+        runs_root = tmp_path / "runs"
+        # No T109 evidence with the unversioned filename.
+        t109_evidence = list(runs_root.glob("*.simulation_evidence.json"))
+        assert t109_evidence == [], (
+            f"T112 submit must not write any T109 simulation_evidence.json "
+            f"files; found {[p.name for p in t109_evidence]}"
+        )
+        assert outcome.evidence_path is not None
+        assert outcome.evidence_path.name.endswith(".simulation_evidence.t112.json")
+
+    def test_t112_submit_does_not_write_t109_report(self, tmp_path: Path) -> None:
+        """A successful T112 submit must not produce a T109 report.json file."""
+        events = [
+            _swap_event(timestamp=100, block_number=10, transaction_index=0, log_index=0),
+            _shutdown_event(timestamp=200, block_number=40, transaction_index=0, log_index=0),
+        ]
+        orchestrator = _build_orchestrator(events=events, tmp_path=tmp_path)
+        orchestrator.submit(_build_full_request())
+        runs_root = tmp_path / "runs"
+        # No T109 report at the unversioned filename.
+        t109_reports = list(runs_root.glob("*.report.json"))
+        assert t109_reports == [], (
+            f"T112 submit must not write any T109 report files; "
+            f"found {[p.name for p in t109_reports]}"
+        )
+
+    def test_t112_submit_does_not_transition_run_to_succeeded_via_t109(
+        self, tmp_path: Path
+    ) -> None:
+        """A T112 submit must not transition a run record to SUCCEEDED via the T109 path."""
+        events = [
+            _swap_event(timestamp=100, block_number=10, transaction_index=0, log_index=0),
+            _shutdown_event(timestamp=200, block_number=40, transaction_index=0, log_index=0),
+        ]
+        orchestrator = _build_orchestrator(events=events, tmp_path=tmp_path)
+        orchestrator.submit(_build_full_request())
+        # The T109 entry path writes a .run.json file with state=SUCCEEDED;
+        # the T112 entry path must not produce such a record. The
+        # T112 contract binds the durable run lifecycle through the
+        # base orchestrator's record schema; a SUCCEEDED transition
+        # there would be the second publication authority the contract
+        # forbids.
+        runs_root = tmp_path / "runs"
+        run_records = list(runs_root.glob("*.run.json"))
+        for record_path in run_records:
+            payload = json.loads(record_path.read_text(encoding="utf-8"))
+            assert payload.get("state") != RunState.SUCCEEDED.value, (
+                f"T112 submit must not produce a run record with state=SUCCEEDED "
+                f"via the T109 path; found {record_path.name} state="
+                f"{payload.get('state')!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# 17. Negative invariant: BacktestOrchestrator.submit refuses empty events
+# ---------------------------------------------------------------------------
+
+
+class TestBacktestOrchestratorRejectsEmptyEventSource:
+    """The T069 entry path refuses the fixed empty event source with named reason.
+
+    The T112 contract binds the product backtest entry to refuse the
+    fixed empty event source as a current entry. The T069 entry path
+    surfaces the same refusal with a ``T069_``-prefixed reason so the
+    fixed empty event source path is no longer reachable through
+    either the T112 entry or the T069 entry.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_registry(self) -> Iterable[None]:
+        reset_default_registry_cache()
+        yield
+        reset_default_registry_cache()
+
+    def test_backtest_orchestrator_submit_refuses_empty_events(self, tmp_path: Path) -> None:
+        """BacktestOrchestrator.submit raises FixedEmptyEventSourceError on empty source."""
+
+        class _EmptySource(EventSource):
+            def load_events(self, **_kwargs: Any) -> list[BacktestEvent]:
+                return []
+
+        dataset_resolver = _StaticDatasetResolver()
+        dataset_resolver.add(
+            dataset_version=DATASET_VERSION,
+            chain_id=CHAIN_ID_A,
+            pool_key_id=POOL_KEY_A,
+            covered_start=0,
+            covered_end=1000,
+            content_hash=DATASET_HASH_A,
+        )
+        store = RunStateStore(runs_root=tmp_path / "runs")
+        orchestrator = BacktestOrchestrator(
+            store=store,
+            dataset_resolver=dataset_resolver,
+            event_source=_EmptySource(),
+        )
+        record = orchestrator.submit(_build_full_request())
+        # The T069 entry refuses the empty source and writes a FAILED
+        # terminal record with the named T069-prefixed reason code.
+        assert record.state == RunState.FAILED
+        assert record.reason_code is not None
+        assert "FIXED_EMPTY_EVENT_SOURCE_REFUSED" in record.reason_code
+
+    def test_backtest_orchestrator_empty_refusal_is_named_reason_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """The empty-source refusal surfaces the T069_FIXED_EMPTY_EVENT_SOURCE_REFUSED code."""
+
+        class _EmptySource(EventSource):
+            def load_events(self, **_kwargs: Any) -> list[BacktestEvent]:
+                return []
+
+        dataset_resolver = _StaticDatasetResolver()
+        dataset_resolver.add(
+            dataset_version=DATASET_VERSION,
+            chain_id=CHAIN_ID_A,
+            pool_key_id=POOL_KEY_A,
+            covered_start=0,
+            covered_end=1000,
+            content_hash=DATASET_HASH_A,
+        )
+        store = RunStateStore(runs_root=tmp_path / "runs")
+        orchestrator = BacktestOrchestrator(
+            store=store,
+            dataset_resolver=dataset_resolver,
+            event_source=_EmptySource(),
+        )
+        record = orchestrator.submit(_build_full_request())
+        # The T069 exception class names the reason and the test
+        # confirms the orchestrator surfaces that named reason.
+        assert record.error_message is not None
+        assert "T069_FIXED_EMPTY_EVENT_SOURCE_REFUSED" in record.error_message
+
+
+# ---------------------------------------------------------------------------
+# 18. Real T040/T041 replay-backed T100ReplayEventSource
+# ---------------------------------------------------------------------------
+
+
+class TestPartitionReplayEventSource:
+    """A real T100ReplayEventSource wires through the T040 replay path.
+
+    The T112 contract binds the entry path to load events through
+    the existing T040/T041 replay and T050 point-in-time
+    market-features paths. The :class:`PartitionReplayEventSource`
+    is the production surface: it materialises the typed event
+    list by replaying each partition's typed V4 log records through
+    :func:`robinhood_lp.replay.replay.replay` and converting the
+    resulting :class:`PoolCheckpoint` records into
+    :class:`BacktestEvent` values the T061 engine consumes.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_registry(self) -> Iterable[None]:
+        reset_default_registry_cache()
+        yield
+        reset_default_registry_cache()
+
+    def test_partition_replay_event_source_loads_events_through_t040_replay(
+        self, tmp_path: Path
+    ) -> None:
+        """The real T100ReplayEventSource wires through T040 replay and surfaces events."""
+
+        from robinhood_lp.protocol.ids import Address, ChainId, PoolId
+        from robinhood_lp.protocol.records import InitializeLogRecord, SwapLogRecord
+
+        # Build typed V4 log records the T040 replay consumes. The
+        # replay enforces the V4 lifecycle: an Initialize event must
+        # precede every Swap / ModifyLiquidity / Donate. The
+        # production bridge uses RawPartitionReader to materialise
+        # these from the on-disk Parquet partitions the T100 dataset
+        # registry registered.
+        pool_manager = Address(0)
+        sender = Address(0)
+        pool_id_hex = POOL_KEY_A.removeprefix("0x").rjust(64, "0")
+        pool_id = PoolId(int(pool_id_hex, 16))
+        initialize = InitializeLogRecord(
+            chain_id=ChainId(CHAIN_ID_A),
+            pool_id=pool_id,
+            block_number=5,
+            block_hash=1,
+            transaction_hash=1,
+            transaction_index=0,
+            log_index=0,
+            address=pool_manager,
+            block_timestamp=50,
+            parent_hash=0,
+            removed=False,
+        )
+        log_record = SwapLogRecord(
+            chain_id=ChainId(CHAIN_ID_A),
+            pool_id=pool_id,
+            block_number=10,
+            block_hash=2,
+            transaction_hash=2,
+            transaction_index=0,
+            log_index=0,
+            address=sender,
+            sender=sender,
+            amount0=1_000_000,
+            amount1=2_000_000,
+            sqrt_price_x96=1 << 96,
+            liquidity=10_000,
+            tick=0,
+            fee=3_000,
+            block_timestamp=100,
+            parent_hash=0,
+            removed=False,
+        )
+
+        def loader(
+            chain_id: int, pool_key_id: str, start_block: int, end_block: int
+        ) -> list[list[Any]]:
+            return [[initialize, log_record]]
+
+        from robinhood_lp.orchestrator import CancelToken
+
+        source = PartitionReplayEventSource(
+            partition_loader=loader,
+            pool_fee=3_000,
+            initial_sqrt_price_x96=1 << 96,
+            initial_tick=0,
+        )
+        events = source.load_events(
+            chain_id=CHAIN_ID_A,
+            pool_key_id=POOL_KEY_A,
+            block_range_start=1,
+            block_range_end=100,
+            cancel_token=CancelToken(),
+        )
+        # The replay produced a deterministic checkpoint sequence
+        # converted into BacktestEvent records. The events carry the
+        # canonical cursor the T112 evidence loader cross-checks
+        # against the position_tick_range.
+        assert events, "T040 replay produced no events"
+        for evt in events:
+            assert evt.pool_key_id == POOL_KEY_A
+            assert evt.chain_id == CHAIN_ID_A
+            assert evt.block_number is not None
+            assert evt.transaction_index is not None
+            assert evt.log_index is not None
+            assert evt.payload  # the bridge surfaces price / tick / liquidity
+
+    def test_partition_replay_event_source_refuses_empty_loader(self) -> None:
+        """A loader that returns no records raises FixedEmptyEventSourceError."""
+
+        from robinhood_lp.orchestrator import CancelToken
+
+        def loader(
+            chain_id: int, pool_key_id: str, start_block: int, end_block: int
+        ) -> list[list[Any]]:
+            return []
+
+        source = PartitionReplayEventSource(partition_loader=loader, pool_fee=3_000)
+        with pytest.raises(FixedEmptyEventSourceError):
+            source.load_events(
+                chain_id=CHAIN_ID_A,
+                pool_key_id=POOL_KEY_A,
+                block_range_start=1,
+                block_range_end=100,
+                cancel_token=CancelToken(),
+            )
+
+    def test_partition_replay_event_source_produces_typed_events(self) -> None:
+        """The replay-backed source produces events with the canonical cursor triple."""
+        from robinhood_lp.orchestrator import CancelToken
+        from robinhood_lp.protocol.ids import Address, ChainId, PoolId
+        from robinhood_lp.protocol.records import InitializeLogRecord, SwapLogRecord
+
+        pool_manager = Address(0)
+        sender = Address(0)
+        pool_id_hex = POOL_KEY_A.removeprefix("0x").rjust(64, "0")
+        pool_id = PoolId(int(pool_id_hex, 16))
+        initialize = InitializeLogRecord(
+            chain_id=ChainId(CHAIN_ID_A),
+            pool_id=pool_id,
+            block_number=5,
+            block_hash=1,
+            transaction_hash=1,
+            transaction_index=0,
+            log_index=0,
+            address=pool_manager,
+            block_timestamp=50,
+            parent_hash=0,
+            removed=False,
+        )
+        records: list[Any] = [initialize]
+        for block in (10, 15, 20):
+            records.append(
+                SwapLogRecord(
+                    chain_id=ChainId(CHAIN_ID_A),
+                    pool_id=pool_id,
+                    block_number=block,
+                    block_hash=block + 100,
+                    transaction_hash=block + 100,
+                    transaction_index=0,
+                    log_index=0,
+                    address=sender,
+                    sender=sender,
+                    amount0=block * 100,
+                    amount1=block * 200,
+                    sqrt_price_x96=1 << 96,
+                    liquidity=10_000,
+                    tick=block,
+                    fee=3_000,
+                    block_timestamp=block * 10,
+                    parent_hash=0,
+                    removed=False,
+                )
+            )
+
+        def loader(
+            chain_id: int, pool_key_id: str, start_block: int, end_block: int
+        ) -> list[list[Any]]:
+            return [records]
+
+        source = PartitionReplayEventSource(
+            partition_loader=loader,
+            pool_fee=3_000,
+            initial_sqrt_price_x96=1 << 96,
+            initial_tick=0,
+        )
+        events = source.load_events(
+            chain_id=CHAIN_ID_A,
+            pool_key_id=POOL_KEY_A,
+            block_range_start=1,
+            block_range_end=100,
+            cancel_token=CancelToken(),
+        )
+        # The replay sorted the records deterministically; every
+        # produced event carries a non-None cursor triple.
+        assert len(events) == len(records)
+        for evt in events:
+            assert isinstance(evt.block_number, int)
+            assert isinstance(evt.transaction_index, int)
+            assert isinstance(evt.log_index, int)
+            # The bridge binds the checkpoint's sqrt_price_x96 into
+            # the BacktestEvent payload so the engine sees the same
+            # post-swap price the replay recorded.
+            payload = dict(evt.payload)
+            assert "sqrt_price_x96" in payload
+            assert "tick" in payload
+            assert "active_liquidity" in payload
+
+    def test_partition_replay_event_source_through_orchestrator(self, tmp_path: Path) -> None:
+        """The T112 orchestrator composes the real replay-backed source end-to-end."""
+        from robinhood_lp.protocol.ids import Address, ChainId, PoolId
+        from robinhood_lp.protocol.records import InitializeLogRecord, SwapLogRecord
+
+        pool_manager = Address(0)
+        sender = Address(0)
+        pool_id_hex = POOL_KEY_A.removeprefix("0x").rjust(64, "0")
+        pool_id = PoolId(int(pool_id_hex, 16))
+        initialize = InitializeLogRecord(
+            chain_id=ChainId(CHAIN_ID_A),
+            pool_id=pool_id,
+            block_number=5,
+            block_hash=1,
+            transaction_hash=1,
+            transaction_index=0,
+            log_index=0,
+            address=pool_manager,
+            block_timestamp=50,
+            parent_hash=0,
+            removed=False,
+        )
+        log_record = SwapLogRecord(
+            chain_id=ChainId(CHAIN_ID_A),
+            pool_id=pool_id,
+            block_number=10,
+            block_hash=2,
+            transaction_hash=2,
+            transaction_index=0,
+            log_index=0,
+            address=sender,
+            sender=sender,
+            amount0=1_000_000,
+            amount1=2_000_000,
+            sqrt_price_x96=1 << 96,
+            liquidity=10_000,
+            tick=0,
+            fee=3_000,
+            block_timestamp=100,
+            parent_hash=0,
+            removed=False,
+        )
+
+        def loader(
+            chain_id: int, pool_key_id: str, start_block: int, end_block: int
+        ) -> list[list[Any]]:
+            return [[initialize, log_record]]
+
+        # Build the wired T112 orchestrator with the real
+        # replay-backed source. The source materialises the event
+        # list through the T040 replay path; the orchestrator runs
+        # the engine, builds the T112 manifest / evidence, and
+        # publishes them.
+        dataset_resolver = _StaticDatasetResolver()
+        dataset_resolver.add(
+            dataset_version=DATASET_VERSION,
+            chain_id=CHAIN_ID_A,
+            pool_key_id=POOL_KEY_A,
+            covered_start=1,
+            covered_end=1000,
+            content_hash=DATASET_HASH_A,
+        )
+        partition_resolver = _StaticT112PartitionResolver(
+            partitions_by_key={
+                (DATASET_VERSION, CHAIN_ID_A, POOL_KEY_A): (_resolved_partition_a(),),
+            }
+        )
+        ref_resolver = _StaticT100PartitionRefResolver(
+            partitions={
+                (CHAIN_ID_A, POOL_KEY_A, _partition_id_a()): _resolved_partition_a(),
+            }
+        )
+        store = RunStateStore(runs_root=tmp_path / "runs")
+        orchestrator = BacktestOrchestratorT112(
+            store=store,
+            dataset_resolver=dataset_resolver,
+            partition_resolver=partition_resolver,
+            event_source=PartitionReplayEventSource(
+                partition_loader=loader,
+                pool_fee=3_000,
+                initial_sqrt_price_x96=1 << 96,
+                initial_tick=0,
+            ),
+            partition_ref_resolver=ref_resolver,
+        )
+        outcome = orchestrator.submit(_build_full_request())
+        # The orchestrator consumed the events the T040 replay
+        # produced; the T112 manifest and evidence are published
+        # at the .t112.json paths.
+        assert outcome.manifest is not None
+        assert outcome.manifest.version == MANIFEST_VERSION_T112
+        assert outcome.evidence_payload["version"] == SIMULATION_EVIDENCE_VERSION_T112

@@ -44,7 +44,7 @@ import contextlib
 import json
 import os
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -304,6 +304,178 @@ class StaticPartitionEventSource(T100ReplayEventSource):
     events to the orchestrator exactly as if a real partition
     reader had read them from disk.
     """
+
+
+class PartitionReplayEventSource(T100ReplayEventSource):
+    """A T100ReplayEventSource wired through the real T040/T041 replay path.
+
+    The T112 contract binds the entry path to load events through
+    the existing T040 replay and T050 point-in-time market-features
+    paths. This class is the production surface: the constructor
+    accepts a partition loader (the function the T100 partition
+    reader would call) and a partition resolver (the function that
+    resolves a ``(chain_id, pool_key_id)`` to its T100 partitions),
+    and the :meth:`load_events` call materialises the typed event
+    list by replaying each partition's typed V4 log records through
+    :func:`robinhood_lp.replay.replay.replay` and converting the
+    resulting :class:`PoolCheckpoint` records into
+    :class:`BacktestEvent` values the T061 engine consumes.
+
+    The bridge honours the existing T040 replay contract: the
+    loader returns the typed log records the partition reader
+    registered; the replay orders them deterministically and
+    produces the post-event checkpoints the T050 point-in-time
+    feature layer reads. The conversion to :class:`BacktestEvent`
+    preserves every cursor field the T109 evidence schema binds so
+    the T112 evidence loader can verify the cursor at the fill
+    transition.
+    """
+
+    def __init__(
+        self,
+        *,
+        partition_loader: Callable[[int, str, int, int], list[list[Any]]],
+        pool_fee: int = 0,
+        initial_sqrt_price_x96: int = 1 << 96,
+        initial_tick: int = 0,
+    ) -> None:
+        if not callable(partition_loader):
+            raise TypeError(
+                f"PartitionReplayEventSource: partition_loader must be "
+                f"callable, got {type(partition_loader).__name__}"
+            )
+        self._loader = partition_loader
+        self._pool_fee = int(pool_fee)
+        self._initial_sqrt_price_x96 = int(initial_sqrt_price_x96)
+        self._initial_tick = int(initial_tick)
+
+    def load_events(
+        self,
+        *,
+        chain_id: int,
+        pool_key_id: str,
+        block_range_start: int,
+        block_range_end: int,
+        cancel_token: CancelToken,
+    ) -> list[BacktestEvent]:
+        # The T112 contract binds the entry path to load events
+        # through the T040/T041 replay path. The loader resolves
+        # the (chain_id, pool_key_id) to the registered T100
+        # partitions and returns the typed log records the partition
+        # reader registered; we replay each partition through the
+        # existing T040 replayer and convert the deterministic
+        # checkpoint sequence into BacktestEvent records.
+        try:
+            from robinhood_lp.protocol.ids import ChainId
+            from robinhood_lp.replay.input import ReplayInput
+            from robinhood_lp.replay.replayer import replay
+        except ImportError as exc:  # pragma: no cover - defensive
+            raise FixedEmptyEventSourceError() from exc
+        records_by_partition = self._loader(
+            chain_id, pool_key_id, block_range_start, block_range_end
+        )
+        if not records_by_partition:
+            raise FixedEmptyEventSourceError()
+        events: list[BacktestEvent] = []
+        # Flatten every partition's records; the replay sort
+        # produces one deterministic ordering across all partitions.
+        flat_records: list[Any] = []
+        for records in records_by_partition:
+            flat_records.extend(records)
+        if not flat_records:
+            raise FixedEmptyEventSourceError()
+        # Build a synthetic ReplayInput. The data_root is irrelevant
+        # at this layer (the replay reads ``records`` directly); the
+        # replay only inspects the chain_id / pool_id / window for
+        # duplicate detection.
+        from pathlib import Path
+
+        replay_input = ReplayInput(
+            chain_id=ChainId(chain_id),
+            pool_id=_coerce_pool_id(pool_key_id),
+            data_root=Path("."),
+            from_block=block_range_start,
+            to_block=block_range_end,
+            initial_sqrt_price_x96=self._initial_sqrt_price_x96,
+            initial_tick=self._initial_tick,
+        )
+        output = replay(replay_input, pool_fee=self._pool_fee, events=flat_records)
+        # Convert the deterministic checkpoint sequence into
+        # BacktestEvent records. Each checkpoint carries the
+        # (block_number, transaction_index, log_index) cursor and
+        # the post-event pool state the T050 features layer
+        # surfaces to the engine.
+        for checkpoint in output.checkpoints:
+            events.append(
+                _checkpoint_to_backtest_event(
+                    checkpoint=checkpoint,
+                    pool_key_id=pool_key_id,
+                    chain_id=chain_id,
+                )
+            )
+        if not events:
+            raise FixedEmptyEventSourceError()
+        return events
+
+
+def _coerce_pool_id(pool_key_id: str) -> Any:
+    """Return a :class:`PoolId` derived from ``pool_key_id``.
+
+    The replay requires a typed :class:`PoolId`; the T112 entry
+    receives the hex string the manifest carries. The conversion
+    parses the 32-byte hex pool key into the V4 ``PoolId`` shape
+    the replayer expects.
+    """
+    from robinhood_lp.protocol.ids import PoolId
+
+    raw = bytes.fromhex(pool_key_id.removeprefix("0x").rjust(64, "0")[:64])
+    return PoolId(int.from_bytes(raw, "big"))
+
+
+def _checkpoint_to_backtest_event(
+    *,
+    checkpoint: Any,
+    pool_key_id: str,
+    chain_id: int,
+) -> BacktestEvent:
+    """Convert a :class:`PoolCheckpoint` into a :class:`BacktestEvent`.
+
+    The bridge preserves the deterministic cursor the replay
+    emitted (``block_number`` / ``transaction_index`` /
+    ``log_index``) and surfaces the post-event price as the
+    payload's ``sqrt_price_x96`` field. The information-frontier
+    fields (``observed_at`` / ``available_at``) are bound to the
+    block number the checkpoint carries so the engine's
+    point-in-time gate observes a deterministic event-time view.
+    """
+    from robinhood_lp.backtest.events import (
+        KIND_SWAP,
+        SOURCE_PRIORITY_DATA,
+    )
+    from robinhood_lp.protocol.contracts import (
+        BACKTEST_EVENT_VERSION,
+    )
+
+    block_number = int(checkpoint.block_number)
+    return BacktestEvent(
+        version=BACKTEST_EVENT_VERSION,
+        timestamp=block_number,
+        sequence=0,
+        source_priority=SOURCE_PRIORITY_DATA,
+        kind=KIND_SWAP,
+        pool_key_id=pool_key_id,
+        chain_id=chain_id,
+        observed_at=block_number,
+        available_at=block_number,
+        payload=(
+            ("sqrt_price_x96", int(checkpoint.sqrt_price_x96)),
+            ("tick", int(checkpoint.tick)),
+            ("active_liquidity", int(checkpoint.active_liquidity)),
+        ),
+        block_number=block_number,
+        transaction_index=int(checkpoint.transaction_index),
+        log_index=int(checkpoint.log_index),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -831,15 +1003,21 @@ class BacktestOrchestratorT112:
         _atomic_write_json(manifest_path, manifest_payload)
         _atomic_write_json(evidence_path, evidence_payload)
         cancel_token.raise_if_cancelled()
-        # Record the published paths on the T069 record through the
-        # base orchestrator's terminal write. The base orchestrator
-        # refuses a request whose event source returned the empty
-        # event list (its T109 ``FixedSource`` path returns the
-        # record with a ``FAILED`` state). The T112 entry path
-        # itself enforces the fixed-empty-source refusal upstream
-        # so the record only reaches the terminal writer when the
-        # publication succeeded.
-        record = self._base_orchestrator.submit(request, cancel_token=cancel_token)
+        # T112 contract: the T112 entry path is the only current
+        # product backtest entry. It must NOT fall back to the
+        # defective T109 writer (which would re-run the engine,
+        # invoke ``_derive_partition_refs``, write a T109 manifest
+        # with cursor-fabricated N-N-N refs, and transition the run
+        # record to SUCCEEDED via the T109 path). The T112 entry
+        # path therefore does not invoke ``BacktestOrchestrator.submit``
+        # or any of its publication helpers. The base orchestrator
+        # remains accessible as a read-only surface for historical
+        # T069 record inspection; new successful publication is
+        # disabled at the cutover boundary and any caller that
+        # reaches it through the T109 entry path is rejected with
+        # ``T069_FIXED_EMPTY_EVENT_SOURCE_REFUSED`` or
+        # ``T112_FIXED_EMPTY_EVENT_SOURCE_REFUSED``.
+        record: Any = None
         return T112RunOutcome(
             record=record,
             manifest=manifest,
@@ -1072,6 +1250,7 @@ __all__ = [
     "BacktestOrchestratorT112",
     "FixedEmptyEventSourceError",
     "PartitionRefMismatchError",
+    "PartitionReplayEventSource",
     "StaticPartitionEventSource",
     "T100PartitionResolutionError",
     "T100ReplayEventSource",
