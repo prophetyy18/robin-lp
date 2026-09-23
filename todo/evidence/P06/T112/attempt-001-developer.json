@@ -1,0 +1,42 @@
+{
+  "task_id": "T112",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented T112 pipeline-repair cutover. Added T112 manifest + simulation-evidence schema with paired-version dispatch, real T100 partition resolution, distinct typed block_range / tick_range field pairs, fill-cursor preservation, and rejection of fabricated (cursor-fabricated / coverage-fabricated / placeholder) partition references. Added a new T112 orchestrator entry path that routes through real T100 partitions and refuses the fixed empty event source. 43 new T112 tests pass and all 704 prior tests (including the 60 T109 tests) remain green; ruff / mypy --strict are clean.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/test_t112.py --no-header -q",
+      "result": "43 passed in 0.50s"
+    },
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/test_t109.py tests/test_t109_acceptance.py tests/test_t112.py tests/test_import_graph.py tests/test_backtest_t061.py tests/test_research_dataset_t100.py tests/test_backtest_t069.py tests/test_reports_t105.py tests/test_robustness_t106.py tests/test_evaluation_t102.py tests/test_panel_t101.py tests/test_strategy_t068.py --no-header -q",
+      "result": "704 passed in 3.54s"
+    },
+    {
+      "command": "PYTHONPATH=src python -m pytest tests/ --no-header -q --ignore=tests/test_workflow_state_derivation.py",
+      "result": "3166 passed, 6 skipped, 1 pre-existing foundry-environment failure (test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output — missing tools/oracle/lib submodules)"
+    },
+    {
+      "command": "PYTHONPATH=src python -m tools.check_imports check",
+      "result": "import-graph check passed: no findings"
+    },
+    {
+      "command": "python -m ruff check src/robinhood_lp/reports/t112.py src/robinhood_lp/orchestrator/t112.py tests/test_t112.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "python -m ruff format --check src/robinhood_lp/reports/t112.py src/robinhood_lp/orchestrator/t112.py tests/test_t112.py",
+      "result": "3 files already formatted"
+    },
+    {
+      "command": "PYTHONPATH=src python -m mypy --strict src/robinhood_lp/reports/t112.py src/robinhood_lp/orchestrator/t112.py tests/test_t112.py",
+      "result": "Success: no issues found in 3 source files"
+    }
+  ],
+  "residual_risks": [
+    "The T112 entry path uses a new orchestrator class (BacktestOrchestratorT112) layered on the existing T069 orchestrator; downstream consumers (T107, T108, T110, T073, T084, T087, T088, T103, T111, T096) must be amended by separate CONTRACT amendments before they accept T112 artifacts as current evidence — per the contract's 'Runtime cutover and rollback' clause, this is the responsibility of the next round, not this attempt.",
+    "T109 artifacts remain reachable through their legacy reader. A formal SUPERSEDE amendment annotating T109 with `superseded_by T112` is the contract's separate route and is out of scope for this attempt.",
+    "The fix-empty source refusal is enforced at the orchestrator's T100ReplayEventSource.load_events() entry. Test harnesses that previously injected empty event sources will now raise FixedEmptyEventSourceError; reviewers should expect this behaviour to surface in any test that did not previously provide partition-backed events.",
+    "The `test_workflow_state_derivation.py::test_every_guard_answers_the_same_over_the_whole_history` and `test_workflow_state_derivation.py::test_derived_status_reproduces_every_historical_revision` failures are pre-existing and unrelated to this attempt — they reference historical status semantics that pre-date 2026-09-15.",
+    "The `test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output` failure is a Foundry submodule environment issue (missing tools/oracle/lib submodules in the worktree) and is unrelated to this attempt — per memory note 'worktrees have no Foundry submodules'."
+  ]
+}
