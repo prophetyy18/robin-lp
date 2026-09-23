@@ -57,6 +57,12 @@ Canonical ownership is:
 - Amendments preserve status, attempts, candidate/approval commits, evidence, and
   review history. Approved work is retired only through the annotation-only
   `SUPERSEDE` route; its historical contract and evidence are never rewritten.
+- Work that will not land is closed with the Owner-directed `abandon-task` or
+  `abandon-maintenance` route. It lands nothing, keeps the branch, worktree and
+  review records as evidence, and is refused for `APPROVED` work. Every
+  non-terminal status has this exit, so a work item can always be closed without
+  the blocked actor acting and the single-active-work lane can always be
+  released.
 - `tools/workflow/`, `.claude/`, and `todo/schemas/` are protected governance
   surfaces changed only by an explicit bootstrap action. Dependency manifests may
   change only when a numbered task contract expressly requires it. No role may

@@ -151,6 +151,51 @@ would be a dead end of its own. This is where a mechanical failure is caught, at
 moment the candidate is sealed; the independent review stays the place where
 judgement is exercised, and it still re-runs every gate.
 
+#### Closing work that will not land
+
+Every non-terminal status has an Owner exit, and that is a property of the
+state machine rather than a convention: `finished` work is not the only way a
+work item may end. A task whose lane cannot be moved — an Agent stopped before
+it wrote its handoff leaves a worktree no command will accept, and an external
+dependency can deny progress for as long as it likes — is closed with
+
+```bash
+python -m tools.workflow abandon-task T073 \
+  --reason "<why this will only be re-issued, if it is wanted at all>"
+python -m tools.workflow abandon-maintenance M0002 \
+  --reason "<why this repair does not fit the lane>"
+```
+
+An abandonment lands nothing. The branch, the worktree, the attempt and every
+review record stay exactly as they were, so the abandoned work remains in Git
+as evidence of what was tried; only the status and a record under
+`todo/abandoned/<task>.md` move, and they move in the main checkout rather than
+on the task branch, because nothing from that branch may enter the product.
+The runtime attempt record is dropped only after that durable record has
+captured where the work was retained, so the pointer outlives an unversioned
+file under `.git/`.
+
+`ABANDONED` is terminal, frees the single-active-work lane, and is refused for
+`APPROVED` work: an approval is retired by the annotation-only `SUPERSEDE` route
+below, never by rewriting a status. Abandoning is also refused while an open
+task still depends on the target, because `_check_dependencies` requires every
+dependency to be `APPROVED` and such a dependent could never activate. That
+refusal redirects the Owner rather than trapping them: dependencies form a DAG,
+so closing in reverse-dependency order always terminates.
+
+`ESCALATED` is the maintenance lane's version of the same problem. It is
+reached when the Developer reports that the repair does not fit the lane, and
+the documented route is then a new numbered task — outside the lane entirely.
+Nothing in the lane could close it, so `abandon-maintenance` is that exit.
+
+The graph these rules describe is checked by
+`tests/test_workflow_state_graph.py`, which asserts that every state is
+reachable, that every non-terminal state can still reach a terminal state, that
+every one has an Owner exit, and that the Agent named for each state actually
+holds the permissions that state requires. The Agent capability table is parsed
+from `.claude/agents/*.md` rather than written down a second time, so removing a
+capability from a definition fails there instead of being discovered mid-run.
+
 #### Retiring approved work
 
 An `APPROVED` task is terminal: no other route may alter it. When an Owner
@@ -316,7 +361,10 @@ task ID and instruct it to:
    `prepare-plan-review`/`finish-plan-review` only when triage routes the issue
    to planning; ask the owner before passing `--owner-decision`;
 8. stop on `BLOCKED`, `OWNER_DECISION_REQUIRED`, or `APPROVED`, report the evidence and
-   commit SHAs, and never start the next numbered task automatically.
+   commit SHAs, and never start the next numbered task automatically;
+9. when no route forward exists, report that to the Owner and ask whether to close the
+   work item with `abandon-task` or `abandon-maintenance` — an Agent never abandons
+   another Agent's work on its own initiative.
 
 The ready-to-copy Manager prompt is in the root `README.md`. A request such as
 “implement T001 directly” is not a valid workflow invocation because it does not
@@ -463,6 +511,8 @@ the exact implementation candidate that the Reviewer inspected.
   product question.
 - `BLOCKED`: preserve the branch and evidence for external/user action.
 - `CHANGES_REQUESTED`: preserve the branch; `retry` starts a fresh Developer.
+- no route forward: close the work item with `abandon-task` or
+  `abandon-maintenance` rather than waiting for progress that cannot happen.
 - `CONTINUATION_REQUIRED`: keep `IN_DEVELOPMENT`, preserve the same attempt and
   uncommitted worktree, and start one fresh Developer through the continuation
   gate. It is neither a task-state transition nor exception triage.

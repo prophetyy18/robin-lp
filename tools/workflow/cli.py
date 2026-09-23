@@ -89,6 +89,20 @@ def _parser() -> argparse.ArgumentParser:
     )
     withdraw.add_argument("amendment_id")
     withdraw.add_argument("--reason", required=True)
+    # The Owner's exit for work whose lane cannot be moved. Lands nothing; keeps
+    # the branch, worktree and evidence; frees the single-active-work lane.
+    abandon_task = subparsers.add_parser(
+        "abandon-task",
+        help="close a task that will not land, keeping its record and branch",
+    )
+    abandon_task.add_argument("task_id")
+    abandon_task.add_argument("--reason", required=True)
+    abandon_maintenance = subparsers.add_parser(
+        "abandon-maintenance",
+        help="close a maintenance repair that will not land, keeping its record",
+    )
+    abandon_maintenance.add_argument("maintenance_id")
+    abandon_maintenance.add_argument("--reason", required=True)
     maintenance = subparsers.add_parser(
         "prepare-maintenance",
         help="prepare a bounded low-risk repair outside the product task graph",
@@ -182,6 +196,10 @@ def main(argv: list[str] | None = None) -> None:
             output = manager.prepare_amendment_retry(args.amendment_id)
         elif args.command == "withdraw-amendment":
             output = manager.withdraw_amendment(args.amendment_id, reason=args.reason)
+        elif args.command == "abandon-task":
+            output = manager.abandon_task(args.task_id, reason=args.reason)
+        elif args.command == "abandon-maintenance":
+            output = manager.abandon_maintenance(args.maintenance_id, reason=args.reason)
         elif args.command == "amendment-status":
             output = manager.amendment_status(args.amendment_id)
         elif args.command == "prepare-maintenance":

@@ -60,32 +60,76 @@ STATES = {
     "OWNER_DECISION_REQUIRED",
     "BLOCKED",
     "APPROVED",
+    # The Owner's exit for work that will not land. A work item can get stuck
+    # for reasons no role in its lane can resolve -- an agent that died without
+    # writing its handoff leaves a worktree no command will accept, and an
+    # external dependency can deny progress indefinitely. Without this value
+    # every such state was a trap: the only escape was forward progress, which
+    # is exactly what failed. `APPROVED` keeps its annotation-only SUPERSEDE
+    # route and is deliberately NOT abandonable, so approval evidence can never
+    # be rewritten by a later abandonment.
+    "ABANDONED",
 }
 
+#: Every non-terminal task state can be closed by the Owner. The edge is drawn
+#: from every state on purpose: an exit that depends on which sub-state the work
+#: item is stuck in would reintroduce the trap this closes. `APPROVED` has no
+#: outgoing edge -- approved work is retired by the annotation-only `SUPERSEDE`
+#: route, never by rewriting its status.
 ALLOWED_TRANSITIONS = {
-    "PLANNED": {"READY"},
-    "READY": {"IN_DEVELOPMENT", "BLOCKED"},
-    "IN_DEVELOPMENT": {"AWAITING_REVIEW", "TRIAGE_REQUIRED", "BLOCKED"},
+    "PLANNED": {"READY", "ABANDONED"},
+    "READY": {"IN_DEVELOPMENT", "BLOCKED", "ABANDONED"},
+    "IN_DEVELOPMENT": {"AWAITING_REVIEW", "TRIAGE_REQUIRED", "BLOCKED", "ABANDONED"},
     "AWAITING_REVIEW": {
         "APPROVED",
         "CHANGES_REQUESTED",
         "TRIAGE_REQUIRED",
         "BLOCKED",
+        "ABANDONED",
     },
-    "CHANGES_REQUESTED": {"IN_DEVELOPMENT", "BLOCKED"},
+    "CHANGES_REQUESTED": {"IN_DEVELOPMENT", "BLOCKED", "ABANDONED"},
     "TRIAGE_REQUIRED": {
         "CHANGES_REQUESTED",
         "PLANNING",
         "OWNER_DECISION_REQUIRED",
         "BLOCKED",
+        "ABANDONED",
     },
-    "PLANNING": {"AWAITING_PLAN_REVIEW", "OWNER_DECISION_REQUIRED", "BLOCKED"},
-    "AWAITING_PLAN_REVIEW": {"CHANGES_REQUESTED", "PLANNING", "PLAN_REVIEW_BLOCKED"},
-    "PLAN_REVIEW_BLOCKED": {"CHANGES_REQUESTED", "PLANNING", "PLAN_REVIEW_BLOCKED"},
-    "OWNER_DECISION_REQUIRED": {"PLANNING", "BLOCKED"},
-    "BLOCKED": {"READY"},
+    "PLANNING": {
+        "AWAITING_PLAN_REVIEW",
+        "OWNER_DECISION_REQUIRED",
+        "BLOCKED",
+        "ABANDONED",
+    },
+    "AWAITING_PLAN_REVIEW": {
+        "CHANGES_REQUESTED",
+        "PLANNING",
+        "PLAN_REVIEW_BLOCKED",
+        "ABANDONED",
+    },
+    "PLAN_REVIEW_BLOCKED": {
+        "CHANGES_REQUESTED",
+        "PLANNING",
+        "PLAN_REVIEW_BLOCKED",
+        "ABANDONED",
+    },
+    "OWNER_DECISION_REQUIRED": {"PLANNING", "BLOCKED", "ABANDONED"},
+    "BLOCKED": {"READY", "ABANDONED"},
     "APPROVED": set(),
+    "ABANDONED": set(),
 }
+
+#: Task statuses that do not occupy the single-active-work lane. `ABANDONED` is
+#: here for the same reason `APPROVED` is: a closed work item must not block the
+#: next one. Leaving it out would have let an abandonment keep the lane forever.
+RESTING_STATES = frozenset({"PLANNED", "APPROVED", "ABANDONED"})
+
+#: Statuses a task can never leave, and therefore can never satisfy a dependency
+#: again. A task depending on one of these is stranded: `_check_dependencies`
+#: requires every dependency to be `APPROVED`, so activation is impossible and
+#: no route can repair it. `PLANNED` is deliberately NOT here -- a planned task
+#: is still reachable, and abandoning its dependency is what would strand it.
+CLOSED_TASK_STATES = frozenset({"APPROVED", "ABANDONED"})
 
 PROTECTED_PREFIXES = (
     ".claude/",
@@ -122,7 +166,17 @@ MAINTENANCE_STATES = {
     "CHANGES_REQUESTED",
     "ESCALATED",
     "BLOCKED",
+    # `ESCALATED` is reached when the maintenance Developer reports a
+    # `TRIAGE_REQUIRED` outcome: the repair does not fit this lane, and the
+    # documented route is a new numbered task or normal triage. Nothing in the
+    # lane could close the record, so it sat forever -- `prepare-maintenance-retry`
+    # accepts only `CHANGES_REQUESTED` or `BLOCKED`. `ABANDONED` is the Owner's
+    # exit for it, and for any other maintenance state that will not land.
+    "ABANDONED",
 }
+
+#: Maintenance statuses that close the lane.
+TERMINAL_MAINTENANCE_STATES = frozenset({"APPROVED", "ABANDONED"})
 
 
 class WorkflowError(RuntimeError):
@@ -790,9 +844,7 @@ class WorkflowManager:
             if config.get("workflow_state") != tasks[active_task]["status"]:
                 raise WorkflowError("workflow_state does not match active task status")
         active_states = [
-            task_id
-            for task_id, task in tasks.items()
-            if task["status"] not in {"PLANNED", "APPROVED"}
+            task_id for task_id, task in tasks.items() if task["status"] not in RESTING_STATES
         ]
         if active_states and active_states != (
             [active_task] if isinstance(active_task, str) else []
@@ -942,10 +994,7 @@ class WorkflowManager:
         if task["status"] != "PLANNED":
             raise WorkflowError(f"ready requires PLANNED, found {task['status']}")
         active = config.get("active_task")
-        if isinstance(active, str) and config["tasks"][active]["status"] not in {
-            "APPROVED",
-            "PLANNED",
-        }:
+        if isinstance(active, str) and config["tasks"][active]["status"] not in RESTING_STATES:
             raise WorkflowError(f"cannot activate {task_id} while {active} is unfinished")
         self._check_dependencies(config, task_id)
         blocked: list[str] = []
@@ -1626,7 +1675,7 @@ class WorkflowManager:
         config = self.load_config()
         active = config.get("active_task")
         active_status = config["tasks"][active]["status"] if isinstance(active, str) else None
-        if active_status not in {None, "APPROVED", "PLANNED"}:
+        if active_status is not None and active_status not in RESTING_STATES:
             raise WorkflowError(f"cannot start an amendment while {active} is unfinished")
         if self._active_amendment_records():
             raise WorkflowError("another owner amendment is already active")
@@ -2276,6 +2325,157 @@ class WorkflowManager:
         self._amendment_request_path(amendment_id).unlink(missing_ok=True)
         return {**closed.to_dict(), "withdrawal": str(target)}
 
+    def abandon_task(self, task_id: str, *, reason: str) -> dict[str, object]:
+        """Close a task that will not land, keeping every record it produced.
+
+        This is the Owner's exit from a work item whose lane cannot be moved. A
+        Developer that dies before writing its handoff leaves a worktree that no
+        command accepts; an external dependency can deny progress for as long as
+        it likes. In both cases the only exit used to be forward progress --
+        exactly the thing that had failed -- so the work item and the
+        single-active-work lane were stuck together, and no route could retire
+        it: ``SUPERSEDE`` requires ``APPROVED``, ``CONTRACT``/``SPEC`` require
+        ``PLANNED``, and deletion is refused everywhere.
+
+        An abandonment lands no implementation. The branch, the worktree and the
+        attempt stay exactly as they were, so the abandoned work remains in Git
+        as evidence; only the status and this record move, and they move in the
+        main checkout rather than on the task branch, because nothing from that
+        branch may enter the product.
+
+        The guard is dependency-shaped: a task still depended on by an open task
+        may not be abandoned, because its dependents could then never activate.
+        Dependencies form a DAG, so abandoning in reverse-dependency order always
+        terminates -- the refusal redirects the Owner, it does not trap them.
+        """
+        self._ensure_clean_main()
+        if not reason.strip():
+            raise WorkflowError("abandon-task requires a non-empty reason")
+        config = self.load_config()
+        attempt = self.load_attempt(task_id)
+        if attempt is not None and Path(attempt.development_worktree).is_dir():
+            # While an attempt is in flight the retained worktree holds the live
+            # status; the main checkout still shows whatever the last commit that
+            # touched it recorded. Resolve the same way `status` does, so the
+            # abandonment record states the status the work item was actually in.
+            config = self.load_config(Path(attempt.development_worktree))
+        task = self._task(config, task_id)
+        status = task["status"]
+        if status in {"APPROVED", "ABANDONED"}:
+            raise WorkflowError(f"{task_id} is already closed ({status})")
+        stranded = [
+            other_id
+            for other_id, other in config["tasks"].items()
+            if other_id != task_id
+            and other["status"] not in CLOSED_TASK_STATES
+            and task_id in other["depends_on"]
+        ]
+        if stranded:
+            raise WorkflowError(
+                f"cannot abandon {task_id}; open tasks still depend on it: "
+                + ", ".join(stranded)
+                + " -- close or re-point them first"
+            )
+
+        relative_record = Path("todo") / "abandoned" / f"{task_id}.md"
+        record_path = self.repo / relative_record
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+        record_path.write_text(
+            "\n".join(
+                [
+                    f"# {task_id} abandonment",
+                    "",
+                    f"- Phase: `{task['phase']}`",
+                    f"- Status at abandonment: `{status}`",
+                    f"- Attempt: {task['attempt']}",
+                    f"- Base commit: `{task['base_commit'] or 'none'}`",
+                    f"- Candidate commit: `{task['candidate_commit'] or 'none'}`",
+                    f"- Latest review: `{task['latest_review'] or 'none'}`",
+                    f"- Retained branch: `{attempt.branch if attempt else 'none'}`",
+                    f"- Retained worktree: `{attempt.development_worktree if attempt else 'none'}`",
+                    "",
+                    "## Reason",
+                    "",
+                    reason.strip(),
+                    "",
+                    "Nothing from this task landed. The branch and worktree above are kept",
+                    "as the record of what was attempted, and the work must be re-issued",
+                    "as a new task if it is still wanted.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        previous_active = config.get("active_task")
+        self._set_state(config, task_id, "ABANDONED")
+        if isinstance(previous_active, str) and previous_active != task_id:
+            # Closing a resting task must not move the active pointer onto it.
+            keeper = config["tasks"][previous_active]
+            config["active_task"] = previous_active
+            config["active_phase"] = keeper["phase"]
+            config["workflow_state"] = keeper["status"]
+        _write_json(self.config_path, config)
+        _git(self.repo, "add", str(relative_record), "todo/config.yaml")
+        _git(self.repo, "commit", "-m", f"chore(workflow): abandon {task_id}")
+        # The runtime record is dropped only after the durable record above has
+        # captured where the work was retained: an unversioned file under .git
+        # is not an acceptable last copy of that pointer.
+        self._attempt_path(task_id).unlink(missing_ok=True)
+        return {
+            "task_id": task_id,
+            "status": "ABANDONED",
+            "record": str(relative_record),
+            "commit": _sha(self.repo),
+        }
+
+    def abandon_maintenance(self, maintenance_id: str, *, reason: str) -> dict[str, object]:
+        """Close a maintenance repair that will not land, keeping its record.
+
+        The lane reaches ``ESCALATED`` when the Developer reports that the repair
+        does not fit the maintenance boundary; the documented route is then a new
+        numbered task or normal triage, i.e. outside this lane. Nothing in the
+        lane could close the record, so it stayed forever. This is that exit, and
+        it also serves any other maintenance state that will not land.
+        """
+        record = self.load_maintenance(maintenance_id)
+        if record is None:
+            raise WorkflowError(f"unknown maintenance repair {maintenance_id}")
+        if record.status in TERMINAL_MAINTENANCE_STATES:
+            raise WorkflowError(f"maintenance {maintenance_id} is already closed ({record.status})")
+        if not reason.strip():
+            raise WorkflowError("abandon-maintenance requires a non-empty reason")
+        worktree = Path(record.development_worktree)
+        relative_path = Path("todo") / "maintenance" / maintenance_id / "withdrawal.md"
+        target = worktree / relative_path
+        withdrawal = "\n".join(
+            [
+                f"# {maintenance_id} abandonment",
+                "",
+                f"- Status at abandonment: `{record.status}`",
+                f"- Attempt: {record.attempt}",
+                f"- Base commit: `{record.base_commit}`",
+                f"- Candidate commit: `{record.candidate_commit or 'none'}`",
+                f"- Retained branch: `{record.branch}`",
+                "",
+                "## Reason",
+                "",
+                reason.strip(),
+                "",
+                "Nothing from this repair landed. The branch and worktree are kept as",
+                "the record of what was attempted.",
+                "",
+            ]
+        )
+        if worktree.is_dir():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(withdrawal, encoding="utf-8")
+            _git(worktree, "add", str(relative_path))
+            _git(worktree, "commit", "-m", f"chore(maintenance): abandon {maintenance_id}")
+        closed = replace(record, status="ABANDONED")
+        self.save_maintenance(closed)
+        self._maintenance_request_path(maintenance_id).unlink(missing_ok=True)
+        return {**closed.to_dict(), "withdrawal": str(target)}
+
     def _assert_no_new_deterministic_findings(
         self,
         *,
@@ -2348,10 +2548,7 @@ class WorkflowManager:
             raise WorkflowError("cannot start maintenance while an owner amendment is unfinished")
         config = self.load_config()
         active = config.get("active_task")
-        if isinstance(active, str) and config["tasks"][active]["status"] not in {
-            "APPROVED",
-            "PLANNED",
-        }:
+        if isinstance(active, str) and config["tasks"][active]["status"] not in RESTING_STATES:
             raise WorkflowError(f"cannot start maintenance while {active} is unfinished")
         active_repairs = [
             record.maintenance_id

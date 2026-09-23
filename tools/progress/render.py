@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from .check import (
+    CLOSED_WITHOUT_DELIVERY,
     NOTABLE_STATES,
     PHASE_PATTERN,
     PLAN_STATES,
@@ -277,7 +278,13 @@ def render(config: Mapping[str, Any], *, repo_root: Path) -> str:
     in_progress = [
         task
         for task in all_tasks
-        if task.status not in {"APPROVED", "PLANNED"} and task.superseded_by is None
+        if task.status not in {"APPROVED", "PLANNED"} | CLOSED_WITHOUT_DELIVERY
+        and task.superseded_by is None
+    ]
+    abandoned = [
+        task
+        for task in all_tasks
+        if task.status in CLOSED_WITHOUT_DELIVERY and task.superseded_by is None
     ]
     planned = [
         task for task in all_tasks if task.status == "PLANNED" and task.superseded_by is None
@@ -330,6 +337,14 @@ def render(config: Mapping[str, Any], *, repo_root: Path) -> str:
     if in_progress:
         for task in in_progress:
             lines.extend(_format_task_block(task, indent="  "))
+    else:
+        lines.append("  (none)")
+    lines.append("")
+
+    lines.append("Abandoned (closed without delivery)")
+    if abandoned:
+        for task in abandoned:
+            lines.append(f"  {task.task_id} — {task.title}")
     else:
         lines.append("  (none)")
     lines.append("")

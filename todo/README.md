@@ -129,8 +129,10 @@ Before requesting independent review:
 
 `todo/config.yaml` is the only machine-readable progress source. `APPROVED` means every
 dependency, phase entry condition and acceptance item has current evidence from an independent
-review of the recorded candidate commit. Code may exist while a task remains `PLANNED`, `READY`
-or `CHANGES_REQUESTED`; downstream code does not retroactively complete an unmet dependency.
+review of the recorded candidate commit. `ABANDONED` means the work item was closed without
+delivery, with the reason recorded under `todo/abandoned/`. Code may exist while a task remains
+`PLANNED`, `READY` or `CHANGES_REQUESTED`; downstream code does not retroactively complete an
+unmet dependency.
 
 ### Workflow state machine
 
@@ -149,6 +151,13 @@ state. No Agent approves its own work.
 If plan review is temporarily unavailable, `PLAN_REVIEW_BLOCKED` retains the exact
 plan candidate so a fresh Plan Reviewer can retry without forcing the Planner to
 rewrite an unchanged plan.
+
+`ABANDONED` is the second terminal status: an Owner-directed close for work that will
+not land, reached from any non-terminal state. It lands nothing — the branch, worktree,
+attempt and review records stay exactly as they were — frees the single-active-work
+lane, and is refused for `APPROVED` work, whose only retirement route remains the
+annotation-only `SUPERSEDE`. Every non-terminal status therefore has an exit that does
+not depend on the blocked actor acting.
 
 After an approved task, the Manager explicitly chooses one dependency-complete
 `PLANNED` task and runs `ready <task>`. The controller never guesses among

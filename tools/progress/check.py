@@ -26,9 +26,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-#: The full plan state machine copied from ``tools.workflow``. The
-#: renderer must never report a status the controller cannot record,
-#: so any unknown value is a configuration defect.
+#: The full plan state machine, kept in step with ``tools.workflow``. The
+#: renderer must never report a status the controller cannot record, so any
+#: unknown value is a configuration defect.
 PLAN_STATES: frozenset[str] = frozenset(
     {
         "PLANNED",
@@ -43,8 +43,14 @@ PLAN_STATES: frozenset[str] = frozenset(
         "OWNER_DECISION_REQUIRED",
         "BLOCKED",
         "APPROVED",
+        "ABANDONED",
     }
 )
+
+#: Statuses that close a work item without delivering it. Like a superseded
+#: task, an abandoned one is not live work: it must not be counted as
+#: in-progress, and `is_ready` already excludes it because it is not `PLANNED`.
+CLOSED_WITHOUT_DELIVERY: frozenset[str] = frozenset({"ABANDONED"})
 
 #: The set of statuses that the renderer prints under the
 #: "blocked / changes-requested / triage-required / owner-decision"
@@ -344,6 +350,7 @@ def is_ready(task_id: str, task: Mapping[str, Any], tasks: Mapping[str, Any]) ->
 
 
 __all__ = [
+    "CLOSED_WITHOUT_DELIVERY",
     "NOTABLE_STATES",
     "PHASE_PATTERN",
     "PLAN_STATES",

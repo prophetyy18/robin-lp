@@ -1115,13 +1115,25 @@ def test_config_rejects_more_than_one_active_task(tmp_path: Path) -> None:
         manager.validate_config(config)
 
 
-def test_every_nonterminal_state_has_a_route_to_approved() -> None:
-    def can_reach_approved(start: str) -> bool:
+def test_every_nonterminal_state_has_a_route_to_a_terminal_state() -> None:
+    """No state is a trap, and every state has an Owner exit.
+
+    The earlier form of this test asserted that every state could reach
+    ``APPROVED``. That is the wrong invariant: it denies that a work item may
+    legitimately end without being delivered, so a task that got stuck had no
+    expressible ending at all. What the workflow owes an operator is that no
+    state is a trap -- every non-terminal state can still reach *some* terminal
+    state, and the Owner can always close the item from where it sits.
+    """
+
+    terminal = {"APPROVED", "ABANDONED"}
+
+    def can_reach_terminal(start: str) -> bool:
         pending = [start]
         visited: set[str] = set()
         while pending:
             state = pending.pop()
-            if state == "APPROVED":
+            if state in terminal:
                 return True
             if state in visited:
                 continue
@@ -1130,8 +1142,15 @@ def test_every_nonterminal_state_has_a_route_to_approved() -> None:
         return False
 
     assert set(ALLOWED_TRANSITIONS) == STATES
-    for state in STATES - {"APPROVED"}:
-        assert can_reach_approved(state), f"{state} is a workflow dead end"
+    for state in STATES - terminal:
+        assert can_reach_terminal(state), f"{state} cannot reach any terminal state"
+        assert "ABANDONED" in ALLOWED_TRANSITIONS[state], (
+            f"{state} has no Owner exit: a work item stuck here could not be closed"
+        )
+    # Approved work is retired by the annotation-only SUPERSEDE route, never by
+    # rewriting its status, so it must remain un-abandonable.
+    assert ALLOWED_TRANSITIONS["APPROVED"] == set()
+    assert ALLOWED_TRANSITIONS["ABANDONED"] == set()
 
 
 def test_ready_activates_one_dependency_complete_planned_task(tmp_path: Path) -> None:
@@ -1776,3 +1795,208 @@ def test_prophet_change_may_not_alter_an_existing_task(tmp_path: Path) -> None:
     _seal_prophet_result(worktree)
     with pytest.raises(WorkflowError, match="a task that already exists"):
         manager.finish_amendment("A0001")
+
+
+# --------------------------------------------------------------------------
+# Abandonment: the Owner's exit from work whose lane cannot be moved
+# --------------------------------------------------------------------------
+
+
+def _add_planned_dependent(repo: Path, manager: WorkflowManager) -> None:
+    """Add T002 (PLANNED) depending on T001, so T001 has an open consumer."""
+    contract = repo / "todo" / "phases" / "P00" / "T002.md"
+    contract.write_text(
+        "# T002\n\n## Dependencies\n\nT001\n\n## Outcome\n\nTest outcome.\n\n"
+        "## Deliverables\n\nTest file.\n\n## Acceptance\n\nValue is good.\n\n"
+        "## Must not\n\nDo not edit contracts.\n\n## References\n\nNone.\n\n"
+        "## Replacement and migration\n\nNone.\n",
+        encoding="utf-8",
+    )
+    config = manager.load_config()
+    config["tasks"]["T002"] = {
+        "phase": "P00",
+        "status": "PLANNED",
+        "depends_on": ["T001"],
+        "task_file": "todo/phases/P00/T002.md",
+        "attempt": 0,
+        "base_commit": None,
+        "candidate_commit": None,
+        "approved_commit": None,
+        "latest_review": None,
+    }
+    _write_json(repo / "todo" / "config.yaml", config)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "add planned dependent")
+
+
+def test_abandon_task_closes_an_attempt_no_command_can_advance(tmp_path: Path) -> None:
+    """A Developer that dies without a handoff used to trap the task forever.
+
+    ``finish-develop`` needs the handoff file, and ``continue-develop`` needs
+    either that handoff or ``--max-turns-exhausted``, which is authorized only
+    when Claude Code actually stopped the agent at its hard turn limit. Every
+    other command requires a different state, so both the work item and the
+    single-active-work lane were stuck with no route out.
+    """
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    prepared = manager.prepare_develop("T001")
+    worktree = Path(str(prepared["development_worktree"]))
+
+    # The visible Developer was stopped by something that is not its turn limit.
+    with pytest.raises(WorkflowError, match="continuation requires"):
+        manager.continue_develop("T001")
+    with pytest.raises(WorkflowError, match="developer result is missing"):
+        manager.finish_develop("T001")
+
+    result = manager.abandon_task("T001", reason="agent died before writing its handoff")
+
+    assert result["status"] == "ABANDONED"
+    assert manager.load_config()["tasks"]["T001"]["status"] == "ABANDONED"
+    record = (repo / "todo" / "abandoned" / "T001.md").read_text(encoding="utf-8")
+    assert "agent died before writing its handoff" in record
+    # The record must state the live status, not the stale one on the last commit.
+    assert "`IN_DEVELOPMENT`" in record
+    # Nothing landed, and the attempt survives as the record of what was tried.
+    assert worktree.is_dir()
+    assert _git(repo, "branch", "--list", "workflow/t001-attempt-001")
+
+
+def test_abandon_task_frees_the_single_active_work_lane(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    with pytest.raises(WorkflowError, match="unfinished"):
+        manager.prepare_maintenance(
+            summary="repair the fixture",
+            reason="the fixture holds the wrong value",
+            allowed_paths=["src/value.txt"],
+            verification_commands=["true"],
+        )
+
+    manager.abandon_task("T001", reason="no longer wanted before it started")
+
+    prepared = manager.prepare_maintenance(
+        summary="repair the fixture",
+        reason="the fixture holds the wrong value",
+        allowed_paths=["src/value.txt"],
+        verification_commands=["true"],
+    )
+    assert prepared["maintenance_id"] == "M0001"
+
+
+def test_abandon_task_requires_a_reason_and_refuses_closed_work(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    with pytest.raises(WorkflowError, match="non-empty reason"):
+        manager.abandon_task("T001", reason="   ")
+
+    manager.abandon_task("T001", reason="first")
+    with pytest.raises(WorkflowError, match="already closed"):
+        manager.abandon_task("T001", reason="second")
+    # Approved work is retired by the annotation-only SUPERSEDE route, never by
+    # rewriting its status, so it must stay un-abandonable.
+    with pytest.raises(WorkflowError, match="already closed"):
+        manager.abandon_task("T000", reason="approved work is not abandonable")
+
+
+def test_abandon_task_refuses_to_strand_an_open_dependent(tmp_path: Path) -> None:
+    """The guard must redirect the Owner, not trap them.
+
+    A dependent could never activate once its dependency is closed, because
+    ``_check_dependencies`` requires every dependency to be ``APPROVED``. The
+    refusal names it, and abandoning in reverse-dependency order then terminates
+    -- dependencies form a DAG, so the route always exists.
+    """
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _add_planned_dependent(repo, manager)
+
+    with pytest.raises(WorkflowError, match="open tasks still depend on it: T002"):
+        manager.abandon_task("T001", reason="depends on a consumer")
+
+    manager.abandon_task("T002", reason="the consumer goes first")
+    manager.abandon_task("T001", reason="now nothing depends on it")
+
+    config = manager.load_config()
+    assert config["tasks"]["T001"]["status"] == "ABANDONED"
+    assert config["tasks"]["T002"]["status"] == "ABANDONED"
+
+
+def test_abandon_maintenance_closes_an_escalated_repair(tmp_path: Path) -> None:
+    """``ESCALATED`` had no exit at all.
+
+    The maintenance Developer reports ``TRIAGE_REQUIRED`` when the repair does
+    not fit the lane, and the documented route is then a new numbered task --
+    outside the lane entirely. ``prepare-maintenance-retry`` accepts only
+    ``CHANGES_REQUESTED`` or ``BLOCKED``, so the record could never be closed by
+    anyone and the lane kept a dead entry forever.
+    """
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _finish_seed_task_for_maintenance(repo, manager)
+    prepared = manager.prepare_maintenance(
+        summary="repair the fixture value",
+        reason="the fixture holds the wrong deterministic value",
+        allowed_paths=["src/value.txt"],
+        verification_commands=["test $(cat src/value.txt) = repaired"],
+        related_task="T001",
+    )
+    development = Path(str(prepared["development_worktree"]))
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "M0001",
+            "outcome": "TRIAGE_REQUIRED",
+            "summary": "the value is generated, so this is not a bounded repair",
+            "commands": [],
+            "residual_risks": [],
+            "triage_request": {
+                "observed_problem": "src/value.txt is generated from a manifest",
+                "evidence": ["the fixture value is derived"],
+                "proposed_classification": "CONTRACT_MISMATCH",
+                "requested_change": "open a numbered task for the generator",
+            },
+        },
+    )
+    escalated = manager.finish_maintenance_develop("M0001")
+    assert escalated.status == "ESCALATED"
+    with pytest.raises(WorkflowError, match="maintenance retry requires"):
+        manager.prepare_maintenance_retry("M0001")
+
+    closed = manager.abandon_maintenance("M0001", reason="this needs a numbered task")
+
+    assert closed["status"] == "ABANDONED"
+    assert "this needs a numbered task" in (
+        development / "todo" / "maintenance" / "M0001" / "withdrawal.md"
+    ).read_text(encoding="utf-8")
+    # The lane is free for the next change.
+    again = manager.prepare_maintenance(
+        summary="open the replacement work",
+        reason="the generated value needs its own task",
+        allowed_paths=["src/value.txt"],
+        verification_commands=["true"],
+        related_task="T001",
+    )
+    assert again["maintenance_id"] == "M0002"
+
+
+def test_abandon_maintenance_requires_a_reason_and_refuses_closed_work(
+    tmp_path: Path,
+) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _finish_seed_task_for_maintenance(repo, manager)
+    manager.prepare_maintenance(
+        summary="repair the fixture",
+        reason="the fixture holds the wrong value",
+        allowed_paths=["src/value.txt"],
+        verification_commands=["true"],
+        related_task="T001",
+    )
+    with pytest.raises(WorkflowError, match="non-empty reason"):
+        manager.abandon_maintenance("M0001", reason="  ")
+    manager.abandon_maintenance("M0001", reason="not wanted")
+    with pytest.raises(WorkflowError, match="already closed"):
+        manager.abandon_maintenance("M0001", reason="again")
+    with pytest.raises(WorkflowError, match="unknown maintenance repair"):
+        manager.abandon_maintenance("M0009", reason="does not exist")

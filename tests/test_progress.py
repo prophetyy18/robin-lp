@@ -662,24 +662,20 @@ def test_is_ready_rejects_superseded_dependency() -> None:
 
 
 def test_plan_states_contains_every_state_rendered_by_view() -> None:
-    """``PLAN_STATES`` is the closed universe the renderer can mention."""
+    """``PLAN_STATES`` is the closed universe the renderer can mention.
 
-    expected = {
-        "PLANNED",
-        "READY",
-        "IN_DEVELOPMENT",
-        "AWAITING_REVIEW",
-        "CHANGES_REQUESTED",
-        "TRIAGE_REQUIRED",
-        "PLANNING",
-        "AWAITING_PLAN_REVIEW",
-        "PLAN_REVIEW_BLOCKED",
-        "OWNER_DECISION_REQUIRED",
-        "BLOCKED",
-        "APPROVED",
-    }
-    assert expected == PLAN_STATES
-    assert expected >= NOTABLE_STATES
+    It is checked against the controller's own table rather than against a
+    second hand-written copy. Three separate literals of the same state machine
+    is how the renderer would come to disagree with the controller it renders,
+    and this is the check that makes the disagreement fail loudly instead.
+    ``tools.progress`` deliberately does not *import* the controller -- it is a
+    product tool and stays standalone -- so the equality is asserted here.
+    """
+
+    from tools.workflow.core import STATES as CONTROLLER_STATES
+
+    assert set(PLAN_STATES) == set(CONTROLLER_STATES)
+    assert set(PLAN_STATES) >= NOTABLE_STATES
 
 
 def test_progress_issue_is_a_namedtuple_like_dataclass() -> None:

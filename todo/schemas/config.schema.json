@@ -65,7 +65,8 @@
         "PLAN_REVIEW_BLOCKED",
         "OWNER_DECISION_REQUIRED",
         "BLOCKED",
-        "APPROVED"
+        "APPROVED",
+        "ABANDONED"
       ]
     },
     "task": {
