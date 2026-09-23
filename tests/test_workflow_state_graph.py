@@ -29,9 +29,11 @@ from pathlib import Path
 import pytest
 from tools.workflow.core import (
     ALLOWED_TRANSITIONS,
+    CLOSED_TASK_STATES,
     LIFECYCLE_OF,
     LIFECYCLE_VALUES,
     MAINTENANCE_STATES,
+    OPEN,
     RESTING_STATES,
     STATES,
     TERMINAL_MAINTENANCE_STATES,
@@ -39,8 +41,6 @@ from tools.workflow.core import (
 
 ROOT = Path(__file__).resolve().parents[1]
 AGENTS_DIR = ROOT / ".claude" / "agents"
-
-TERMINAL_TASK_STATES = frozenset({"APPROVED", "ABANDONED"})
 
 
 def _frontmatter(path: Path) -> dict[str, str]:
@@ -150,9 +150,9 @@ def test_every_state_is_reachable_and_leavable() -> None:
     # Escape: every non-terminal state can still reach a terminal state. Cycles
     # such as CHANGES_REQUESTED -> IN_DEVELOPMENT -> AWAITING_REVIEW -> back are
     # fine because they can be exited; a state with no exit at all is not.
-    for state in STATES - TERMINAL_TASK_STATES:
+    for state in STATES - CLOSED_TASK_STATES:
         forward = _reachable(state)
-        assert forward & TERMINAL_TASK_STATES, f"{state} cannot reach any terminal state"
+        assert forward & CLOSED_TASK_STATES, f"{state} cannot reach any terminal state"
 
 
 def test_every_nonterminal_state_has_an_owner_exit() -> None:
@@ -164,7 +164,7 @@ def test_every_nonterminal_state_has_an_owner_exit() -> None:
     PLANNED, and deletion is refused everywhere.
     """
 
-    for state in STATES - TERMINAL_TASK_STATES:
+    for state in STATES - CLOSED_TASK_STATES:
         assert "ABANDONED" in ALLOWED_TRANSITIONS[state], (
             f"{state} has no Owner exit: a work item stuck here could not be closed"
         )
@@ -206,8 +206,14 @@ def test_the_decomposition_is_total_and_agrees_with_the_lane() -> None:
         assert claimed is (state not in RESTING_STATES), (
             f"{state} claims the lane inconsistently with the resting set"
         )
-    for state in TERMINAL_TASK_STATES:
+    for state in CLOSED_TASK_STATES:
         assert LIFECYCLE_OF[state][1] is False, f"{state} must release the lane"
+    # Routing now reads the lifecycle where it used to ask whether a status was
+    # in `CLOSED_TASK_STATES`, so the two must stay the same statement.
+    closed = frozenset(state for state, (lifecycle, _) in LIFECYCLE_OF.items() if lifecycle != OPEN)
+    assert closed == CLOSED_TASK_STATES, (
+        "the closed set must be exactly the statuses whose lifecycle has left OPEN"
+    )
 
 
 def test_every_lane_that_holds_the_work_slot_can_release_it() -> None:
@@ -283,7 +289,7 @@ def test_state_has_a_declared_next_actor(state: str) -> None:
     Manager or the Owner is a state nobody is responsible for.
     """
 
-    if state in TERMINAL_TASK_STATES:
+    if state in CLOSED_TASK_STATES:
         return
     assert state in REQUIRED_ACTOR or state in MANAGER_STATES or state in OWNER_STATES, (
         f"{state} has no declared next actor"

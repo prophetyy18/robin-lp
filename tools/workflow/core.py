@@ -1280,12 +1280,41 @@ class WorkflowManager:
             raise WorkflowError(f"unknown task {task_id}")
         return raw
 
+    def _admitted_states(
+        self, config: Mapping[str, Any], task_id: str, root: Path
+    ) -> frozenset[str]:
+        """The statuses a task's stored facts and committed artifacts admit.
+
+        Routing reads this instead of ``status``. The two agree for every
+        revision this repository has ever committed -- measured over all 18,580
+        task-revisions in ``tests/test_workflow_state_derivation.py``, with the
+        three enumerated exceptions pinned there -- so nothing routes on a field
+        a hand edit can rewrite while the evidence stays where it was.
+
+        ``root`` is the tree the caller read ``config`` from. Artifacts and the
+        config that describes them must come from the same revision: during an
+        attempt both live on the retained development branch.
+        """
+        task = self._task(config, task_id)
+        derived = derive_status(
+            phase=str(task["phase"]),
+            task_id=task_id,
+            attempt=int(task["attempt"]),
+            approved_commit=task["approved_commit"],
+            artifacts=RepositoryArtifacts(root),
+        )
+        return admitted_statuses(
+            lifecycle=str(task["lifecycle"]),
+            claimed=bool(task["claimed"]),
+            derived=derived,
+        )
+
     def _check_dependencies(self, config: Mapping[str, Any], task_id: str) -> None:
         task = self._task(config, task_id)
         incomplete = [
             dependency
             for dependency in task["depends_on"]
-            if config["tasks"][dependency]["status"] != "APPROVED"
+            if "APPROVED" not in self._admitted_states(config, dependency, self.repo)
         ]
         if incomplete:
             raise WorkflowError(f"{task_id} has unapproved dependencies: {', '.join(incomplete)}")
@@ -1309,11 +1338,17 @@ class WorkflowManager:
         if self._active_amendment_records():
             raise WorkflowError("cannot activate a task while an owner amendment is unfinished")
         config = self.load_config()
-        task = self._task(config, task_id)
-        if task["status"] != "PLANNED":
-            raise WorkflowError(f"ready requires PLANNED, found {task['status']}")
+        admitted = self._admitted_states(config, task_id, self.repo)
+        if "PLANNED" not in admitted:
+            raise WorkflowError(
+                "ready requires an unselected task with no committed artifacts, whose facts admit "
+                f"{sorted(admitted) if admitted else 'no status at all'}"
+            )
         active = config.get("active_task")
-        if isinstance(active, str) and config["tasks"][active]["status"] not in RESTING_STATES:
+        # The lane is held exactly by the statuses the decomposition marks as
+        # claimed, so occupancy is a fact about the record rather than a
+        # membership test over a copy of the state list.
+        if isinstance(active, str) and bool(config["tasks"][active]["claimed"]):
             raise WorkflowError(f"cannot activate {task_id} while {active} is unfinished")
         self._check_dependencies(config, task_id)
         blocked: list[str] = []
@@ -1626,11 +1661,13 @@ class WorkflowManager:
             worktree = Path(attempt.development_worktree)
             config = self.load_config(worktree)
             task = self._task(config, task_id)
-            if task["status"] == "BLOCKED":
+            admitted = self._admitted_states(config, task_id, worktree)
+            if "BLOCKED" in admitted:
                 self._set_state(config, task_id, "READY")
-            elif task["status"] != "CHANGES_REQUESTED":
+            elif "CHANGES_REQUESTED" not in admitted:
                 raise WorkflowError(
-                    f"retry requires CHANGES_REQUESTED or resolved BLOCKED, found {task['status']}"
+                    "retry requires a review that requested changes or a resolved block; the "
+                    f"facts admit {sorted(admitted) if admitted else 'no status at all'}"
                 )
             attempt = AttemptRecord(
                 task_id=attempt.task_id,
@@ -1645,8 +1682,12 @@ class WorkflowManager:
             self._ensure_clean_main()
             config = self.load_config()
             task = self._task(config, task_id)
-            if task["status"] != "READY":
-                raise WorkflowError(f"develop requires READY, found {task['status']}")
+            admitted = self._admitted_states(config, task_id, self.repo)
+            if "READY" not in admitted:
+                raise WorkflowError(
+                    "develop requires a selected task with no sealed candidate, whose facts "
+                    f"admit {sorted(admitted) if admitted else 'no status at all'}"
+                )
             self._check_dependencies(config, task_id)
             retained = self.load_attempt(task_id)
             if retained is not None:
@@ -1731,8 +1772,8 @@ class WorkflowManager:
             raise WorkflowError(f"{task_id} has no prepared development attempt")
         worktree = Path(attempt.development_worktree)
         config = self.load_config(worktree)
-        task = self._task(config, task_id)
-        if task["status"] != "IN_DEVELOPMENT" or attempt.candidate_commit is not None:
+        admitted = self._admitted_states(config, task_id, worktree)
+        if "IN_DEVELOPMENT" not in admitted or attempt.candidate_commit is not None:
             raise WorkflowError(
                 "development continuation requires an unfinished IN_DEVELOPMENT attempt"
             )
@@ -2010,8 +2051,10 @@ class WorkflowManager:
             raise WorkflowError("amendment layer must be " + ", ".join(sorted(AMENDMENT_LAYERS)))
         config = self.load_config()
         active = config.get("active_task")
-        active_status = config["tasks"][active]["status"] if isinstance(active, str) else None
-        if active_status is not None and active_status not in RESTING_STATES:
+        active_claimed = (
+            bool(config["tasks"][active]["claimed"]) if isinstance(active, str) else False
+        )
+        if active_claimed:
             raise WorkflowError(f"cannot start an amendment while {active} is unfinished")
         if self._active_amendment_records():
             raise WorkflowError("another owner amendment is already active")
@@ -2044,7 +2087,7 @@ class WorkflowManager:
         if layer != "PROPHET":
             for task_id in normalized:
                 task = self._task(config, task_id)
-                if task["status"] != required_status:
+                if required_status not in self._admitted_states(config, task_id, self.repo):
                     raise WorkflowError(
                         f"{layer} amendment targets must be {required_status}, "
                         f"found {task_id}={task['status']}"
@@ -2697,13 +2740,16 @@ class WorkflowManager:
             config = self.load_config(Path(attempt.development_worktree))
         task = self._task(config, task_id)
         status = task["status"]
-        if status in {"APPROVED", "ABANDONED"}:
+        # Closedness is the task's own lifecycle, not the projected status: a
+        # hand-edited status could otherwise present closed work as open (or the
+        # reverse) while the decomposition disagreed.
+        if str(task["lifecycle"]) != OPEN:
             raise WorkflowError(f"{task_id} is already closed ({status})")
         stranded = [
             other_id
             for other_id, other in config["tasks"].items()
             if other_id != task_id
-            and other["status"] not in CLOSED_TASK_STATES
+            and str(other["lifecycle"]) == OPEN
             and task_id in other["depends_on"]
         ]
         if stranded:
@@ -2830,12 +2876,27 @@ class WorkflowManager:
         config = self.load_config()
         task = self._task(config, task_id)
         status = task["status"]
-        closed = status in CLOSED_TASK_STATES
-        if not closed and status not in {"PLANNED", "READY"}:
-            raise WorkflowError(
-                f"{task_id} is {status}, but a lost attempt only leaves the main checkout in "
-                "PLANNED or READY; close the work item with abandon-task instead"
-            )
+        closed = str(task["lifecycle"]) != OPEN
+        if not closed:
+            admitted = self._admitted_states(config, task_id, self.repo)
+            if status not in admitted:
+                raise WorkflowError(
+                    f"{task_id} records {status}, but its committed artifacts admit "
+                    f"{sorted(admitted) if admitted else 'no status at all'}; settle that "
+                    "disagreement with 'validate' before clearing a lost attempt"
+                )
+            # A lost attempt only leaves the main checkout before the work has
+            # sealed anything. The facts cannot separate READY from
+            # IN_DEVELOPMENT, and here the difference does not matter: both mean
+            # the attempt produced no candidate, which is the remnant this
+            # command exists to clear. Anything beyond that pair is a task stuck
+            # mid-flight, which `abandon-task` closes.
+            if not admitted <= {"PLANNED", "READY", "IN_DEVELOPMENT"}:
+                raise WorkflowError(
+                    f"{task_id} is {status}, but a lost attempt only leaves the main checkout "
+                    "before any candidate is sealed; close the work item with abandon-task "
+                    "instead"
+                )
 
         relative = (
             Path("todo")
@@ -2998,7 +3059,7 @@ class WorkflowManager:
             raise WorkflowError("cannot start maintenance while an owner amendment is unfinished")
         config = self.load_config()
         active = config.get("active_task")
-        if isinstance(active, str) and config["tasks"][active]["status"] not in RESTING_STATES:
+        if isinstance(active, str) and bool(config["tasks"][active]["claimed"]):
             raise WorkflowError(f"cannot start maintenance while {active} is unfinished")
         active_repairs = [
             record.maintenance_id
@@ -3010,10 +3071,10 @@ class WorkflowManager:
                 "cannot start maintenance while another repair is active: "
                 + ", ".join(active_repairs)
             )
-        if related_task is not None:
-            task = self._task(config, related_task)
-            if task["status"] != "APPROVED":
-                raise WorkflowError("maintenance may reference only an APPROVED task")
+        if related_task is not None and "APPROVED" not in self._admitted_states(
+            config, related_task, self.repo
+        ):
+            raise WorkflowError("maintenance may reference only an APPROVED task")
         paths = self._validate_maintenance_paths(allowed_paths)
         if (
             not verification_commands
@@ -3434,7 +3495,7 @@ class WorkflowManager:
             raise WorkflowError(f"{task_id} has no candidate commit")
         worktree = Path(attempt.development_worktree)
         config = self.load_config(worktree)
-        if self._task(config, task_id)["status"] != "AWAITING_REVIEW":
+        if "AWAITING_REVIEW" not in self._admitted_states(config, task_id, worktree):
             raise WorkflowError("review requires AWAITING_REVIEW")
         if _sha(worktree) != attempt.candidate_commit:
             raise WorkflowError("development worktree HEAD no longer matches candidate commit")
@@ -3557,7 +3618,7 @@ class WorkflowManager:
             raise WorkflowError(f"{task_id} has no retained attempt")
         worktree = Path(attempt.development_worktree)
         config = self.load_config(worktree)
-        if self._task(config, task_id)["status"] != "TRIAGE_REQUIRED":
+        if "TRIAGE_REQUIRED" not in self._admitted_states(config, task_id, worktree):
             raise WorkflowError("triage requires TRIAGE_REQUIRED")
         if _git(worktree, "status", "--porcelain").stdout:
             raise WorkflowError("development worktree must be clean before triage")
@@ -3663,15 +3724,15 @@ class WorkflowManager:
             raise WorkflowError(f"{task_id} has no retained attempt")
         worktree = Path(attempt.development_worktree)
         config = self.load_config(worktree)
-        task = self._task(config, task_id)
-        if task["status"] not in {"PLANNING", "OWNER_DECISION_REQUIRED"}:
+        admitted = self._admitted_states(config, task_id, worktree)
+        if not admitted & {"PLANNING", "OWNER_DECISION_REQUIRED"}:
             raise WorkflowError("plan requires PLANNING or OWNER_DECISION_REQUIRED")
         if _git(worktree, "status", "--porcelain").stdout:
             raise WorkflowError("development worktree must be clean before planning")
         triage_path = self._triage_report_path(attempt)
         triage_result = _load_json(worktree / triage_path)
         classification = _required_string(triage_result, "classification")
-        owner_route = task["status"] == "OWNER_DECISION_REQUIRED"
+        owner_route = "OWNER_DECISION_REQUIRED" in admitted
         if owner_route:
             if not owner_decision or not owner_decision.strip():
                 raise WorkflowError("planning this issue requires the owner's explicit decision")
@@ -3827,7 +3888,7 @@ class WorkflowManager:
             raise WorkflowError(f"{task_id} has no plan candidate")
         worktree = Path(attempt.development_worktree)
         config = self.load_config(worktree)
-        if self._task(config, task_id)["status"] not in {
+        if not self._admitted_states(config, task_id, worktree) & {
             "AWAITING_PLAN_REVIEW",
             "PLAN_REVIEW_BLOCKED",
         }:

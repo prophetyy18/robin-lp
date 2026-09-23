@@ -24,10 +24,12 @@ from typing import Any
 import pytest
 from tools.workflow.core import (
     IN_FLIGHT,
+    LIFECYCLE_OF,
     UNDERDETERMINED,
     UNSTARTED,
     RepositoryArtifacts,
     WorkflowError,
+    admitted_statuses,
     derive_status,
 )
 
@@ -251,9 +253,112 @@ def test_repository_artifacts_read_a_checked_out_tree(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------
 
 
-def test_derived_status_reproduces_every_historical_revision() -> None:
+def _revisions() -> list[str]:
     revisions = _git("log", "--format=%H", "--", "todo/config.yaml").split()
     assert revisions, "no historical revisions found"
+    return revisions
+
+
+#: Every routing guard that used to read the composite ``status`` and now reads
+#: the stored facts and the committed artifacts, as the status set it accepts.
+#: The key names the command whose precondition it is.
+ROUTING_GUARDS: dict[str, frozenset[str]] = {
+    "ready": frozenset({"PLANNED"}),
+    "develop": frozenset({"READY"}),
+    "retry": frozenset({"CHANGES_REQUESTED"}),
+    "retry-from-blocked": frozenset({"BLOCKED"}),
+    "continue-develop": frozenset({"IN_DEVELOPMENT"}),
+    "review": frozenset({"AWAITING_REVIEW"}),
+    "triage": frozenset({"TRIAGE_REQUIRED"}),
+    "plan": frozenset({"PLANNING", "OWNER_DECISION_REQUIRED"}),
+    "review-plan": frozenset({"AWAITING_PLAN_REVIEW", "PLAN_REVIEW_BLOCKED"}),
+    "dependency": frozenset({"APPROVED"}),
+    "amendment-target": frozenset({"PLANNED", "APPROVED"}),
+    "maintenance-related": frozenset({"APPROVED"}),
+}
+
+#: The task-revisions whose recorded status its own decomposition cannot admit.
+#: Exactly the pre-semantics revision: the same one ``PRE_SEMANTICS_EXCEPTIONS``
+#: pins for the derivation, seen from the routing side.
+ROUTING_NOT_ADMITTED = frozenset({("63cfb2cc", "T001", "BLOCKED", "CHANGES_REQUESTED")})
+
+#: The task-revisions where the facts admit the one underdetermined pair, and
+#: therefore cannot say whether the work is selected or already running.
+ROUTING_PAIR_CASES = {"IN_DEVELOPMENT": 1}
+
+#: Every historical decision the two rules answer differently, and why each is
+#: safe. A new entry here is a behaviour change and must be argued, not added.
+#:
+#: - ``develop``: the one pair case. The new rule admits ``READY``, which the
+#:   facts cannot distinguish from ``IN_DEVELOPMENT``; ``prepare-develop``
+#:   refuses moments later whenever a live runtime record exists, and that record
+#:   is the authority on whether an attempt is running.
+#: - the two ``retry`` rows: the pre-semantics revision, where the artifacts say
+#:   ``CHANGES_REQUESTED`` while the record says ``BLOCKED``. The new rule
+#:   follows the evidence in both directions.
+ROUTING_DIVERGENCES = {
+    ("develop", "IN_DEVELOPMENT", "IN_FLIGHT"): 1,
+    ("retry", "BLOCKED", "CHANGES_REQUESTED"): 1,
+    ("retry-from-blocked", "BLOCKED", "CHANGES_REQUESTED"): 1,
+}
+
+
+def test_every_guard_answers_the_same_over_the_whole_history() -> None:
+    """The migration's judge: the facts must reproduce every recorded decision.
+
+    Each revision of ``todo/config.yaml`` carries both the status a transition
+    recorded and the evidence committed with it, so the whole history is an
+    oracle for routing as much as for the derivation. For every task-revision
+    and every guard, the answer read from the facts must equal the answer read
+    from the recorded field -- except where the two are enumerated above, with
+    the reason each is safe.
+    """
+    not_admitted: Counter[tuple[str, str, str, str]] = Counter()
+    pair_cases: Counter[str] = Counter()
+    divergences: Counter[tuple[str, str, str]] = Counter()
+    total = 0
+
+    for sha in _revisions():
+        config = json.loads(_git("show", f"{sha}:todo/config.yaml"))
+        artifacts = GitArtifacts(sha)
+        for task_id, task in config["tasks"].items():
+            recorded = task["status"]
+            derived = derive_status(
+                phase=task["phase"],
+                task_id=task_id,
+                attempt=task["attempt"],
+                approved_commit=task["approved_commit"],
+                artifacts=artifacts,
+            )
+            lifecycle, claimed = LIFECYCLE_OF[recorded]
+            admitted = admitted_statuses(lifecycle=lifecycle, claimed=claimed, derived=derived)
+            total += 1
+            if admitted == UNDERDETERMINED[IN_FLIGHT]:
+                pair_cases[recorded] += 1
+            if recorded not in admitted:
+                not_admitted[(sha[:8], task_id, recorded, derived)] += 1
+            for name, accepted in ROUTING_GUARDS.items():
+                if (recorded in accepted) != bool(admitted & accepted):
+                    divergences[(name, recorded, derived)] += 1
+
+    # Shape rather than a fixed total: the plan may grow, but a walk that
+    # suddenly covers a fraction of the history is a broken test, not a clean
+    # repository.
+    assert total > 18_000, f"only {total} task-revisions walked"
+
+    assert dict(not_admitted) == {key: 1 for key in ROUTING_NOT_ADMITTED}, (
+        "a recorded status its own facts do not admit appeared outside the "
+        f"documented pre-semantics revision: {dict(not_admitted)}"
+    )
+    assert dict(pair_cases) == ROUTING_PAIR_CASES
+    assert dict(divergences) == ROUTING_DIVERGENCES, (
+        "routing now answers differently from the recorded status in cases that "
+        f"are not documented: {dict(divergences)}"
+    )
+
+
+def test_derived_status_reproduces_every_historical_revision() -> None:
+    revisions = _revisions()
 
     reproduced: Counter[str] = Counter()
     underdetermined: Counter[str] = Counter()

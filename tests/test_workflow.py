@@ -2342,10 +2342,42 @@ def test_discard_attempt_redirects_instead_of_trapping(tmp_path: Path) -> None:
     """A state the recovery cannot serve must name a route that can.
 
     A task branch reaches the main checkout only through an approval, so a lost
-    attempt leaves the main checkout in PLANNED or READY. Any other recorded
-    state means something outside this path moved it, and the recovery refuses
-    -- but ``abandon-task`` is reachable from every state, so the refusal always
-    has somewhere to go.
+    attempt leaves the main checkout in PLANNED or READY. Any other state the
+    committed artifacts support means something outside this path moved it, and
+    the recovery refuses -- but ``abandon-task`` is reachable from every state,
+    so the refusal always has somewhere to go.
+    """
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    manager.prepare_develop("T001")
+    _lose_the_worktree(manager, "T001")
+    config = manager.load_config()
+    _set_task_state(config, "T001", "CHANGES_REQUESTED")
+    config["tasks"]["T001"]["attempt"] = 1
+    config["workflow_state"] = "CHANGES_REQUESTED"
+    _write_json(repo / "todo" / "config.yaml", config)
+    # The state has to be one the evidence supports: the guard reads the
+    # committed artifacts, so a status edit alone no longer describes a state
+    # the workflow ever reaches (see the sibling test below for that case).
+    _write_json(repo / "todo" / "reviews" / "P00" / "T001" / "review-001.json", {"verdict": "FAIL"})
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "move the task out of the recovery's reach")
+
+    with pytest.raises(WorkflowError, match="close the work item with abandon-task instead"):
+        manager.discard_attempt("T001", reason="out of reach")
+
+    # The named route really is available from here.
+    assert manager.abandon_task("T001", reason="the attempt is gone")["status"] == "ABANDONED"
+    assert manager.status()["orphaned_attempts"] == []
+
+
+def test_discard_attempt_refuses_a_record_its_artifacts_do_not_support(tmp_path: Path) -> None:
+    """A recorded status with no artifact behind it is refused, not acted on.
+
+    The guard reads the facts, so a config whose status was edited by hand can
+    no longer decide what the recovery does: here the record claims
+    CHANGES_REQUESTED while nothing committed supports it, and the refusal says
+    so instead of silently treating the task as mid-flight.
     """
     repo, _ = _make_repo(tmp_path)
     manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
@@ -2356,11 +2388,34 @@ def test_discard_attempt_redirects_instead_of_trapping(tmp_path: Path) -> None:
     config["workflow_state"] = "CHANGES_REQUESTED"
     _write_json(repo / "todo" / "config.yaml", config)
     _git(repo, "add", "todo/config.yaml")
-    _git(repo, "commit", "-m", "move the task out of the recovery's reach")
+    _git(repo, "commit", "-m", "record a state no artifact produced")
 
-    with pytest.raises(WorkflowError, match="close the work item with abandon-task instead"):
+    with pytest.raises(WorkflowError, match="its committed artifacts admit"):
         manager.discard_attempt("T001", reason="out of reach")
 
-    # The named route really is available from here.
-    assert manager.abandon_task("T001", reason="the attempt is gone")["status"] == "ABANDONED"
-    assert manager.status()["orphaned_attempts"] == []
+    # The disagreement is the thing to resolve, and `validate` is what says so.
+    with pytest.raises(WorkflowError, match="disagrees with the committed artifacts"):
+        manager.validate_repository()
+
+
+def test_a_contradictory_config_is_refused_before_any_guard_runs(tmp_path: Path) -> None:
+    """The three fields must describe one task, and reading is where that holds.
+
+    A guard derives its answer from the decomposition and the artifacts, so it
+    can only be reached by a record whose status and decomposition already
+    agree: the disagreement is refused while the config is loaded, which is why
+    `prepare-develop` never gets as far as its own precondition.
+    """
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    config = manager.load_config()
+    config["tasks"]["T001"]["claimed"] = False  # the decomposition only, by hand
+    _write_json(repo / "todo" / "config.yaml", config)
+    _git(repo, "add", "todo/config.yaml")
+    _git(repo, "commit", "-m", "hand-edit the lane claim under READY")
+
+    # Both a command and a plain read refuse the same contradiction.
+    with pytest.raises(WorkflowError, match="decomposes READY"):
+        manager.prepare_develop("T001")
+    with pytest.raises(WorkflowError, match="decomposes READY"):
+        manager.status()
