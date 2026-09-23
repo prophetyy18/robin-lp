@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0027",
+  "task_ids": [],
+  "layer": "PROPHET",
+  "target_status": null,
+  "summary": "generic continue_session for all lanes",
+  "owner_direction": "Extract a shared continue_session helper from continue_develop / continue_maintenance_develop and add four new continue-* commands: continue_amendment, continue_task_review, continue_maintenance_review, continue_amendment_review. Each carries MAX_DEVELOPMENT_CONTINUATIONS=1. The amendment and review lanes currently have no continue exit when an agent is stopped by maxTurns or crashes before writing the handoff. The helper centralises status check, worktree cleanliness, continuation_count increment, handoff-file removal, prompt return. Existing two continue-* commands keep their existing tests and behaviour; the four new wrappers share the same body. Adds CLI subcommands continue-amendment, continue-task-review, continue-maintenance-review, continue-amendment-review with --max-turns-exhausted flag. PROPHET route only because core.py is bootstrap-only."
+}
