@@ -67,6 +67,17 @@ Canonical ownership is:
   surfaces changed only by an explicit bootstrap action. Dependency manifests may
   change only when a numbered task contract expressly requires it. No role may
   rewrite the gate that governs its own work.
+- Within `.claude/` and `todo/schemas/`, the role definitions of `prophet.md` and
+  `prophet-reviewer.md`, plus `tools/workflow/core.py` itself, are the **constitutional**
+  surface and remain bootstrap-only. PROPHET may, however, rewrite the
+  non-constitutional governance artifacts inside its delegated authority —
+  the three reviewer and manager agent prompts that are not its own role
+  definition, the three review-result schemas, and the predicates in
+  `tools/workflow/core_governance.py` — through a normal PROPHET amendment
+  reviewed by `prophet-reviewer`. An amendment that crosses the delegated
+  boundary (e.g. attempts to edit `core.py`, the role definitions, or the
+  editable/forbidden file lists themselves) is refused by the controller before
+  review fires.
 
 ## 3. V1 product boundary
 

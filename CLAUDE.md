@@ -35,6 +35,17 @@ explicit completed state, scope growth, or an external side effect requiring new
 authority. Follow the next route named by `todo/WORKFLOW.md`; the Manager does not
 invent a route or answer an Owner decision itself.
 
+A governance maintenance need (a reviewer prompt clarification, a schema field
+adjustment, or a small change inside `tools/workflow/core_governance.py`) is a
+normal PROPHET amendment followed by `prepare-amendment-review` and
+`finish-amendment-review`, not an Owner bootstrap. The controller's change-set
+check refuses a PROPHET candidate that touches a constitutional path, so a
+returned `BLOCKED` from `finish-amendment-review` is the constitutional-
+escalation signal: surface it to the Owner and wait for an explicit bootstrap
+authorisation before retrying. Do not edit a constitutional path in this
+session, do not weaken any gate to make a candidate pass, and do not invent a
+new route.
+
 ## Permissions and recovery
 
 - Start the Manager with Claude Code permission mode `manual`. Approve only the

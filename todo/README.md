@@ -183,6 +183,17 @@ create a new task contract and may never modify an existing one, and every task
 that already exists stays byte-identical, so a goal restatement can never add an
 obligation to a contract whose approval would then describe something else.
 
+In addition to its original future-plan responsibility, the PROPHET lane owns a
+small surface of *delegated governance maintenance*: the three reviewer and
+manager agent prompts that are not its own role definition, the three
+review-result schemas, and the predicate file `tools/workflow/core_governance.py`
+that decides which paths a PROPHET amendment may write. A PROPHET amendment that
+touches any path outside that surface — including `tools/workflow/core.py`, the
+role definitions of `prophet` and `prophet-reviewer`, or the editable/forbidden
+file lists themselves — is refused by the controller's change-set check before
+the reviewer is invoked. Constitutional changes remain an explicit Owner
+bootstrap, never a delegated amendment.
+
 A `SUPERSEDE`-layer amendment retires work that is already `APPROVED` instead of
 planning work that is not. It records the successor in the target's
 `superseded_by` field and may change nothing else — the recorded state

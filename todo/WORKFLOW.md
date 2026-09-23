@@ -434,6 +434,24 @@ and the work counts only after an independent review, and the maintenance lane m
 edit only the explicit paths its record declares in advance and may not touch
 `.github/` or execution, risk or signer code.
 
+Within `.claude/` and `todo/schemas/`, the PROPHET amendment lane is the
+exception: it owns the small, explicit surface of *delegated governance*. The
+predicate that decides which paths a PROPHET amendment may modify lives in
+`tools/workflow/core_governance.py`, and the editable list inside that module
+admits the three reviewer and manager agent prompts that are not PROPHET itself,
+the three review-result schemas, and the predicate file itself. Everything
+else inside `.claude/`, `todo/schemas/` and `tools/workflow/` — including the
+PROPHET and prophet-reviewer role definitions, `tools/workflow/core.py`, and
+the editable/forbidden file lists themselves — remains in the constitutional
+bootstrap surface. A PROPHET amendment that touches any path outside the
+editable list is refused by the controller's change-set check before the
+reviewer is invoked, so a Prophet cannot grant itself authority by editing
+its own gate. The dependency manifests
+(`pyproject.toml`, `requirements.in`, `requirements.lock.txt`) are outside every
+amendment layer and the maintenance lane, and only a Developer whose task contract
+requires it changes them.
+`.github/` or execution, risk or signer code.
+
 Intent belongs to PROPHET rather than to the Planner. The Planner translates a
 goal into task text, and on the triaged route it may reach `docs/intent/` only to
 transcribe the Owner decision that `--owner-decision` was required to supply
