@@ -1,0 +1,24 @@
+{
+  "task_id": "M0007",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Docstring-only repair: added the simulation_evidence_path field description to the RunRecord class docstring in src/robinhood_lp/orchestrator/__init__.py between the source_checksum and created_at_unix_seconds entries, mirroring the existing source_checksum / manifest_path style. No signature, type, default, behaviour, AST or control-flow change.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_backtest_t069.py -q",
+      "result": "41 passed in 2.40s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/orchestrator/__init__.py",
+      "result": "1 file already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/orchestrator/__init__.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "git diff --check",
+      "result": "(no output; clean)"
+    }
+  ],
+  "residual_risks": []
+}

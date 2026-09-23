@@ -1,0 +1,16 @@
+{
+  "maintenance_id": "M0007",
+  "summary": "document the RunRecord simulation_evidence_path field",
+  "reason": "M0005 review-001 residual_risks recorded: 'The RunRecord docstring field list in src/robinhood_lp/orchestrator/__init__.py does not document simulation_evidence_path'. M0006 attempted the same fix and reached CANDIDATE_READY but the review was abandoned because the stage-reviewer committed the review record into the development worktree instead of the independent review worktree, so the branch HEAD moved past the candidate commit and finish-maintenance-review rejected the handoff. The previous candidate (837388b) is preserved on maintenance/m0006-attempt-001 as evidence; M0007 re-runs the same repair with a clearer reviewer prompt. Repair: add the simulation_evidence_path entry between source_checksum and created_at_unix_seconds in the RunRecord class docstring, mirroring the existing source_checksum/manifest_path style. Docstring-only change; no signature, type, default, behaviour, AST or control-flow change.",
+  "allowed_paths": [
+    "src/robinhood_lp/orchestrator/__init__.py"
+  ],
+  "verification_commands": [
+    "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_backtest_t069.py -q",
+    "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/orchestrator/__init__.py",
+    "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/orchestrator/__init__.py",
+    "git diff --check"
+  ],
+  "related_task": "T069",
+  "risk_attestation": "LOW_RISK_IMPLEMENTATION_DEFECT"
+}

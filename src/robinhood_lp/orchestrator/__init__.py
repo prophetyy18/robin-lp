@@ -863,6 +863,9 @@ class RunRecord:
       the product rerun started. The record never mutates the
       source; the checksum pins the source's bytes so a later
       reviewer can verify the source was unchanged.
+    - ``simulation_evidence_path`` — optional non-empty string
+      path; the path to the published T109 simulation-evidence
+      artifact. ``None`` until the run succeeds.
     - ``created_at_unix_seconds`` — non-negative int; the
       moment the run was first created.
     - ``updated_at_unix_seconds`` — non-negative int; the
