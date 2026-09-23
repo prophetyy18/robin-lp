@@ -305,6 +305,12 @@ def derive_status(
     if approved_commit:
         return "APPROVED"
 
+    # Abandonment is recorded with the task, not with an attempt: it closes the
+    # work item rather than one try at it, so `abandon_task` writes an unstamped
+    # record and this reads the same path.
+    if artifacts.exists(f"todo/abandoned/{task_id}.md"):
+        return "ABANDONED"
+
     paths = _artifact_paths(phase, task_id, attempt)
 
     plan_review = (
@@ -1056,10 +1062,12 @@ class WorkflowManager:
 
     def status(self) -> dict[str, object]:
         config = self.load_config()
+        config_root = self.repo
         active = config.get("active_task")
         runtime = self.load_attempt(active) if isinstance(active, str) else None
         if runtime is not None and Path(runtime.development_worktree).is_dir():
-            config = self.load_config(Path(runtime.development_worktree))
+            config_root = Path(runtime.development_worktree)
+            config = self.load_config(config_root)
         active_plan = self.load_plan(active) if isinstance(active, str) else None
         active_maintenance = [
             record.to_dict()
@@ -1093,10 +1101,64 @@ class WorkflowManager:
             # `prepare-develop` on the task it belongs to, and nothing else in
             # the workflow surfaces that until someone tries to start it.
             "orphaned_attempts": [record.to_dict() for record in self.orphaned_attempts()],
+            # A status with no artifact behind it did not come from a transition.
+            # `validate` refuses one outright; this reports it so an operator
+            # sees the disagreement while inspecting rather than when blocked.
+            "status_conflicts": self.status_conflicts(config, config_root),
         }
 
+    def status_conflicts(
+        self, config: Mapping[str, Any], root: Path | None = None
+    ) -> list[dict[str, str]]:
+        """Recorded statuses the committed artifacts do not support.
+
+        Every status a controller transition writes has its evidence committed in
+        the same commit, so the two must agree. When they do not, the recorded
+        value did not come from a transition -- a hand-edited config is how six
+        tasks were once added with no author role and no review -- and acting on
+        it would run the workflow from a state nothing can explain.
+
+        The two underdetermined markers are not conflicts of their own: a
+        recorded ``PLANNED``/``READY``/``IN_DEVELOPMENT`` is exactly what the
+        control plane is allowed to decide, because no artifact carries the
+        Manager's selection.
+        """
+        base = root or self.repo
+        artifacts = RepositoryArtifacts(base)
+        conflicts: list[dict[str, str]] = []
+        for task_id, task in config["tasks"].items():
+            recorded = str(task["status"])
+            derived = derive_status(
+                phase=str(task["phase"]),
+                task_id=task_id,
+                attempt=int(task["attempt"]),
+                approved_commit=task["approved_commit"],
+                artifacts=artifacts,
+            )
+            tolerated = UNDERDETERMINED.get(derived)
+            if tolerated is None:
+                if derived == recorded:
+                    continue
+                reason = f"the artifacts imply {derived}"
+            elif recorded in tolerated:
+                continue
+            else:
+                reason = f"no artifact decides this; it is one of {sorted(tolerated)}"
+            conflicts.append(
+                {"task_id": task_id, "recorded": recorded, "derived": derived, "reason": reason}
+            )
+        return conflicts
+
     def validate_repository(self) -> None:
-        self.load_config()
+        config = self.load_config()
+        conflicts = self.status_conflicts(config)
+        if conflicts:
+            rendered = "; ".join(
+                f"{item['task_id']}={item['recorded']} but {item['reason']}" for item in conflicts
+            )
+            raise WorkflowError(
+                "recorded task status disagrees with the committed artifacts: " + rendered
+            )
         for agent in (
             "workflow-manager",
             "stage-developer",

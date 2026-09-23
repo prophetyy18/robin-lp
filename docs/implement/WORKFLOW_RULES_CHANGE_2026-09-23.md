@@ -184,7 +184,42 @@ controller（现行 `_record_review_result` 在 APPROVED 时会删除记录）�
 守卫因此按「**是否存在路线**」判定，而不是按枚举的状态集合：终结态无需路线，`PLANNED`/`READY`
 需要「重开」这条路线，其余状态则指向一条确实可达的路线。
 
-## 8. 仍待实施
+## 8. 增量 3 已落地：记录的状态必须有证据支撑
+
+**动手前才想通的一件事，它缩小了这一步能做的范围。** 原计划「路由只读派生事实」在
+`READY`/`IN_DEVELOPMENT` 上是循环的：`derive_status` 对这两个值只能返回标记（`UNSTARTED` /
+`IN_FLIGHT`），因为**「Manager 选中了这个任务」这个事实在仓库里没有任何持久归属**——`ready`
+只写 `config.yaml`，不留构件、不留运行时记录。要读派生值就得先有车道声明，要有车道声明就得
+改 schema（增量 4）。所以纯路由迁移**做不到**，强行做只会把循环藏起来。
+
+因此本增量按它**能真正交付**的形态落地：
+
+**`status_conflicts(config, root)`** — 拿 `root` 那棵树里已提交的构件去校验每个任务记录的状态。
+`validate_repository` 对冲突**直接拒绝**；`status()` 报告在 `status_conflicts` 字段里。
+
+它拦的正是仓库自己的痛点：T026/T027/T039/T100–T104 是**手改 config** 加进去的，作者角色和
+评审都不存在，当时没有任何东西能发现状态被写成了别的东西。
+
+**豁免只有三个值**（`PLANNED`/`READY`/`IN_DEVELOPMENT`），而且是有界的：哪个可采纳仍取决于
+是否已启动 attempt——`attempt == 0` 时只接受 `PLANNED`/`READY`，`attempt > 0` 且该 attempt
+没有任何构件时只接受 `READY`/`IN_DEVELOPMENT`。测试把这条边界逐项钉住。
+
+**接入前先测真仓库**：87 个任务 0 冲突，才把它接成门禁。
+
+**顺带补上的真实缺口**：`derive_status` 初版不认识 `ABANDONED`——而 `abandon_task` 写的
+`todo/abandoned/<T>.md` **本身就是一件构件**，所以它必须可推导，否则一致性检查会在每个被放弃
+的任务上报冲突。
+
+**测试夹具的两处失真也一并修了**：`_make_repo` 只造了 7 个 agent 定义（`validate_repository`
+要 8 个）和 6 个 schema（要 8 个），因此 `validate_repository` 在夹具上**根本跑不起来**。
+
+### 为什么这不是「路由改用派生事实」
+
+因为那一步需要先给车道事实一个持久归属。本增量让 controller **校验并报告**不一致，但判定
+仍读 `status`。真正迁移路由的判据仍然是 golden 等价测试：对每一次 `prepare-*`/`finish-*`
+的接受与拒绝，新判定必须与旧判定完全相同。
+
+## 9. 仍待实施
 
 - **增量 3**：路由改用派生事实，`status` 仍存为兼容投影。
 - **增量 4**：新修订只存 `lifecycle`；`READY`/`IN_DEVELOPMENT` 改由显式的车道声明承载。
@@ -195,7 +230,7 @@ controller（现行 `_record_review_result` 在 APPROVED 时会删除记录）�
 
 ---
 
-## 9. 验证
+## 10. 验证
 
 ```
 PYTHONPATH=src python -m pytest tests/test_workflow.py tests/test_workflow_state_graph.py \
@@ -217,11 +252,15 @@ Owner 出口、车道占用者可释放车道，以及**从 `.claude/agents/*.md
 证据落盘）、边界（工作树仍在时拒绝）、非法输入（空理由、无记录）、失败路径（状态不在恢复
 可达范围时改道到 `abandon-task`，并在同一测试里真的走通那条路）。
 
+一致性检查的测试：正常（夹具仓库 `validate` 通过）、失败路径（把已批准任务的 status 手改成
+`PLANNED`，`status` 报告冲突而 `validate` 直接拒绝）、边界（`PLANNED`/`READY` 在 `attempt == 0`
+可采纳、`READY`/`IN_DEVELOPMENT` 在 `attempt > 0` 且无构件时可采纳，其余组合一律报冲突）。
+
 **一处单测发现的真实缺陷**：初版 `derive_status` 不认识 planner 的 `NO_CHANGE_REQUIRED`
 outcome（现行 `finish_plan` 会把它推进到 `AWAITING_PLAN_REVIEW`），历史遍历直接把它暴露为
 `WorkflowError`。
 
-## 10. 与在途工作的关系
+## 11. 与在途工作的关系
 
 本次不触碰任何任务状态、不迁移任何任务、不改写任何历史提交。`todo/config.yaml` 中 T109 及其
 A0026 影响链（T073/T084/T087/T088/T096/T103/T107/T108/T110/T111 的 10 条开放 impact）与本次

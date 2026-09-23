@@ -132,6 +132,7 @@ DECISION = "todo/triage/P00/T001/owner-decision-001.json"
 PLANNER = "todo/evidence/P00/T001/attempt-001-planner.json"
 PLAN_REVIEW = "todo/reviews/P00/T001/plan-review-001.json"
 DEVELOPER = "todo/evidence/P00/T001/attempt-001-developer.json"
+ABANDONED_RECORD = "todo/abandoned/T001.md"
 
 
 # --------------------------------------------------------------------------
@@ -149,6 +150,19 @@ def test_nothing_recorded_is_undetermined_by_artifacts() -> None:
 def test_delivery_evidence_outranks_every_artifact() -> None:
     files = {DEVELOPER: {"outcome": "CANDIDATE_READY"}, REVIEW: {"verdict": "FAIL"}}
     assert _derive(files, approved_commit="a" * 40) == "APPROVED"
+
+
+def test_abandonment_is_read_from_the_task_record_not_an_attempt() -> None:
+    """Abandonment closes the work item, so its record is not attempt-stamped.
+
+    It is written by `abandon-task` and must be derivable like every other
+    status, or the consistency check would report a conflict on every abandoned
+    task. Approval wins if both are somehow present: `abandon-task` refuses
+    approved work, and the approval claim is the one that is immutable.
+    """
+
+    assert _derive({ABANDONED_RECORD: "# T001 abandonment"}) == "ABANDONED"
+    assert _derive({ABANDONED_RECORD: "# T001 abandonment"}, approved_commit="a" * 40) == "APPROVED"
 
 
 def test_every_artifact_kind_maps_to_its_recorded_status() -> None:

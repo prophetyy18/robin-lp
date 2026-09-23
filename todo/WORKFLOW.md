@@ -39,6 +39,31 @@ becomes current again.
 Conversation text, an Agent's completion claim and uncommitted files are never
 workflow state.
 
+### Recorded state must be backed by evidence
+
+Every transition writes its evidence — the review, triage report, owner decision,
+planner or developer handoff, or abandonment record — in the *same commit* as the
+status it explains. So the two must agree, and the controller checks that they do:
+`derive_status` reconstructs a task's status from the committed artifacts alone,
+and
+
+- `validate` refuses a repository where a recorded status has no artifact behind
+  it, because such a value did not come from a transition — hand-editing
+  `todo/config.yaml` is how six tasks were once added with no author role and no
+  review — and running the workflow from a state nothing can explain is what must
+  not happen;
+- `status` reports every disagreement under `status_conflicts`, so an operator
+  sees it while inspecting rather than when blocked.
+
+Three values are exempt, and only these: `PLANNED`, `READY` and `IN_DEVELOPMENT`.
+No committed artifact carries the Manager's selection, so the control plane is
+allowed to decide them — though which of the three is admissible still depends on
+whether an attempt has been started. The exemption is bounded and measured: over
+all 280 revisions of `todo/config.yaml` (18,493 task-revisions, the whole history
+rather than a sample) the derivation reproduces every recorded value except one,
+and that one is a pre-2026-09-15 semantics difference that must not be rewritten.
+`tests/test_workflow_state_derivation.py` holds the walk and the named exception.
+
 ## Commands
 
 Run from the repository root with the project Python:

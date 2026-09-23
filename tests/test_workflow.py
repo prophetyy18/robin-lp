@@ -103,6 +103,9 @@ def _make_repo(tmp_path: Path) -> tuple[Path, str]:
     (repo / ".gitignore").write_text("__pycache__/\n*.py[cod]\n", encoding="utf-8")
     (repo / "todo" / "README.md").write_text("test workflow\n", encoding="utf-8")
     for agent in (
+        # `validate_repository` requires every role, including the Manager, so a
+        # fixture that omits one cannot exercise it at all.
+        "workflow-manager",
         "stage-developer",
         "stage-reviewer",
         "issue-triager",
@@ -115,8 +118,12 @@ def _make_repo(tmp_path: Path) -> tuple[Path, str]:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"---\nname: {agent}\ndescription: test\n---\n", encoding="utf-8")
     schema_dir = repo / "todo" / "schemas"
+    # `validate_repository` loads every schema, so the fixture carries all of
+    # them; with a partial set it could not be exercised here at all.
     for schema in (
         "config",
+        "amendment-result",
+        "amendment-review-result",
         "developer-result",
         "review-result",
         "triage-result",
@@ -2091,6 +2098,72 @@ def test_discard_attempt_requires_a_reason_and_a_record(tmp_path: Path) -> None:
         manager.discard_attempt("T001", reason="   ")
     # Still blocked: a refused discard must not half-apply.
     assert manager.load_attempt("T001") is not None
+
+
+# --------------------------------------------------------------------------
+# The recorded status must be supported by the committed artifacts
+# --------------------------------------------------------------------------
+
+
+def test_validate_refuses_a_status_no_artifact_supports(tmp_path: Path) -> None:
+    """A status with nothing behind it did not come from a transition.
+
+    Every transition commits its evidence in the same commit, so the two must
+    agree. When they do not, the value was written by hand -- which is how six
+    tasks were once added with no author role and no review -- and running the
+    workflow from a state nothing can explain is exactly what must not happen.
+    """
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    manager.validate_repository()
+
+    config = manager.load_config()
+    config["tasks"]["T000"]["status"] = "PLANNED"  # approved, with the evidence
+    _write_json(repo / "todo" / "config.yaml", config)
+
+    # `status` reports it so an operator sees it while inspecting...
+    assert manager.status()["status_conflicts"] == [
+        {
+            "task_id": "T000",
+            "recorded": "PLANNED",
+            "derived": "APPROVED",
+            "reason": "the artifacts imply APPROVED",
+        }
+    ]
+    # ...and `validate` refuses it outright.
+    with pytest.raises(WorkflowError, match="T000=PLANNED but the artifacts imply APPROVED"):
+        manager.validate_repository()
+
+
+def test_validate_accepts_what_only_the_control_plane_can_decide(tmp_path: Path) -> None:
+    """PLANNED, READY and IN_DEVELOPMENT are decisions, not artifact facts.
+
+    No committed artifact carries the Manager's selection, so these three must
+    not be reported as conflicts. They are bounded all the same: which of them
+    is admissible depends on whether an attempt has been started.
+    """
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    config_path = repo / "todo" / "config.yaml"
+
+    def set_state(status: str, attempt: int) -> list[dict[str, str]]:
+        config = manager.load_config()
+        config["tasks"]["T001"]["status"] = status
+        config["tasks"]["T001"]["attempt"] = attempt
+        config["workflow_state"] = status
+        _write_json(config_path, config)
+        return manager.status_conflicts(config)
+
+    # Nothing has run: only PLANNED and READY are explainable.
+    assert set_state("PLANNED", 0) == []
+    assert set_state("READY", 0) == []
+    assert set_state("AWAITING_REVIEW", 0) != []
+    assert set_state("APPROVED", 0) != []
+
+    # An attempt is recorded with no artifact for it: READY or IN_DEVELOPMENT.
+    assert set_state("READY", 3) == []
+    assert set_state("IN_DEVELOPMENT", 3) == []
+    assert set_state("BLOCKED", 3) != []
 
 
 def test_discard_attempt_clears_a_remnant_on_a_closed_task(tmp_path: Path) -> None:
