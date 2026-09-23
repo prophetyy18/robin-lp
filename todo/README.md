@@ -22,8 +22,14 @@ dataset content hash covers (no cursor or coverage-string forgery), and records
 drawdown and T052 attribution at the actual fill cursor (no block range written into the tick
 range, no zero-valued run facts). T109's contract and its historical approved evidence remain
 byte-identical, read-only and explicitly unavailable for exact replay (`T109_HISTORICAL_UNAVAILABLE`);
-T110, T111, T087 and T088 keep their contracts and dependency edges to T109 and become
-transitively dependent on the repaired evidence through T112. The previous plan-structure revision
+The direct T109 consumers are T073, T084, T107, T108 and T110; T087, T088, T103,
+T111 and T096 also make downstream current-artifact claims. Their contracts and
+dependencies remain unchanged now and carry open impact records. The legal order is
+T112 independent approval with new production publication disabled, reviewed CONTRACT
+amendments to rewire direct consumers and repair indirect claims, reviewed SUPERSEDE
+annotation on T109, then atomic runtime cutover to T112-only current publication.
+Until those gates pass, no dependent task may treat defective T109 artifacts as
+repaired current evidence. The previous plan-structure revision
 remains documented below for traceability.
 
 Previous plan-structure revision: **OWNER_BOOTSTRAP_T109_SPLIT_2026_09_21**. The bootstrap retained

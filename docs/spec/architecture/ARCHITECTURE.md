@@ -155,6 +155,8 @@ application / backtest orchestration
 | 6 | T105 (superseded by T109) | `robinhood_lp.reports.{manifest,validation,rerun,run_identity,metrics}` (predecessor registry-bound manifest and artifact-rerun delivery) | backtest / research |
 | 6 | T109 (superseded by T112 upon formal retirement; current until then) | `robinhood_lp.orchestrator` (product-run lifecycle, causal scheduling and atomic evidence publication; the backtest / research row below names the rest of attempt-4's module set) | application / orchestration |
 | 6 | T109 (superseded by T112 upon formal retirement; current until then) | `robinhood_lp.backtest.engine`, `robinhood_lp.reports.{manifest,run_state,validation}` (causal-scheduling engine extension and atomic manifest/run-state/validation publication) | backtest / research |
+| 6 | T112 | `robinhood_lp.orchestrator` (planned repair of the product entry and T100 partition resolution through T040/T041 replay and T050 point-in-time features) | application / orchestration |
+| 6 | T112 | `robinhood_lp.backtest.engine`, `robinhood_lp.reports.{manifest,run_state,validation,simulation_evidence}` (planned repaired fill-cursor facts and distinct versioned manifest/evidence reader dispatch) | backtest / research |
 | 6 | T110 | `robinhood_lp.application.historical_replay` (qualified MarketState/RunState composition and replay frames) | application / orchestration |
 | 6 | T111 | `robinhood_lp.reports.evidence_adapter` (validated T101/T102/T106 compatibility view over current artifacts) | backtest / research |
 | 6 | T106 | `robinhood_lp.robustness` (schema-bound surfaces, splits, scenarios, runner and reports) | backtest / research |
@@ -201,7 +203,14 @@ layer and describes the rest in prose: T105 extends the artifact-rerun entry thr
 orchestration and which the T097 row already maps.
 
 T109 replaces the T069/T105 current-write authorities and owns causal evidence plus atomic
-publication. T110 composes the already-approved reconstruction primitives rather than absorbing
+publication. A0026 records that its approved implementation still permits a fixed empty
+event source, fabricated partition references and block-range-as-tick-range evidence;
+that implementation cannot establish repaired current partition/run evidence. T112 is
+the planned successor repair, with separate manifest/evidence versions and fail-closed
+reader dispatch. T112 approval precedes reviewed CONTRACT consumer rewiring, followed
+by SUPERSEDE on T109, then an atomic runtime cutover to T112-only new publication;
+new successful production publication stays disabled until that cutover. T110
+composes the already-approved reconstruction primitives rather than absorbing
 them: T040/T041 own post-event pool/tick reconstruction and T104 remains the sole dataset/window/
 cursor/reconstruction-bound fee-growth and exact range-fee projection. T110 and the Web read
 models may compose T104 but may not implement another fee path. T111's versioned compatibility
@@ -214,11 +223,12 @@ at protocol/domain: the optional `block_number` / `transaction_index` / `log_ind
 on `BacktestEvent` belongs to the protocol layer map and so is named here in prose rather than
 in a §2.2 backtest / research row that already lists the other module layers attempt-4 touched.
 
-For new T109 runs, delayed execution is a correction inside the one T061 engine schedule, not a
+T109's approved causal-schedule contract, carried forward by T112, places delayed
+execution inside the one T061 engine schedule, not a
 projection-layer reorder: a future fill remains queued until its actual fill-data MarketCursor is
 reached, so intervening callbacks and accounting views remain pre-fill. Audit ordinal and cursor
-order agree when created; T109 refuses publication instead of sorting a non-causal audit history
-afterward. T110 projects that saved evidence without callbacks; T111 performs the approved-consumer
+order agree when created; T112 must refuse publication instead of sorting a non-causal audit history
+afterward. T110 projects validated T112 evidence without callbacks; T111 performs the approved-consumer
 cutover. Historical predecessor artifacts remain read-only and unavailable for exact RunState, not
 reinterpreted under the corrected schedule.
 

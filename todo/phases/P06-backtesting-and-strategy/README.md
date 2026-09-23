@@ -17,11 +17,14 @@ dataset-addressed run evidence and atomic current publication, T110 qualifies ex
 market/run state and replay frames while composing rather than replacing T104, and T111 cuts
 the approved research consumers over to that current artifact chain; T112, the A0026
 successor repair task, closes the three defects A0026 confirmed in the code paths that
-produce new T109 artifacts — routing the backtest entry through real T100 partitions,
-binding the manifest to real T100 partition refs and recording `SimulationEvidence` run
+produce new T109 artifacts — routing the backtest entry through real T100 partitions
+via T040/T041 replay and T050 point-in-time features, binding the manifest to real
+T100 partition refs and recording separately versioned `SimulationEvidence` run
 facts sufficient to recover positions, integer inventory, equity, drawdown and T052
 attribution at the actual fill cursor — without mutating T109's contract or its
-historical approved evidence; T107 produces an
+historical approved evidence. T112 approval precedes reviewed consumer CONTRACT
+amendments and T109 SUPERSEDE; current production publication resumes only after
+an atomic T112-only cutover. T107 produces an
 explicitly provisional candidate marked `EXPERIMENTAL_NOT_LIVE_APPROVED`, or an honest
 `NO_TRADE`. Neither is live approval.
 

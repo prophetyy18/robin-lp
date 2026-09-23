@@ -17,16 +17,16 @@
 
 | 目标 | 主要任务 | 最终证据 |
 | --- | --- | --- |
-| `G-RESEARCH-01` | T020–T062、T064–T068、T100–T104、T106–T109（T063/T069/T105 为前任证据） | 数据、replay、估值、实验 manifest/report、规范数据集引用和完成运行证据；T109 是 T069/T105 的当前后继交付 |
+| `G-RESEARCH-01` | T020–T062、T064–T068、T100–T104、T106–T109、T112（T063/T069/T105 为前任证据） | 数据、replay、估值、实验 manifest/report、规范数据集引用和完成运行证据；T109 为已批准交付，T112 为待审后继修复，尚无完成证据 |
 | `G-PAPER-01` | T071–T083、T093 | 实时 paper ledger、soak 与 post-testnet shadow 报告 |
-| `G-STRATEGY-01`、`G-RECOMMEND-01` | T060–T066、T068、T084–T087、T106–T109（T105 为前任证据） | 版本化候选、注册身份、样本外结果、人工选择审计、当前 manifest/run authority 和登记身份作者指引 |
+| `G-STRATEGY-01`、`G-RECOMMEND-01` | T060–T066、T068、T084–T087、T106–T109、T112（T105 为前任证据） | 版本化候选、注册身份、样本外结果、人工选择审计、manifest/run authority 和登记身份作者指引；T112 修复当前运行证据链，尚待审查 |
 | `G-SIGNAL-01`、`G-STRATEGY-SPIKE-01` | T050、T053、T060、T065、T066、T107 | point-in-time 市场特征、合格 USDG 价格、5 分钟规则和登记身份锁定的策略决策记录 |
-| `G-NUMERAIRE-01`、`G-ECONOMIC-01` | T049、T052、T053、T060、T063–T066、T106、T107、T109（T105 为前任证据） | USDG 估值、PnL 归因、净经济价值、基准报告和登记身份/运行证据绑定的实验证据 |
+| `G-NUMERAIRE-01`、`G-ECONOMIC-01` | T049、T052、T053、T060、T063–T066、T106、T107、T109、T112（T105 为前任证据） | USDG 估值、PnL 归因、净经济价值、基准报告和登记身份/运行证据绑定的实验证据；T112 的游标归因修复待审查 |
 | `G-NUMERAIRE-02` | T052、T053、T100、T103 | 研究侧计价层级、`RELATIVE_ONLY` 与执行侧 USDG 不变 |
 | `G-RESEARCH-UNIVERSE-01` | T026、T027、T100 | 研究范围注册表、独立分类与执行权限隔离 |
-| `G-DATASET-01` | T100、T103、T109（T063/T069/T105 为前任证据） | 版本化数据集、canonical partition reference、registry-bound manifest 绑定与不可变发布 |
+| `G-DATASET-01` | T100、T103、T109、T112（T063/T069/T105 为前任证据） | 版本化数据集、真实 canonical partition reference、registry-bound manifest 绑定与不可变发布；T112 的真实分区引用修复待审查 |
 | `G-ML-01` | T060、T101、T102、T103 | 模型接口边界、经济判据与拒绝记录 |
-| `G-STRATEGY-MAINTAIN-01` | T060、T063、T065、T066、T068、T106–T109（T105 为前任证据） | 稳定接口、不可变模型/阈值版本、注册身份、schema-bound robustness、重现实验和当前作者指引 |
+| `G-STRATEGY-MAINTAIN-01` | T060、T063、T065、T066、T068、T106–T109、T112（T105 为前任证据） | 稳定接口、不可变模型/阈值版本、注册身份、schema-bound robustness、重现实验和作者指引；现行证据版本切换仍待审查 |
 | `G-LIFECYCLE-01` | T051、T052、T061、T062、T065、T071 | 入场至退出的 episode ledger 与反事实路径 |
 | `G-UI-01` | T073、T084–T088、T103 | Web 控制台与端到端用户旅程；结果页与运行页见 T087/T088，研究页由 T103 交付 |
 | `G-AUTO-01` | T072、T080–T082、T090–T095 | 后台恢复、soak、testnet/mainnet 自动运行证据 |
@@ -51,10 +51,10 @@
 | `G-LIMIT-01`、`G-V4-SIZING-01` | T025、T049、T051、T070、T085、T091、T094 | 双层上限、liquidityDelta 反算和两边最坏敞口测试 |
 | `G-EXIT-01` | T070、T081、T085、T091、T092、T095、T097 | 收回执行钱包、撤权、禁止自动外转的演练与交易证据 |
 | `G-RECON-01` | T033、T071、T072、T081、T091、T092、T095 | 重启、RPC、nonce、replacement、reorg 与账本核对测试 |
-| `G-BACKTEST-RUN-01` | T061、T068、T087、T109（T063/T069/T105 为前任证据） | 当前运行入口、运行身份、状态/进度/取消、registry-bound manifest 与原子 simulation evidence |
-| `G-BACKTEST-RESULT-01` | T088、T104、T106、T107、T109（T063/T069/T105 为前任证据） | 分层结果页、事件标记、归因残差、覆盖缺口、T104 exact-fee provenance、manifest 身份、完成运行 replay 与稳健性/候选证据 |
-| `G-HISTORICAL-REPLAY-01`、`G-RUN-REPLAY-01` | T040、T041、T052、T061、T088、T100、T103、T104、T109（T069/T105 为前任证据） | 数据集寻址的市场状态、T104 fee-growth 投影、完成运行的不可变模拟证据、按游标的运行状态与组合回放帧；T109 复用既有重建、费用、回测和会计路径 |
-| `G-STRATEGY-REGISTRY-01` | T060、T062、T063、T065、T068、T087、T106–T109（T105 为前任证据） | 注册身份、参数 schema、代码来源、manifest/robustness/candidate-lock 绑定与作者指引 |
+| `G-BACKTEST-RUN-01` | T061、T068、T087、T109、T112（T063/T069/T105 为前任证据） | 运行入口、运行身份、状态/进度/取消、registry-bound manifest 与原子 simulation evidence；T112 真实分区入口及版本切换尚待批准 |
+| `G-BACKTEST-RESULT-01` | T088、T104、T106、T107、T109、T112（T063/T069/T105 为前任证据） | 分层结果页、事件标记、归因残差、覆盖缺口、T104 exact-fee provenance、manifest 身份、完成运行 replay 与稳健性/候选证据；T112 游标运行事实待批准 |
+| `G-HISTORICAL-REPLAY-01`、`G-RUN-REPLAY-01` | T040、T041、T050、T052、T061、T088、T100、T103、T104、T109、T112（T069/T105 为前任证据） | 数据集寻址的市场状态、T050 可用时间特征、T104 fee-growth 投影、完成运行的不可变模拟证据、按游标的运行状态与组合回放帧；T112 修复真实分区和填单游标事实，尚待批准 |
+| `G-STRATEGY-REGISTRY-01` | T060、T062、T063、T065、T068、T087、T106–T109、T112（T105 为前任证据） | 注册身份、参数 schema、代码来源、manifest/robustness/candidate-lock 绑定与作者指引；T112 版本绑定待批准 |
 | `G-PERM-WRITE-01` | T025、T073、T085、T097 | Web 提权版本化路径与 reduce-only CLI 边界 |
 | `G-PAPER-AUTHORIZE-01` | T025、T073 | 池选择、`HOLD`/`LP` 审批与 preliminary paper 授权记录 |
 
@@ -64,10 +64,10 @@
 | --- | --- |
 | `ADM-TECH-*`、`ADM-RISK-*`、`ADM-PAIR-*`、`ADM-HOOK-*` | T025、T027、T043、T049、T070、T073、T084、T085、T094 |
 | `WEB-GLOBAL-*`、`WEB-PAGE-*` | T073、T084–T088、T103 |
-| `ECO-*` | T049、T050–T053、T060–T066、T070、T106、T107、T109（T105 为前任证据） |
+| `ECO-*` | T049、T050–T053、T060–T066、T070、T106、T107、T109、T112（T105 为前任证据） |
 | `CTRL-*` | T070、T080、T081、T085、T090–T095、T097 |
 | `M-*`（LP 指标字典） | T052、T101、T102、T103 |
-| `DS-*`（研究数据集与模型评估） | T100–T104、T109 |
+| `DS-*`（研究数据集与模型评估） | T100–T104、T109、T112 |
 
 ## 更新要求
 

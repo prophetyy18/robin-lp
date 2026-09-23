@@ -1,7 +1,21 @@
 {
   "amendment_id": "A0026",
-  "layer": "PROPHET",
-  "raised": [
+  "outcome": "AMENDMENT_READY",
+  "summary": "修复 A0026 的 T112 合同、依赖安全的退休顺序、T109 消费方影响、追溯映射与版本化产物边界；保留所有既有合同和历史批准证据。",
+  "rationale": "Owner 已确认 T109 已批准实现中的三处缺陷：产品入口可使用固定空事件源，manifest 分区引用可由游标或 coverage 字符串伪造，simulation evidence 将 block range 写入 tick range 且缺少 fill-cursor 实际运行事实。T112 是不重写 T109 历史合同与批准记录的后继修复任务。独立 review-001 的五项 required_changes 均在本次候选中处理：T112 使用 T040/T041 replay 与 T050 point-in-time features；新 manifest/evidence 分别换版本并严格配对读写；T112 独立批准后，先由 reviewed CONTRACT amendment 改写所有直接消费者与受影响间接消费者，再由 SUPERSEDE 注释 T109，最后原子切换唯一现行写入器。批准与部署之间禁止新的成功生产发布；回滚关闭发布而不复活缺陷写入器。",
+  "unresolved_questions": [],
+  "impact_assessment": {
+    "intent": "行为修复；PROJECT_GOALS.md 的 G-DATASET-01、G-BACKTEST-RUN-01、G-HISTORICAL-REPLAY-01、G-RUN-REPLAY-01 保持原义，intent_revision 不变。不新增产品目标或权限。",
+    "specification": "ARCHITECTURE.md §2.2 新增 T112 分层所有权行并明确 T109 当前实现缺陷和切换顺序；THREAT_MODEL.md T-17/T-21/T-22 将真实 T100 引用、区分版本和拒绝降级明确归属 T112；DATASET_AND_EVALUATION.md 将新运行的因果调度表述指向 T112 并保留 T109 已批准合同的历史含义。属于安全/架构/研究条款澄清，spec_revision 升至 v1-2026-09-23-a0026-run-evidence-cutover。DS-002、DS-005–DS-007 与 ADR-006/014 的行为要求不变。",
+    "contracts": "只修订本次 A0026 新增的 T112.md；原始 base 中存在的全部任务合同逐字保留。T112 依赖新增 T050；其 Outcome/Deliverables/Acceptance/Must not 明确独立版本、严格读者分派、真实分区、填单游标事实和禁止提前生产发布。受影响既有合同逐项列于 affected_existing_tasks，不能把本结果当作那些合同已修改或其任务已完成。",
+    "dependencies": "config 只改变本次 A0026 新增 T112 的依赖和 spec_revision；原始既有任务 entry 不变。T109 直接消费者恰为 T073/T084/T107/T108/T110；T087/T088/T103/T111/T096 有受影响的间接现行产物断言。合法顺序：T112 开发并独立批准但不启用新成功生产发布；reviewed CONTRACT amendment 先改五个直接消费者及受影响间接合同和必要的 T112 边；reviewed SUPERSEDE 才将 T109 注释为 superseded_by T112；随后运行时原子切换。T112 保留依赖 T109 作为合法后继；T085/T086 通过既有依赖传递且无独立 T109 断言。",
+    "implementation": "本 PROPHET 变更不编辑 src/tests。T112 开发时改造既有 orchestrator 产品入口及 reports/manifest、simulation_evidence、validation 与 T061 事实采集，复用 T040/T041 replay、T050 features、T052 attribution 和 T104 fee projection；不得建立第二套引擎/会计/发布器。旧空源、游标/coverage 引用和 block-as-tick 路径对当前写入不可达。",
+    "data": "T109 既有 manifest 版本 t109.experiment_manifest.v1、evidence 版本 t109.simulation_evidence.v1 均保留为历史只读。T112 新 manifest 与 evidence 必须各有不同且稳定的版本，成对绑定版本、身份及 checksum；manifest 保存 T100 source block range，新 evidence 用互不混淆的 typed field pairs 同时保存该 source block range 与 fill-cursor position tick range。读者先按版本分派，再验证全字段和跨产物绑定，拒绝缺失/未知/混合/降级及旧版冒充现行。所有历史 manifests、evidence、reports、candidate locks、audit 和 review bytes 不迁写、不回填；仅增加读者分支。",
+    "operations": "T112 获独立 APPROVED 不等于 runtime 启用。CONTRACT 消费者修复与 SUPERSEDE 审核之前，新成功生产发布关闭；正式切换时仅 T112 写现行版本，且原子发布 manifest/report/evidence。任一绑定失败或回滚均关闭新成功发布，保留旧/新已发布产物的严格分版本只读访问，不回退到缺陷 T109 写入器。Web 与 pre-paper 控制使用经过版本/引用验证的 T112 当前证据。",
+    "security": "保持中央风险、paper/live、签名器、执行和凭据边界不变；T112 产物不授予审批或执行权限。篡改、伪造引用、混合版本、旧版冒充现行、block/tick 混淆、缺失填单事实均 fail closed 并有命名原因；T073 不得把 T109 缺陷产物作为当前 pre-paper 授权证据。",
+    "verification": "本次 PROPHET 仅提供计划与静态校验，不是 T112 完成证据。T112 必须对两种异质池验证真实 T100 bytes/hash/range/PoolKey、T040/T041+T050 到 T061 的非空事件流与 availability cursor、manifest/evidence 双版本分派、block/tick 区分、fill-cursor 仓位/整数库存/净值/回撤/T052 归因、旧版本只读与混版拒绝、失败原子性、禁用/回滚和旧路径不可达；后续消费者 CONTRACT amendment 各自保留原验收并增加明确断言。独立 Reviewer 和控制器记录 PASS 之前无批准声明。"
+  },
+  "affected_existing_tasks": [
     {
       "impact_id": "A0026:T073:prepaper-current-evidence",
       "task_id": "T073",
@@ -153,5 +167,5 @@
       "required_disposition": "CONTRACT/DEPENDENCY：T112 批准后、SUPERSEDE 前给 T096 增加显式 T112 边和单独矩阵行；T109 只记历史批准，T112/T110/T111 分别记修复写入、精确 replay、消费者切换。IMPLEMENTATION：最终 dossier 解析实际 artifact/version/review SHA，不宣称空白验证通过。DATA：历史矩阵/批准记录不改写。OPERATIONS：T112 未经切换及下游验收不得宣称 V1 完成。SECURITY：不把研究证据转为 paper/live 批准。VERIFICATION：矩阵要求 T112 分区/版本/填单事实与 T110/T111 独立证据，旧版/缺失证据阻断最终验收，保留 T096 原矩阵要求。"
     }
   ],
-  "resolves": []
+  "resolved_task_impacts": []
 }

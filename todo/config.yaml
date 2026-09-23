@@ -3,7 +3,7 @@
   "project": "robinhood-lp-v1",
   "product_baseline_commit": "6c3177883a676a06f8b571d0a598f524e319fa34",
   "intent_revision": "v1-2026-09-21-historical-and-run-replay",
-  "spec_revision": "v1-2026-09-21-section-2-2-module-attribution",
+  "spec_revision": "v1-2026-09-23-a0026-run-evidence-cutover",
   "agent_runtime": {
     "provider": "MiniMax Anthropic-compatible API",
     "model": "MiniMax-M3[1m]",
@@ -1287,6 +1287,7 @@
       "depends_on": [
         "T040",
         "T041",
+        "T050",
         "T052",
         "T061",
         "T100",

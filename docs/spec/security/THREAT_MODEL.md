@@ -367,18 +367,22 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
   point-in-time bars and T101 labels carry their observation and availability times;
   T101 acceptance fails a run when an injected future-derived feature or an unpurged
   overlapping fold is detected; T063/T105 record predecessor dataset bindings, while
-  T109 binds current manifests and simulation evidence to immutable dataset references,
-  content hashes, exact canonical cursors and registered strategy revision; T106
+  T109's approved contract binds manifests and simulation evidence to immutable dataset
+  references, content hashes, exact canonical cursors and registered strategy revision;
+  A0026 records a defective implementation of the current partition/run binding.
+  T112 must repair it with real T100 references and separately versioned evidence before
+  new successful production publication resumes; T106
   constrains robustness surfaces to the recorded registered schema and ranges; T111 proves the
   approved T101/T102/T106 consumers use that current binding.
 - **Owner:** T101 (panel labels and harness) + T064 (historical split/robustness
   delivery) + T106 (current schema-bound split/robustness successor after retirement)
-  + T050 (point-in-time bars) + T109 (current manifest/run-evidence successor after retirement)
+  + T050 (point-in-time bars) + T109 (historical approved manifest/run-evidence delivery)
+  + T112 (planned current-write repair and versioned cutover)
 - **Residual risk:** A leak that the artifact's own metadata does not reveal, such as
   a source whose availability time is itself misrecorded. Mitigated by re-derivation
   from raw partitions and manifest checksums; not eliminated.
 - **Evidence:** T101 acceptance (injected future-derived feature, overlapping label
-  window, truncation invariance); T109/T106 acceptance and T111 approved-consumer regression and
+  window, truncation invariance); T109 historical approval, T112/T106 acceptance and T111 approved-consumer regression and
   migration/old-path-unreachable evidence;
   `docs/spec/research/DATASET_AND_EVALUATION.md` §4 (`DS-020`–`DS-022`).
 
@@ -456,22 +460,25 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
   editing an existing version; `DS-043` requires every model artifact to carry a
   content hash and full provenance (dataset version, feature configuration, split
   definition, hyperparameters, seed, code revision); T063/T105 historical manifests
-  record predecessor dataset versions and reporting numeraires, while T109 is the
-  current registry-bound manifest and run-evidence authority after retirement, references
-  immutable T100 partitions instead of copying the market timeline, and fails validation when
-  the dataset/numeraire, partition/content hash, cursor or registry/schema binding is missing or
-  disagrees; T111 owns approved-consumer compatibility and old-path removal; T100's registry and T103's
+  record predecessor dataset versions and reporting numeraires. T109's approved
+  contract requires registry-bound manifest/run evidence, but A0026 found its
+  current writer can fabricate partition refs. T112 must resolve immutable T100
+  partitions to the same canonical bytes, publish a distinct paired manifest/evidence
+  version, and reject missing or mismatched dataset/numeraire, partition/content
+  hash, cursor, registry/schema and version bindings. T111 owns approved-consumer
+  compatibility and old-path removal; T100's registry and T103's
   saved definitions re-open to the same pools, ranges and segment roles; T031/T032
   compare partition manifests and checksums.
-- **Owner:** T100 (dataset registry) + T063/T105 (historical manifest deliveries) + T109
-  (current manifest and simulation-evidence successor after retirement) + T110 (qualified replay)
+- **Owner:** T100 (dataset registry) + T063/T105/T109 (historical approved deliveries)
+  + T112 (planned repaired current manifest and simulation-evidence writer) + T110 (qualified replay)
   + T111 (approved-consumer cutover) + T101 (artifact provenance) + T103
   (saved definitions)
 - **Residual risk:** A mutation is detected only when a run is repeated; without a
   durable record of the original version, tampering that also rewrites the manifest
   cannot be proven.
 - **Evidence:** `DS-002`, `DS-043`, ADR-014 clause 4, T101/T103 acceptance, and
-  T109 publication compatibility, T110 replay qualification, and T111 approved T101/T106/T102
+  T109 historical publication compatibility, T112 distinct-version/real-partition/rollback
+  acceptance, T110 replay qualification, and T111 approved T101/T106/T102
   regression, migration and old-path-unreachable acceptance.
 
 ### T-22 A completed run is replayed with substituted market or strategy state
@@ -484,19 +491,24 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
   looks historical but does not represent either canonical market truth or what that exact run did.
 - **Controls:** `DS-005`–`DS-007` bind post-event MarketState and post-transition RunState to one
   immutable dataset/content hash, exact canonical cursor and deterministic transition ordinal;
-  T109 publishes checksummed run evidence atomically and refuses unbound transitions; T110 never
-  invokes strategy callbacks for replay and composes rather than copies the two timelines; new T109 runs
+  T109's approved contract publishes checksummed run evidence atomically and refuses
+  unbound transitions, but A0026 found defective block/tick and fill-cursor facts
+  in its implementation. T112 must repair those facts, use a distinct evidence version
+  and fail closed on legacy-as-current or mixed-version reads. T110 never invokes
+  strategy callbacks for replay and composes rather than copies the two timelines; new T112 runs
   queue delayed latency/fill inside the single T061 schedule until the actual fill-data cursor, and
   require audit ordinal/cursor agreement at creation rather than post-sort repair; T104 remains the
   sole fee-growth/range-fee projection with its dataset/window/cursor/reconstruction provenance;
   pre-evidence runs are explicitly unavailable instead of regenerated.
-- **Owner:** T100 (canonical dataset identity) + T104 (fee-growth projection) + T109 (current
-  manifest and evidence successor after retirement) + T110 (state projection and frame composition)
+- **Owner:** T100 (canonical dataset identity) + T104 (fee-growth projection)
+  + T109 (historical approved delivery) + T112 (planned repaired current writer)
+  + T110 (state projection and frame composition)
 - **Residual risk:** A defect in the original engine/accounting transition is preserved faithfully
   by evidence. Replay proves what the run did, not that the run's economic logic was correct; T061,
   T052 and independent reconciliation remain responsible for that correctness.
 - **Evidence:** G-HISTORICAL-REPLAY-01, G-RUN-REPLAY-01, `DS-005`–`DS-007`, T104 equivalence and
-  provenance acceptance, T109 cursor-order/publication/tamper acceptance, T110 no-callback and
+  provenance acceptance, T109 historical cursor-order/publication/tamper acceptance,
+  T112 fill-cursor/version/legacy-rejection acceptance, T110 no-callback and
   replay-equivalence acceptance, and T111 migration/old-path-unreachable acceptance.
 
 ## 4. Severity rubric
@@ -528,12 +540,12 @@ Each threat records: **severity**, **scenario**, **controls in V1**, **owner**,
 | T-14 | Bound signer request + deterministic planner/executor | T090–T095, T097 evidence |
 | T-15 | Encrypted Keystore + interactive unlock + locked restart | T081/T090 evidence |
 | T-16 | Qualified point-in-time USDG quotes + fail-closed risk | T049/T053/T070 evidence |
-| T-17 | Point-in-time features/labels, horizon-derived purge/embargo, temporal-only splits, current dataset-reference manifest binding | T101/T106/T109/T111 acceptance; `DS-020`–`DS-022` |
+| T-17 | Point-in-time features/labels, horizon-derived purge/embargo, temporal-only splits, current dataset-reference manifest binding | T101/T106/T109/T112/T111 acceptance; `DS-020`–`DS-022` |
 | T-18 | Qualification record + `RELATIVE_ONLY` display rule (no USD-denominated field) | `WEB-GLOBAL-001`; T084/T086/T103 acceptance |
 | T-19 | Research artifacts stay research: no execution authority, approval appearance or reachability | T085 acceptance; T086 journeys; ADR-014 clauses 1 and 5 |
 | T-20 | One central, non-bypassable risk gateway ahead of any model output | T070 + T060/T102 acceptance; `G-RISK-01` |
-| T-21 | Additive publishing, content hashes, canonical dataset references and dataset/registry-version binding in the manifest/evidence | T100/T063/T105 historical evidence plus T109/T111/T101 acceptance; `DS-002`/`DS-043` |
-| T-22 | Exact cursor/ordinal binding, causally queued delayed fills, immutable run evidence, no post-sort/strategy rerun, T104-only fee projection | T061/T104/T109/T110 acceptance; `DS-005`–`DS-007` |
+| T-21 | Additive publishing, content hashes, canonical dataset references and dataset/registry-version binding in the manifest/evidence | T100/T063/T105/T109 historical evidence plus T112/T111/T101 acceptance; `DS-002`/`DS-043` |
+| T-22 | Exact cursor/ordinal binding, causally queued delayed fills, immutable run evidence, no post-sort/strategy rerun, T104-only fee projection | T061/T104/T109/T112/T110 acceptance; `DS-005`–`DS-007` |
 
 ## 6. Residual risks and owner follow-ups
 

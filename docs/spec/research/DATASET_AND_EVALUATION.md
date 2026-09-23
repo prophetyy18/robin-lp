@@ -76,7 +76,8 @@ fee-growth 积分器。
 因此绑定后一个游标而不是原 decision 游标。任何会改变或证明运行状态、但无法绑定到数据集
 内确切规范游标的 transition，都使新式成功证据发布失败。
 
-对新的 T109 run，这一绑定是对**同一条 T061 执行调度路径**的扩展与纠正，不是结果发布后
+T109 已批准合同中的游标绑定由 T112 后继修复沿用；对新的 T112 run，这一绑定是对
+**同一条 T061 执行调度路径**的扩展与纠正，不是结果发布后
 的重新排序：decision/risk 若选择未来 fill-data event，现有引擎路径把 latency/fill 作为 pending
 pipeline 按该实际 `MarketCursor` 排队，只在主市场循环到达该游标、该事件已进入 information
 frontier 后才依次应用 latency 与 fill、改变 ledger。到达 fill 游标时，先应用该游标的市场事件，
