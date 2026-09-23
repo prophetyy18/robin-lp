@@ -153,8 +153,8 @@ application / backtest orchestration
 | 6 | T068 | `robinhood_lp.strategy.registry` (registered strategy identities, parameter schemas and code provenance) | strategy |
 | 6 | T069 (superseded by T109) | `robinhood_lp.orchestrator` (predecessor product-run lifecycle delivery: durable identity, queue/progress/status, cancellation and atomic publication of the registry-bound manifest/report) | application / orchestration |
 | 6 | T105 (superseded by T109) | `robinhood_lp.reports.{manifest,validation,rerun,run_identity,metrics}` (predecessor registry-bound manifest and artifact-rerun delivery) | backtest / research |
-| 6 | T109 | `robinhood_lp.orchestrator` (product-run lifecycle, causal scheduling and atomic evidence publication; the backtest / research row below names the rest of attempt-4's module set) | application / orchestration |
-| 6 | T109 | `robinhood_lp.backtest.engine`, `robinhood_lp.reports.{manifest,run_state,validation}` (causal-scheduling engine extension and atomic manifest/run-state/validation publication) | backtest / research |
+| 6 | T109 (superseded by T112 upon formal retirement; current until then) | `robinhood_lp.orchestrator` (product-run lifecycle, causal scheduling and atomic evidence publication; the backtest / research row below names the rest of attempt-4's module set) | application / orchestration |
+| 6 | T109 (superseded by T112 upon formal retirement; current until then) | `robinhood_lp.backtest.engine`, `robinhood_lp.reports.{manifest,run_state,validation}` (causal-scheduling engine extension and atomic manifest/run-state/validation publication) | backtest / research |
 | 6 | T110 | `robinhood_lp.application.historical_replay` (qualified MarketState/RunState composition and replay frames) | application / orchestration |
 | 6 | T111 | `robinhood_lp.reports.evidence_adapter` (validated T101/T102/T106 compatibility view over current artifacts) | backtest / research |
 | 6 | T106 | `robinhood_lp.robustness` (schema-bound surfaces, splits, scenarios, runner and reports) | backtest / research |

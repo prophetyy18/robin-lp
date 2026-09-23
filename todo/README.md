@@ -11,11 +11,25 @@ Last plan review: **2026-09-14**. Network and deployment facts are mutable;
 the links in this file are evidence sources, not values that may be copied into
 code without the verification required by T024.
 
-Plan structure revision: **OWNER_BOOTSTRAP_T109_SPLIT_2026_09_21**. This names the last
-Owner-authorized plan-structure change. The bootstrap retained T109's active causal evidence and
-publication work and moved its replay qualification and approved-consumer cutover into T110 and
-T111 after the finite Developer continuation budget was exhausted. It did not change Intent or
-Spec requirements; the audit record is
+Plan structure revision: **OWNER_AMENDMENT_A0026_T109_REPAIR_SUCCESSOR_2026_09_22**. This names the last
+Owner-authorized plan-structure change. A0026 confirmed three defects in the code paths that
+produce new T109 artifacts after T109 was APPROVED, and the Owner directed a legal successor repair
+task. The plan now adds T112 in `P06` as the successor that routes the product backtest entry through
+real T100 partitions via the existing replay / features surfaces into T061 (no fixed empty event
+source), binds the T109 manifest to real T100 partition refs that resolve to the canonical bytes the
+dataset content hash covers (no cursor or coverage-string forgery), and records
+`SimulationEvidence` run facts sufficient to recover positions, integer inventory, equity,
+drawdown and T052 attribution at the actual fill cursor (no block range written into the tick
+range, no zero-valued run facts). T109's contract and its historical approved evidence remain
+byte-identical, read-only and explicitly unavailable for exact replay (`T109_HISTORICAL_UNAVAILABLE`);
+T110, T111, T087 and T088 keep their contracts and dependency edges to T109 and become
+transitively dependent on the repaired evidence through T112. The previous plan-structure revision
+remains documented below for traceability.
+
+Previous plan-structure revision: **OWNER_BOOTSTRAP_T109_SPLIT_2026_09_21**. The bootstrap retained
+T109's active causal evidence and publication work and moved its replay qualification and
+approved-consumer cutover into T110 and T111 after the finite Developer continuation budget was
+exhausted. It did not change Intent or Spec requirements; the audit record is
 [`evidence/workflow-bootstrap/2026-09-21-t109-split.md`](evidence/workflow-bootstrap/2026-09-21-t109-split.md).
 
 ## 1. Product boundary and final delivery standard

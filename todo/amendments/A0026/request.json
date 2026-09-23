@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0026",
+  "task_ids": [],
+  "layer": "PROPHET",
+  "target_status": null,
+  "summary": "add a successor task to repair the broken historical-data to run-timeline product chain",
+  "owner_direction": "修复已确认的产品技术主线缺陷：产品回测入口必须从真实 T100 分区经既有 replay/features 进入 T061，不得使用固定空事件源；manifest 必须引用真实且可解析到相同 canonical bytes 的 T100 partition refs，不得由事件游标或 coverage 字符串伪造；simulation evidence 不得把 block range 写入 tick range，必须保存足以在实际 fill cursor 恢复仓位、整数库存、净值、回撤与 T052 归因的运行事实；为这些已批准 T109 实现缺陷新增合法后继修复任务，记录对 T110/T111/Web 依赖链的影响，并保持历史批准证据不变。"
+}

@@ -1,0 +1,72 @@
+{
+  "amendment_id": "A0026",
+  "layer": "PROPHET",
+  "raised": [
+    {
+      "impact_id": "A0026:T110:repoint-to-t112-when-approved",
+      "task_id": "T110",
+      "reason": "T110 (PLANNED, depends_on T109) currently commits to compose `MarketState` / `RunState` / `ReplayFrame` from `T109` simulation evidence through T040 / T041 / T104. A0026 confirmed that the T109 evidence chain is currently wired through `_derive_partition_refs` (cursor-fabricated or coverage-fabricated `dataset_partition_refs`), a fixed empty `EventSource` entry and `PositionState.tick_lower/tick_upper` filled from `block_range_start/end` with zero-valued `equity_q64_64`, `drawdown_q64_64` and `attribution_snapshot`. A reader of T110's contract that trusts it to compose real canonical partition refs and fill-cursor run facts from T109 evidence would be misled while these defects stand; T110's `RunState` projection would be projecting zero equity, zero drawdown, zero attribution and a tick range that mirrors the block range. T109's contract stays correct; the defect is in the T109 implementation. Without T112, T110's `depends_on T109` is a contract that names an evidence shape the current implementation does not deliver.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT / DEPENDENCY: leave T110.md byte-identical while T109 is APPROVED. After T112 is APPROVED and the SUPERSEDE amendment annotates T109 `superseded_by T112`, a future CONTRACT amendment must add `T112` to T110's `depends_on` (alongside the existing T109 edge to keep historical evidence readable) and rewrite T110's acceptance to compose `MarketState` / `RunState` / `ReplayFrame` through T112 evidence for new runs while keeping every existing T110 acceptance clause. IMPLEMENTATION: no edit until T112 lands; T110's planned path `robinhood_lp.application.historical_replay` must compose the repaired T112 evidence through the existing T040 / T041 / T104 surfaces and never duplicate them. DATA: historical T109 artifacts and their `RunState`-unavailable label stay byte-identical and reachable only through the versioned legacy reader; new runs after T112 starts carry the repaired evidence. OPERATIONS: not applicable (T110's run-time cutover follows T112's atomic cutover). SECURITY: not applicable (T110 grants no authority). VERIFICATION: retain all current T110 acceptance plus the additional cases T112's contract adds (real-partition resolution, refusal of the fixed empty event source, block_range vs tick_range separation, fill-cursor preservation of position / integer inventory / equity / drawdown / T052 attribution)."
+    },
+    {
+      "impact_id": "A0026:T111:repoint-to-t112-when-approved",
+      "task_id": "T111",
+      "reason": "T111 (PLANNED, depends_on T101 / T102 / T106 / T110) currently commits to cut approved T101 / T102 / T106 consumers over to current T109 artifacts through one versioned compatibility adapter that resolves canonical event bytes from T100 references and never invokes the T105 publisher or a strategy callback. T111's adapter consumes T109 evidence through T110's `RunState` / `MarketState` / `ReplayFrame` chain. A0026 confirmed that the T109 evidence chain is currently wired through cursor-fabricated or coverage-fabricated `dataset_partition_refs`, a fixed empty `EventSource` entry and `PositionState` constructed from `block_range_start/end`. While these stand, T111's adapter would be resolving canonical bytes against partition refs T100 cannot resolve, feeding `T101` panel/harness and `T106` robustness runner an adapter that is internally consistent with the broken shape. A reader of T111's contract that trusts it to consume canonical T100 references and exact cursor-bound evidence would be misled; the adapter's `dataset / pool / range / registry / schema / revision mismatches fail with named reasons` invariant depends on the upstream evidence being correct.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT / DEPENDENCY: leave T111.md byte-identical while T109 is APPROVED. After T112 is APPROVED and T109 SUPERSEDED, a future CONTRACT amendment must add `T112` to T111's `depends_on` (alongside T110 to keep historical evidence reachable) and rewrite T111's adapter acceptance to bind to T112 evidence, retaining every clause that protects the logical T101 / T102 / T106 identity and byte contract. IMPLEMENTATION: T111's `robinhood_lp.reports.evidence_adapter` (a file already present from T109 attempt-1, named in the §2.2 row by §2.2's planned-path convention) must consume the repaired T112 evidence and not invoke a strategy callback. DATA: historical T105 artifacts and pre-T112 T109 artifacts stay byte-identical through the legacy reader; new runs after T112 carry the repaired evidence. OPERATIONS: not applicable (T111's runtime cutover follows T112's atomic cutover). SECURITY: not applicable. VERIFICATION: retain all current T111 acceptance plus an explicit assertion that the adapter resolves real T100 partition refs (not cursor-fabricated or coverage-fabricated strings), that the adapter refuses adapters fed a fixed empty event source, and that block_range does not appear inside any tick_range field the adapter exposes."
+    },
+    {
+      "impact_id": "A0026:T084:repoint-web-provenance-to-t112-when-approved",
+      "task_id": "T084",
+      "reason": "T084 (PLANNED, depends_on T025 / T072 / T080 / T109) currently commits to render, from the validated T109 manifest, the 'canonical T100 dataset content hash and partition-reference provenance and simulation-evidence schema/checksum/availability' and to fail closed when those bindings disagree. A0026 confirmed that the T109 manifest's `dataset_partition_refs` is currently authored from cursor triples or coverage strings inside `src/robinhood_lp/orchestrator/__init__.py:2041 _derive_partition_refs`. A reader of T084 that trusts the web shell to render the canonical T100 partition references the dataset registry records would be misled: the shell would render fabricated refs and would not surface the `T112_PARTITION_REF_UNRESOLVABLE` named failure mode the contract requires. The pre-existing T069/T105 vs T109-legacy rendering distinction T084 already protects is the right shape; it now needs to extend to a T109 defective vs T112 repaired distinction at the same surface, because a T109-bad manifest and a T109-good manifest are both `version == MANIFEST_VERSION_T109` from T084's existing loader.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT / DEPENDENCY: leave T084.md byte-identical while T109 is APPROVED. After T112 is APPROVED and T109 SUPERSEDED, a future CONTRACT amendment must add `T112` to T084's `depends_on` (alongside T109 to keep historical evidence rendering intact) and add an acceptance clause that proves the shell renders only real T100 partition references resolving to the same canonical bytes the dataset registry records, surfaces the new `T112_PARTITION_REF_UNRESOLVABLE` / `T112_TICK_OUT_OF_RANGE` / `T112_BLOCK_RANGE_IN_TICK_RANGE` / `T112_RUN_FACTS_MISSING` named reasons when a manifest or evidence artifact fails the repaired binding check, and refuses to render a fabricated ref as canonical provenance. IMPLEMENTATION: no edit until T112 lands; T084's `robinhood_lp.web` console shell must surface the T112 binding state without reconstructing `MarketState` / `RunState` / `ReplayFrame` (those still belong to the dedicated T088 / T103 pages). DATA: historical T069 / T105 / T063 evidence and pre-T112 T109 evidence stay byte-identical and rendered as explicitly legacy and non-current; new runs after T112 start carry the repaired evidence. OPERATIONS: not applicable. SECURITY: not applicable (T084 grants no authority). VERIFICATION: retain all current T084 acceptance plus the new binding-failure / fabricated-refusal / legacy-non-current / no-secret cases."
+    },
+    {
+      "impact_id": "A0026:T087:repoint-web-runs-page-to-t112-when-approved",
+      "task_id": "T087",
+      "reason": "T087 (PLANNED, depends_on T068 / T084 / T110) currently commits to display the data coverage 'as recorded' in the validated T109 manifest of a T109 run, and to expose validated simulation-evidence availability plus a link to T088 for each successful run. A0026 confirmed that the T109 evidence chain is currently wired through cursor-fabricated or coverage-fabricated partition refs and a fixed empty event source. A reader of T087's contract that trusts its coverage rendering and evidence-availability link would be misled: the page would surface a coverage breakdown derived from fabricated refs and would link from a successful run whose evidence cannot actually replay at the fill cursor.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT / DEPENDENCY: leave T087.md byte-identical while T109 is APPROVED. After T112 is APPROVED and T109 SUPERSEDED, a future CONTRACT amendment must add `T112` to T087's `depends_on` (alongside T084 / T110) and add an acceptance clause that proves the page surfaces only real T100 partition references and that its evidence-availability link only links to runs whose evidence can restore position / integer inventory / equity / drawdown / T052 attribution at the fill cursor (i.e. runs produced by T112, not T109). IMPLEMENTATION: no edit until T112 lands; T087's `robinhood_lp.web.runs` page must not reconstruct state itself. DATA: historical T069 / T105 / T063 records and pre-T112 T109 records render as legacy and non-current; new runs after T112 start carry repaired evidence. OPERATIONS: not applicable. SECURITY: not applicable. VERIFICATION: retain all current T087 acceptance plus the new real-partition / repaired-evidence-only / named-reason / no-fabricated-coverage cases."
+    },
+    {
+      "impact_id": "A0026:T088:repoint-web-backtest-result-to-t112-when-approved",
+      "task_id": "T088",
+      "reason": "T088 (PLANNED, depends_on T084 / T110) currently commits to consume `ReplayFrame(run_id, cursor)` and render the post-event `MarketState` and the exact saved post-transition `RunState` at the same cursor, with an equity chart, drawdown, PnL attribution, inventory chart showing `liquidity` and both tokens' raw integer amounts, and a tick liquidity distribution. A0026 confirmed that the T109 simulation evidence is currently built with `tick_lower=request.block_range_start, tick_upper=request.block_range_end`, `equity_q64_64=0`, `drawdown_q64_64=0` and an `attribution_snapshot` whose every component is zero. A reader of T088's contract that trusts it to draw real equity / drawdown / attribution / tick band / inventory charts would be misled: the page would draw zero equity, zero drawdown, zero attribution, a tick band that mirrors the block range (not the actual `tickLower` / `tickUpper` chosen by the strategy) and zero inventory at every cursor.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "DATA",
+        "VERIFICATION"
+      ],
+      "required_disposition": "CONTRACT / DEPENDENCY: leave T088.md byte-identical while T109 is APPROVED. After T112 is APPROVED and T109 SUPERSEDED, a future CONTRACT amendment must add `T112` to T088's `depends_on` (alongside T084 / T110) and add an acceptance clause that proves the page renders real equity / drawdown / attribution (P&L components) / inventory / tick band / tick liquidity distribution sourced from real `RunState` facts bound at the actual fill cursor, refuses to render T109 defective evidence as complete and surfaces the new `T112_RUN_FACTS_MISSING` / `T112_TICK_OUT_OF_RANGE` / `T112_BLOCK_RANGE_IN_TICK_RANGE` named reasons. IMPLEMENTATION: no edit until T112 lands; T088's `robinhood_lp.web.backtest_result` page must compose `ReplayFrame` from the repaired T112 evidence through T110's reader and not reconstruct state itself. DATA: historical T069 / T105 / T063 records and pre-T112 T109 records render as legacy and `T109_HISTORICAL_UNAVAILABLE`; new runs after T112 start carry repaired evidence. OPERATIONS: not applicable. SECURITY: not applicable. VERIFICATION: retain all current T088 acceptance plus the new real-equity / real-drawdown / real-attribution / real-tick-band / real-inventory / named-reason cases."
+    }
+  ],
+  "resolves": []
+}

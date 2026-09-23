@@ -14,8 +14,14 @@ candidate-lock and authoring-guide paths; and T069's
 product-level run entry point turns a registered strategy, its parameters and a data range
 into a reproducible manifest and report with observable run state; T109 adds causally bound,
 dataset-addressed run evidence and atomic current publication, T110 qualifies exact historical
-market/run state and replay frames while composing rather than replacing T104, and T111 cuts the
-approved research consumers over to that current artifact chain; T107 produces an
+market/run state and replay frames while composing rather than replacing T104, and T111 cuts
+the approved research consumers over to that current artifact chain; T112, the A0026
+successor repair task, closes the three defects A0026 confirmed in the code paths that
+produce new T109 artifacts — routing the backtest entry through real T100 partitions,
+binding the manifest to real T100 partition refs and recording `SimulationEvidence` run
+facts sufficient to recover positions, integer inventory, equity, drawdown and T052
+attribution at the actual fill cursor — without mutating T109's contract or its
+historical approved evidence; T107 produces an
 explicitly provisional candidate marked `EXPERIMENTAL_NOT_LIVE_APPROVED`, or an honest
 `NO_TRADE`. Neither is live approval.
 
@@ -41,3 +47,4 @@ parameter selection on held-out data, or profitability-based acceptance.
 - [T109 — Publish causally bound strategy-run evidence](T109.md)
 - [T110 — Qualify exact historical market and run-state replay](T110.md)
 - [T111 — Cut approved research consumers over to replay artifacts](T111.md)
+- [T112 — Repair product backtest entry to bind real partitions and fill-cursor run facts](T112.md)
