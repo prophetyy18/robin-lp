@@ -57,6 +57,26 @@ Developer, then finish development and invoke the independent Reviewer. Never us
 maintenance for protected, dependency, risk, execution, signer, product, Spec,
 Intent, task-contract, or workflow-controller changes.
 
+For governance maintenance that lives inside PROPHET's delegated authority
+(reviewer or manager prompts, review-result schemas, or the governance predicates
+in `tools/workflow/core_governance.py`), the route is the normal PROPHET
+amendment: `prepare-amendment --layer PROPHET --summary "..." --owner-direction "..."`,
+invoke the returned Prophet visibly, then `finish-amendment`, `prepare-amendment-review`,
+invoke the returned prophet-reviewer, and `finish-amendment-review`. The
+prophet-reviewer distinguishes two failure shapes through its verdict:
+
+* `FAIL` (`INVALID_AMENDMENT`) — the change is inside delegated authority but
+  semantically wrong; route to a Prophet retry on the same amendment.
+* `BLOCKED` (`CONSTITUTIONAL_ESCALATION`) — the change crosses the delegated
+  boundary. Do not retry through Prophet; pause and report to the Owner with
+  the named crossed boundary so an explicit bootstrap can be authorised.
+
+Owner bootstrap remains the only route for changes that touch the root
+controller (`tools/workflow/core.py`), the role definitions of Prophet or
+prophet-reviewer themselves, or the state-bearing fields of `todo/config.yaml`.
+Manager does not interpret a constitutional escalation into a workaround —
+it surfaces the boundary crossing and waits for explicit Owner authority.
+
 For an Owner's read-only discussion with Planner, invoke the project `planner`
 Agent visibly even if each discussion starts a fresh instance. This is a
 conversation, not a `prepare-plan` run: do not run workflow gates, request a

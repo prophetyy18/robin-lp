@@ -896,49 +896,18 @@ def _without_prophet_owned_config_fields(
     return comparable
 
 
-#: A new task contract a PROPHET change may create. Modifying an existing file
-#: that matches this pattern is the one thing the Owner role must never do, so
-#: the status letter is part of the test rather than an afterthought.
-_TASK_CONTRACT_PATH = re.compile(r"^todo/phases/[^/]+/T[0-9]{3}\.md$")
-
-#: Files a PROPHET change may edit freely. Everything absent from this set is
-#: refused, so the enforcement core, the agent definitions, the schemas, CI and
-#: the source tree stay out of reach without needing to be listed.
-_PROPHET_EDITABLE_FILES = frozenset(
-    {
-        "README.md",
-        "CLAUDE.md",
-        "AGENTS.md",
-        "todo/README.md",
-        "todo/WORKFLOW.md",
-    }
+# PROPHET path gating and the new-task-contract pattern live in
+# ``core_governance`` so a delegated PROPHET amendment may rewrite them without
+# touching this file. The functions are re-exported here so existing call sites
+# keep working without a churn of import edits.
+from .core_governance import (  # noqa: E402,F401  (re-exported; circular)
+    _PROPHET_EDITABLE_FILES,
+    _PROPHET_EDITABLE_PREFIXES,
+    _PROPHET_FORBIDDEN_FILES,
+    _TASK_CONTRACT_PATH,
+    _change_statuses,
+    _prophet_path_allowed,
 )
-_PROPHET_EDITABLE_PREFIXES = ("docs/spec/", "docs/intent/", "docs/implement/")
-
-
-def _prophet_path_allowed(path: str, status: str) -> bool:
-    if status == "D":
-        return False
-    if path in _PROPHET_EDITABLE_FILES or path.startswith(_PROPHET_EDITABLE_PREFIXES):
-        return True
-    if path.startswith("todo/phases/"):
-        if path.endswith("README.md"):
-            return True
-        if _TASK_CONTRACT_PATH.fullmatch(path):
-            return status == "A"
-    return False
-
-
-def _change_statuses(root: Path, base: str) -> dict[str, str]:
-    """Map every changed path to its single-letter Git status."""
-    statuses: dict[str, str] = {}
-    for line in _git(root, "diff", "--name-status", base, "--").stdout.splitlines():
-        parts = line.split("\t")
-        if len(parts) >= 2 and parts[-1]:
-            statuses[parts[-1]] = parts[0][0]
-    for path in _git(root, "ls-files", "--others", "--exclude-standard").stdout.splitlines():
-        statuses.setdefault(path, "A")
-    return statuses
 
 
 def _render_review(result: Mapping[str, Any]) -> str:

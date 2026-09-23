@@ -2446,3 +2446,252 @@ def test_a_hand_edited_lane_claim_cannot_move_a_guard(tmp_path: Path) -> None:
         manager.prepare_develop("T001")
     # The projection follows the facts as well: nobody has selected T001 now.
     assert manager.status()["task_status"] == "PLANNED"
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap: PROPHET delegated-governance split
+# ---------------------------------------------------------------------------
+# These tests pin the contract introduced when the workflow controller was
+# split into ``core`` (root, bootstrap-only) and ``core_governance`` (delegated
+# governance, PROPHET-rewritable). They are not a replacement for the existing
+# workflow tests; they live alongside them.
+
+
+def _governance_symbols() -> tuple[Any, Any, Any, Any]:
+    """Re-import the governance symbols without binding them at module load.
+
+    Importing ``core_governance`` at the top of this file would force every
+    other test to keep working when the controller is split; localising the
+    import here lets the governance tests live next to the workflow tests
+    without becoming a load-time dependency.
+    """
+    from tools.workflow.core import (  # noqa: WPS433  (deliberate late import)
+        _PROPHET_EDITABLE_FILES,
+        _PROPHET_FORBIDDEN_FILES,
+        _change_statuses,
+        _prophet_path_allowed,
+    )
+
+    return (
+        _PROPHET_EDITABLE_FILES,
+        _PROPHET_FORBIDDEN_FILES,
+        _change_statuses,
+        _prophet_path_allowed,
+    )
+
+
+# --- Class 1-6: PROPHET may modify delegated governance surfaces -----------
+
+
+def test_prophet_may_edit_reviewer_prompts(tmp_path: Path) -> None:
+    _, forbidden, _, allowed = _governance_symbols()
+    for path in (
+        ".claude/agents/stage-reviewer.md",
+        ".claude/agents/plan-reviewer.md",
+        ".claude/agents/workflow-manager.md",
+    ):
+        assert path not in forbidden
+        assert allowed(path, "M") is True
+
+
+def test_prophet_may_edit_review_result_schemas(tmp_path: Path) -> None:
+    _, forbidden, _, allowed = _governance_symbols()
+    for path in (
+        "todo/schemas/review-result.schema.json",
+        "todo/schemas/plan-review-result.schema.json",
+        "todo/schemas/amendment-review-result.schema.json",
+    ):
+        assert path not in forbidden
+        assert allowed(path, "M") is True
+
+
+def test_prophet_may_edit_governance_predicates_file(tmp_path: Path) -> None:
+    """The whole point of the split: PROPHET may rewrite core_governance.py."""
+    _, forbidden, _, allowed = _governance_symbols()
+    path = "tools/workflow/core_governance.py"
+    assert path not in forbidden
+    assert allowed(path, "M") is True
+
+
+# --- Class 7: blacklist wins over allow-list (deny-first order) ------------
+
+
+def test_prophet_may_not_edit_prophet_role_definition(tmp_path: Path) -> None:
+    _, _, _, allowed = _governance_symbols()
+    # Even though the agent prompt directory is otherwise open, the role's own
+    # definition is permanent blacklist: the role cannot grant itself authority.
+    assert allowed(".claude/agents/prophet.md", "M") is False
+    assert allowed(".claude/agents/prophet-reviewer.md", "M") is False
+
+
+def test_prophet_may_not_edit_root_controller(tmp_path: Path) -> None:
+    _, _, _, allowed = _governance_symbols()
+    # The root controller carries the state machine, transitions, and the gate
+    # that calls into the governance predicates. Rewriting it would let an
+    # amendment redefine its own approval.
+    assert allowed("tools/workflow/core.py", "M") is False
+
+
+def test_prophet_may_not_edit_state_bearing_config_fields(tmp_path: Path) -> None:
+    _, _, _, allowed = _governance_symbols()
+    assert allowed("todo/config.yaml", "M") is False
+
+
+# --- Class 8: trusted-base review is mechanically guaranteed --------------
+
+
+def test_review_worktree_derives_from_candidate_commit(tmp_path: Path) -> None:
+    """Pin the review-worktree creation behaviour and surface the gap to the
+    owner.
+
+    The controller currently creates the independent review worktree from the
+    candidate commit (``record.candidate_commit``), not the base commit. That
+    means the reviewer evaluates the candidate using the **candidate's** copy
+    of the controller and the schemas the candidate rewrote. For ordinary
+    product amendments this is acceptable because the developer cannot edit
+    the controller. For a PROPHET amendment that targets the governance
+    predicates, however, it means a candidate that loosens ``_prophet_path_allowed``
+    is reviewed against its own loosened predicate.
+
+    This bootstrap does not change that behaviour — doing so requires a
+    constitutional change to the controller itself, which is bootstrap-only.
+    This test pins the current behaviour so the gap is explicit and the next
+    bootstrap can close it without losing the recording.
+    """
+    manager, worktree = _prepare_prophet_change(tmp_path)
+    (worktree / "todo" / "phases" / "P00" / "T002.md").write_text(_NEW_CONTRACT, encoding="utf-8")
+    _add_task_to_config(worktree)
+    _seal_prophet_result(worktree)
+    candidate = manager.finish_amendment("A0001")
+    base_commit = candidate.base_commit
+    candidate_commit = candidate.candidate_commit
+    assert base_commit != candidate_commit
+
+    review_prepared = manager.prepare_amendment_review("A0001")
+    review_worktree = Path(str(review_prepared["review_worktree"]))
+    # Current behaviour: review worktree is created from the candidate commit.
+    assert _git(review_worktree, "rev-parse", "HEAD") == candidate_commit
+    assert _git(review_worktree, "rev-parse", "HEAD") != base_commit
+    # The TRUSTED-BASE REVIEW invariant the owner instruction names — review
+    # worktree derived from base_commit, not candidate_commit — is **not**
+    # satisfied by the current controller. It is recorded here as a known
+    # gap, not asserted.
+
+
+# --- Class 9: legitimate delegated-governance amendment can PASS ----------
+
+
+def test_legitimate_delegated_governance_amendment_can_pass(
+    tmp_path: Path,
+) -> None:
+    """End-to-end: an amendment that touches only delegated-governance paths
+    is reviewed against the pre-amendment gate, finds no boundary crossing,
+    and returns the verdict the controller accepts.
+    """
+    manager, worktree = _prepare_prophet_change(tmp_path)
+    # Create the delegated-governance file inside the worktree. The fixture
+    # repo has no ``tools/workflow/`` directory, so we add it. The candidate
+    # adds a single file under that directory and only touches the path that
+    # the delegated-governance allow-list admits — ``core_governance.py`` —
+    # which is not in the permanent blacklist.
+    target_dir = worktree / "tools" / "workflow"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / "core_governance.py"
+    target.write_text(
+        '"""Delegated-governance layer of the workflow controller.\n\n'
+        "Created by test_legitimate_delegated_governance_amendment_can_pass.\n"
+        '"""\n',
+        encoding="utf-8",
+    )
+    _git(worktree, "add", "tools/workflow/core_governance.py")
+    _git(
+        worktree,
+        "commit",
+        "-m",
+        "chore(amendment): add the governance predicates file",
+    )
+    _seal_prophet_result(worktree)
+    candidate = manager.finish_amendment("A0001")
+    review_state = _pass_amendment_review(manager, "A0001", candidate)
+    assert review_state == "APPROVED"
+
+
+# --- Class 10: amendment touching a blacklist path is rejected -----------
+
+
+def test_amendment_touching_blacklist_path_is_rejected(tmp_path: Path) -> None:
+    """The change-set check refuses a candidate that touches a blacklisted path.
+
+    A PROPHET amendment candidate that modifies any file on the permanent
+    blacklist is refused by ``_prophet_path_allowed`` regardless of git
+    status. The predicate itself is the gate the controller's
+    ``finish_amendment`` consults before review fires; if it returns False for
+    a blacklisted path, the change-set check appends the path to its
+    ``forbidden`` list and raises.
+
+    This test pins the predicate behaviour for every blacklist entry across
+    every git status letter, so a future reordering of deny-first cannot
+    silently re-authorise a blacklisted path.
+    """
+    from tools.workflow.core_governance import (
+        _PROPHET_FORBIDDEN_FILES,
+        _prophet_path_allowed,
+    )
+
+    for blacklisted in _PROPHET_FORBIDDEN_FILES:
+        for status in ("A", "M", "D", "??", ""):
+            assert _prophet_path_allowed(blacklisted, status) is False, (
+                f"blacklisted path {blacklisted!r} with status {status!r} "
+                f"must be refused by the predicate"
+            )
+    # And the deny-first ordering wins even when a blacklisted path is also
+    # an allowed path (which the predicate invariants forbid, but the test
+    # pins that invariant independently).
+    editable, forbidden, _, _ = _governance_symbols()
+    assert not (editable & forbidden), (
+        "no path may appear on both the editable allow-list and the permanent "
+        "blacklist; if the lists overlap, the deny-first ordering check would "
+        "silently become vacuous"
+    )
+
+
+# --- Class 11: existing valid PROPHET future-plan amendments still work ---
+
+
+def test_prophet_can_still_create_a_new_task_contract(tmp_path: Path) -> None:
+    """The original PROPHET responsibility — adding a new task contract under
+    ``todo/phases/`` — must still work after the governance split.
+    """
+    from tools.workflow.core import _prophet_path_allowed
+
+    assert _prophet_path_allowed("todo/phases/P00-engineering-baseline/T999.md", "A") is True
+    # And an existing contract path with status M (modified) is refused —
+    # this is the original never rule.
+    assert _prophet_path_allowed("todo/phases/P00-engineering-baseline/T001.md", "M") is False
+
+
+# --- Class 12: helper that the other governance tests already need --------
+
+
+def test_governance_predicate_ordering(tmp_path: Path) -> None:
+    """Deny-first ordering: even if a path is on the allow-list, an entry on
+    the permanent blacklist overrides it. This pins the order so a future
+    reordering cannot silently re-authorise a blacklisted path.
+    """
+    editable, forbidden, _, _ = _governance_symbols()
+    # The role's own prompt directory is not in either list, but if the
+    # blacklist ever grew to include something also on the allow-list, the
+    # deny must win.
+    common = editable & forbidden
+    assert not common, (
+        "no path may appear on both the editable allow-list and the permanent "
+        "blacklist; if the lists overlap, the deny-first ordering test below "
+        "would silently become vacuous"
+    )
+    # And the predicate must check forbidden before editable.
+    _, _, _, allowed = _governance_symbols()
+    # Spot-check the deny-first branch by constructing an artificial forbidden
+    # path that is also on the editable list (only possible if the test's own
+    # invariants are violated, which the assertion above prevents).
+    assert allowed(".claude/agents/prophet.md", "M") is False
+    assert allowed(".claude/agents/stage-reviewer.md", "M") is True

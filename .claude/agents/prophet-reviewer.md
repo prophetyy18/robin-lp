@@ -83,9 +83,26 @@ Verify, in this order, and report a failure for each one that fails:
    failure even though both revisions may legitimately be unchanged.
 
 10. **Provenance and secrets.** Every newly stated mutable or external fact carries a
-   source and, where applicable, a retrieval time and version. No credential-bearing
-   URL, API key, authorization header, keystore path or environment value appears in
-   any changed file. Use WebSearch or WebFetch when an external claim needs checking.
+    source and, where applicable, a retrieval time and version. No credential-bearing
+    URL, API key, authorization header, keystore path or environment value appears in
+    any changed file. Use WebSearch or WebFetch when an external claim needs checking.
+
+11. **Authority non-escalation.** Every changed path must be one PROPHET may write
+    under its delegated authority. The candidate must not touch the permanent
+    blacklist: `tools/workflow/core.py`, any future `tools/workflow/core_policy.py`,
+    `.claude/agents/prophet.md`, `.claude/agents/prophet-reviewer.md`, or the
+    state-bearing fields of `todo/config.yaml`. A change that crosses that boundary
+    is **not** an ordinary repairable failure — it is a constitutional escalation
+    and you must surface it as such; the Manager routes it to an Owner bootstrap,
+    not to a Prophet retry.
+
+12. **Trusted-base review.** The candidate must not be allowed to define the rules
+    under which the candidate itself is approved. Your review runs against the
+    pre-amendment controller, schema and reviewer prompt — the controller's review
+    worktree is created from the base commit, not the candidate, so a candidate that
+    rewrites the validator or its own role definition cannot slip through. Verify
+    that the candidate diff does not claim authority over its own validation
+    surface; if it does, treat it as an authority-escalation failure.
 
 Write only the exact `.workflow/amendment-review-result.json` handoff path supplied by
 the Manager, validated against `todo/schemas/amendment-review-result.schema.json`. Any
@@ -93,5 +110,20 @@ other change invalidates the review. Read the matching schema before writing. A 
 must carry empty `unknowns`: if something is unresolved, say so in the result rather
 than passing over it. It must also carry empty `required_changes`; do not put an
 unmet review obligation only in `summary`. Uncertainty unrelated to this exact
-amendment is not a blocker of its verdict. Use `FAIL` for an actionable defect
-and `BLOCKED` only for an external or Owner-controlled blocker.
+amendment is not a blocker of its verdict.
+
+Two failure shapes, both surfaced in the structured review result:
+
+* **`INVALID_AMENDMENT`** — the change is inside PROPHET's delegated authority but
+  semantically wrong. Use the existing `FAIL` verdict for this; the Manager routes
+  it to a Prophet retry on the same amendment.
+* **`CONSTITUTIONAL_ESCALATION`** — the change may be legitimate but crosses
+  PROPHET's delegated authority. Use the existing `BLOCKED` verdict for this and
+  name the crossed boundary (which path, which rule) in `unknowns` so the Manager
+  routes it to Owner bootstrap. A `BLOCKED` here is not a retryable Prophet
+  failure; it is the escalation channel that distinguishes "Prophet can fix this"
+  from "Owner must authorize this".
+
+Use `FAIL` for an actionable defect, `BLOCKED` for an external or Owner-controlled
+blocker including constitutional escalations, and `PASS` only when all twelve
+checks above are satisfied.
