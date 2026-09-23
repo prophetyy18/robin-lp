@@ -1,0 +1,136 @@
+# M0005 independent review
+
+- Base commit: `570c64ed41d5de6353cf0c0d7091c089a628e487`
+- Candidate commit: `384ea6b079e66c34a8022f4e1ec8f4f8da530407`
+- Verdict: **PASS**
+
+## Checks
+
+### request-frozen-and-binding — PASS
+
+The request committed in the candidate is the byte-exact frozen controller request, and the reviewed worktree is pinned to the declared base/candidate pair.
+
+Evidence:
+
+- sha256sum of `git show 384ea6b:todo/maintenance/M0005/request.json` = 88bb4a08890d6c53ec936424f54e1688f1d39a2885bbeab9ae2094d5ef123f24, byte-identical to the controller-frozen /home/lpdev/lp/.git/robinhood-lp-workflow/M0005-request.json
+- /home/lpdev/lp/.git/robinhood-lp-workflow/M0005.json binds maintenance_id=M0005, status=AWAITING_REVIEW, attempt=1, base_commit=570c64ed41d5de6353cf0c0d7091c089a628e487, candidate_commit=384ea6b079e66c34a8022f4e1ec8f4f8da530407, branch=maintenance/m0005-attempt-001
+- review worktree HEAD = 384ea6b079e66c34a8022f4e1ec8f4f8da530407; `git rev-parse 384ea6b^` = 570c64ed41d5de6353cf0c0d7091c089a628e487 (candidate is a single fast-forward commit on the base)
+
+### diff-scope-and-allowed-paths — PASS
+
+The candidate edits only the two declared allowed paths plus the maintenance lane's own request/developer records; no protected, governance, dependency, schema, risk, execution or signer path is touched.
+
+Evidence:
+
+- git diff --numstat 570c64e 384ea6b: src/robinhood_lp/__main__.py 6/0, tests/test_backtest_t069.py 193/1, todo/maintenance/M0005/developer-001.json 46/0, todo/maintenance/M0005/request.json 19/0
+- the two editable paths are exactly the request's allowed_paths: [src/robinhood_lp/__main__.py, tests/test_backtest_t069.py]
+- the two todo/maintenance/M0005 records are the lane's own artifacts, matching the precedent of candidate commits ce14c0d (M0001) and 0aeeb01 (M0004), which also carry todo/maintenance/<id>/request.json + developer-001.json
+- no changed path matches .claude/, tools/workflow/, todo/config.yaml, todo/schemas/, pyproject.toml, requirements*, environment.yml, or any risk/execution/signer module
+- word diff of src/robinhood_lp/__main__.py contains only the five-line comment block and `simulation_evidence_path=None,`
+
+### maintenance-eligibility-boundary — PASS
+
+M0005 is a low-risk implementation-defect repair inside the maintenance lane boundary: no product, public-interface, dependency, safety, execution, signer, Intent, Spec, task-contract or controller behavior is changed.
+
+Evidence:
+
+- reproduced implementation defect with a concrete failure and concrete repair verification commands (see checks defect-reproduced-at-base and requested-commands)
+- one to five explicit paths, no globs: exactly two allowed_paths
+- no argparse/CLI surface change: the diff body only supplies a missing constructor argument inside the existing `if args.backtest_command == "cancel"` branch; flags, stdout contract and record schema keys are unchanged
+- the repair restores the behavior already required by todo/phases/P06-backtesting-and-strategy/T069.md (lines 23-26: run progression with cancellation carrying a reason code; lines 49-54: a cancelled run publishes no manifest and no report, and every command starts/observes/cancels a run without a Web session)
+- no Intent, Spec, task-contract, .claude/, tools/workflow/, todo/config.yaml, todo/schemas/ or dependency-manifest file appears in the diff
+- no risk/execution/signer code and no signing, broadcast or key material appears anywhere in the diff
+
+### defect-reproduced-at-base — PASS
+
+The defect is real and independently reproduced at the base commit: `backtest cancel` on any non-terminal (QUEUED/RUNNING) record raised TypeError instead of persisting the terminal CANCELLED record.
+
+Evidence:
+
+- base src/robinhood_lp/__main__.py:806 constructs `cancelled = RunRecord(` with version, run_id, state, request, progress, reason_code, error_message, manifest_path, report_path, source_manifest_path, source_checksum, created/updated/terminal timestamps and omits simulation_evidence_path
+- src/robinhood_lp/orchestrator/__init__.py:886 declares `simulation_evidence_path: str | None` with no default in the frozen slots dataclass RunRecord, and the class is unchanged by the candidate
+- the field was introduced by T109 commit fac669a (`git log -S'simulation_evidence_path' -- src/robinhood_lp/orchestrator/__init__.py` -> fac669a 'feat(t109): candidate attempt 2'), and `git merge-base --is-ancestor fac669a 570c64e` succeeds, so base already requires it
+- independent run (this reviewer, no worktree modification): the base commit's `_run_backtest` source was exec'd in memory and invoked with a non-terminal record persisted through RunStateStore -> 'BASE cancel(RUNNING) -> RAISED TypeError: RunRecord.__init__() missing 1 required positional argument: simulation_evidence_path' and the identical result for QUEUED
+- main() calls _run_backtest directly (src/robinhood_lp/__main__.py:269) with no wrapping handler; the broad `except Exception` at line 376 belongs to _run_rerun_manifest, so the base failure escapes as a traceback with non-zero exit and empty stdout
+
+### repair-correctness — PASS
+
+The one-keyword repair removes the crash with the value the orchestrator and the T109 contract already prescribe for a cancelled run; it introduces no new behavior, interface or schema.
+
+Evidence:
+
+- the candidate adds exactly `simulation_evidence_path=None,` beside the sibling optional fields at the same construction site (src/robinhood_lp/__main__.py, candidate line 826)
+- the value matches the orchestrator's own cancellation semantics, which already pass simulation_evidence_path=None (src/robinhood_lp/orchestrator/__init__.py:1654 in BacktestOrchestrator.cancel)
+- it also matches the contract: todo/phases/P06-backtesting-and-strategy/T109.md:56 requires that failed, cancelled, incomplete or evidence-invalid runs publish no complete-looking result, and T109.md:91-94 ties simulation evidence publication to successful orchestration
+- independent in-memory run of the candidate's `_run_backtest`: 'CANDIDATE cancel(RUNNING) -> returned 0' and 'CANDIDATE cancel(QUEUED) -> returned 0', emitting a CANCELLED record with reason_code preserved, created_at_unix_seconds preserved, and manifest_path/report_path/simulation_evidence_path all null
+- no other field, flag, schema key, dependency or source path changed
+
+### regression-coverage — PASS
+
+The added coverage is genuine regression coverage of the repaired branch, with normal, rerun, durability and failure-path assertions.
+
+Evidence:
+
+- three new tests at tests/test_backtest_t069.py:1503 test_cli_cancel_running_record_is_cancelled, :1561 test_cli_cancel_queued_record_preserves_source_link, :1588 test_cli_cancel_unknown_run_id_still_fails_closed; test-function count 38 (base) -> 41 (candidate)
+- the tests persist a non-terminal record through the real RunStateStore and drive the real CLI subprocess (`python -m robinhood_lp backtest cancel`), so they execute the repaired construction site rather than mocking it
+- coverage includes the normal path (RUNNING -> exit 0, CANCELLED, reason code and creation time preserved, terminal timestamps set), the rerun path (QUEUED record keeps source_manifest_path/source_checksum and links no new evidence), durability (store reload), cross-surface agreement (observe returns the same payload), the no-publication invariant (no manifest/report/simulation-evidence files on disk), and a failure path (unknown run id -> exit 1, empty stdout, no record written)
+- the base commit raises the TypeError exactly at that site (see defect-reproduced-at-base), so the first two tests cannot pass pre-fix; the third exercises the unrelated not-found branch
+- the only removed line in tests/test_backtest_t069.py is the docstring line 'running.'; no assertion, test case, tolerance or helper was deleted or relaxed, and the diff adds no noqa, type: ignore, pytest.skip or xfail
+
+### requested-commands — PASS
+
+Every verification command listed in the frozen request was run exactly once on the candidate and passed; the only non-executed items are the environment-excluded Foundry artifact file and six pre-existing, unrelated skips, none of which is a required check of this repair.
+
+Evidence:
+
+- `/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/robinhood_lp/__main__.py` -> Success: no issues found in 1 source file (exit 0)
+- `PYTHONPATH=src .../python -m pytest tests/test_backtest_t069.py -q` -> 41 passed in 2.04s
+- `PYTHONPATH=src .../python -m pytest -q --ignore=tests/test_abi_artifacts.py` -> 3077 passed, 6 skipped in 36.32s
+- `.../python -m ruff format --check .` -> 550 files already formatted (exit 0)
+- `.../python -m ruff check .` -> All checks passed! (exit 0)
+- `git diff --check` -> no output (exit 0); `git diff --check 570c64ed... 384ea6b0...` -> no output (exit 0)
+- the ignored file is justified: tests/test_abi_artifacts.py is unchanged between base and candidate and, when run once by this reviewer, fails only because tools/oracle/lib/v4-core sources are absent in the worktree (forge build/test rc=1, 'No such file or directory') - the environment condition the frozen request documents
+- the 6 skips are pre-existing environment/design skips in files the candidate does not touch: 3 forge-not-on-PATH in tests/test_oracle_drift.py, 2 reserved signature_method='gpg' in tests/test_oracle_review_provenance.py, 1 intentionally delegated unsorted-currency vector in tests/test_protocol_ids.py
+
+### must-not-rules — PASS
+
+No must-not rule of the maintenance lane or the repository policy is violated by this candidate.
+
+Evidence:
+
+- no change to Intent, Spec, task contract, todo/config.yaml, todo/schemas/, .claude/, tools/workflow/ or dependency manifests
+- no change to product behavior beyond restoring the documented T069 cancel path; no new CLI flag, output key or exit-code semantics
+- no private key, keystore, password, signing, broadcast or chain-execution surface touched (phases 0-8 boundary untouched)
+- no test deleted, weakened, skipped or relaxed; no new ignore directive added
+- no raw-data, audit-event or append-only artifact touched by the change
+
+### worktree-integrity — PASS
+
+The review worktree is clean and pinned; the review result file is the only artifact this role wrote.
+
+Evidence:
+
+- `git status --porcelain=v1` in /home/lpdev/lp-worktrees/review-m0005-attempt-001 was empty before all runs and empty after the full command set
+- HEAD remained 384ea6b079e66c34a8022f4e1ec8f4f8da530407 throughout; no file in the worktree was modified, reverted, staged or staged-away by this reviewer
+- no repair was implemented and no test, tolerance or gate was altered during review
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- The repo-wide mypy gate still aborts on a duplicate-module error, which is why this call-site arity defect escaped earlier scoped reviews; only the task-scoped mypy invocation surfaces it. Changing that gate is a governance/tooling change outside this maintenance lane.
+- RunRecord still declares simulation_evidence_path as a required constructor argument with no default. A grep of src/, tests/ and tools/ shows no remaining construction site that omits it, but any new construction site reintroduces the same defect class.
+- The RunRecord docstring field list in src/robinhood_lp/orchestrator/__init__.py does not document simulation_evidence_path (documentation-only gap; that file is outside the allowed_paths and was deliberately left untouched).
+- The frozen request cites the call site as src/robinhood_lp/__main__.py:811; at the M0005 base the construction is at line 806 because the M0004 reformat commit 0aeeb01 landed in between (line 811 is exact for the pre-M0004 revision 09e082a). Text-only drift; it does not change the defect identity, the scope or the repair.
+- 6 test items skipped in the full-suite command (forge not on PATH, reserved gpg signature_method, one intentionally delegated protocol-id vector) were not executed; they live in files untouched by this candidate and none covers the CLI cancel path.
+- tests/test_abi_artifacts.py, excluded by the frozen full-suite command, fails in this worktree only on missing tools/oracle/lib Foundry submodules - an environment condition independent of this repair.
