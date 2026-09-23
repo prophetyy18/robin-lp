@@ -1,0 +1,114 @@
+# M0008 independent review
+
+- Base commit: `2884aaac31b3edcf9b5a8021ec0f6c8c5a9270dc`
+- Candidate commit: `ff5738c78eb8e4204c6443fa4c7f7c1dfa889e14`
+- Verdict: **PASS**
+
+## Checks
+
+### diff_matches_request — PASS
+
+The diff matches the declared repair: tighten wrapper signatures and wrap six parameters_from_validated int(...) call sites with cast(int, ...). No other developer-touched paths appear in the diff. The two todo/maintenance/M0008/*.json entries are controller-written artifacts, as in the prior M0007 candidate.
+
+Evidence:
+
+- git diff --stat 2884aaa..ff5738c reports 3 files changed, 17 insertions(+), 11 deletions(-)
+- src/robinhood_lp/research/evaluation.py: 28 insertions / 11 deletions (imports of DeterministicClock/SeededRandomSource and typing.cast; two wrapper signatures tightened from object to the Protocol types; six int(parameters.get(...)) call sites wrapped with cast(int, ...))
+- todo/maintenance/M0008/developer-001.json: new file (controller-written developer handoff per tools/workflow/core.py:3315-3317)
+- todo/maintenance/M0008/request.json: new file (controller-written request copy per tools/workflow/core.py:3315-3317)
+
+### allowed_paths_boundary — PASS
+
+Only the one explicitly allowed implementation path was developer-modified. The two todo/maintenance/M0008/*.json files in the commit are controller-written per core.py:3315-3317, not developer-touched, so the forbidden-paths check correctly admits them.
+
+Evidence:
+
+- request.json allowed_paths = ['src/robinhood_lp/research/evaluation.py']
+- git diff --name-only 2884aaa..ff5738c lists src/robinhood_lp/research/evaluation.py plus the two controller-written todo/maintenance/M0008/*.json files
+- tools/workflow/core.py:3282-3296 excludes .workflow/developer-result.json, .workflow/developer-continuation.json, and .workflow/maintenance-request.json from the forbidden-paths check; lines 3315-3317 show the controller itself writes todo/maintenance/<id>/request.json and todo/maintenance/<id>/developer-<attempt>.json into the candidate commit after that check
+- MAINTENANCE_FORBIDDEN_PREFIXES (.claude/, .github/, docs/intent/, docs/spec/, todo/phases/, todo/schemas/, todo/maintenance/, tools/workflow/, src/robinhood_lp/execution/, src/robinhood_lp/risk/, src/robinhood_lp/signer/) and MAINTENANCE_FORBIDDEN_FILES (AGENTS.md, CLAUDE.md, todo/README.md, todo/config.yaml, pyproject.toml, requirements.in, requirements.lock.txt, tools/oracle/foundry.toml, tools/oracle/remappings.txt) are not developer-touched
+
+### signature_tightening_type_correct — PASS
+
+Tightening the wrapper signatures from object to the Protocol types matches the static type expected by the fallback Protocol.assess signatures and the runtime isinstance check in __post_init__; no behaviour change.
+
+Evidence:
+
+- src/robinhood_lp/strategy/base.py:365-397 declares DeterministicClock and SeededRandomSource as @runtime_checkable Protocols
+- src/robinhood_lp/strategy/base.py:849-855 (RegimeModel.assess) and lines 881-887 (FeeOpportunityModel.assess) declare the same clock: DeterministicClock, rng: SeededRandomSource parameter types, so the wrapped self.fallback.assess(...) call inside ModelBackedRegimeModel.assess and ModelBackedFeeOpportunityModel.assess now type-checks
+- ModelBackedRegimeModel.__post_init__ (line 1134) and ModelBackedFeeOpportunityModel.__post_init__ (line 1265) already enforce isinstance(self.fallback, RegimeModel | FeeOpportunityModel) at runtime; the wrapper now matches the Protocol contract statically
+- The change is a pure Protocol narrowing; no default, no body, no return-type change
+
+### cast_does_not_change_runtime_behaviour — PASS
+
+Wrapping parameters.get(...) with cast(int, ...) is a static-only annotation. Runtime semantics of int(...) on a non-numeric value are identical, so the validation/error path is preserved.
+
+Evidence:
+
+- cast() is a no-op at runtime in CPython; int(cast(int, x)) still calls int(x) which raises TypeError on non-numeric values exactly as int(parameters.get(...)) did before
+- ModelBackedEvaluationParameters fields at strategy/model_backed.py:109-116 are typed as int; the cast value is consistent with the declared dataclass field types
+- All six dict-get sites wrap the parameters.get(...) result before int(...): staleness_seconds, ood_prediction_variance_q64_64, regime_confidence_floor_q64_64, fee_opportunity_floor_q64_64, bootstrap_iterations, bootstrap_seed
+- The two non-integer fields (model_artifact_id=str(...), require_pool_set_membership=bool(...)) are unchanged
+
+### verification_commands_pass — PASS
+
+All five verification_commands from request.json were executed once in the review worktree (using absolute paths to avoid the main-checkout base state) and produced clean results that match the developer-001.json claim.
+
+Evidence:
+
+- mypy on candidate: /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy /home/lpdev/lp-worktrees/review-m0008-attempt-001/src/robinhood_lp/research/evaluation.py -> 'Success: no issues found in 1 source file' (matches developer-001.json claim of zero errors after the change)
+- ruff format check: '/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check /home/lpdev/lp-worktrees/review-m0008-attempt-001/src/robinhood_lp/research/evaluation.py' -> '1 file already formatted'
+- ruff lint: '/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check /home/lpdev/lp-worktrees/review-m0008-attempt-001/src/robinhood_lp/research/evaluation.py' -> 'All checks passed!'
+- git diff --check on the candidate diff (cd /home/lpdev/lp-worktrees/review-m0008-attempt-001 && git diff --check 2884aaa ff5738c) -> no output (clean)
+- pytest: 'PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest /home/lpdev/lp-worktrees/review-m0008-attempt-001/tests/ -q --ignore=/home/lpdev/lp-worktrees/review-m0008-attempt-001/tests/test_abi_artifacts.py' -> '3095 passed, 6 skipped in 42.09s'; skip set matches developer-001.json (3 oracle_drift Foundry skips, 2 oracle_review_provenance gpg skips, 1 protocol_ids reordered_inputs vector)
+
+### low_risk_implementation_defect_boundary — PASS
+
+The repair is a docstring/import/type-annotation-only mypy-cleanup on a research/evaluation helper; it fits the LOW_RISK_IMPLEMENTATION_DEFECT boundary for the maintenance lane.
+
+Evidence:
+
+- risk_attestation in request.json = LOW_RISK_IMPLEMENTATION_DEFECT
+- Defect scope: 10 static mypy errors in evaluation.py (4 [arg-type] in two wrapper signatures + 6 [call-overload] in parameters_from_validated) confined to typing of local parameters and dict values
+- No product behaviour, public interface, dependency, data schema, safety/risk rule, execution/signer surface, Intent, Spec, task contract, or controller behaviour is altered
+- Only the documented allowed path (src/robinhood_lp/research/evaluation.py) was developer-modified
+- Related task T052 referenced in request.json is unaffected: the repair does not change ModelBackedEvaluationParameters semantics, the parameters_from_validated validation contract, or any consumer
+
+### no_protected_or_forbidden_paths_touched — PASS
+
+No protected or maintenance-forbidden path is touched by the developer portion of the candidate.
+
+Evidence:
+
+- git diff --name-only 2884aaa..ff5738c lists src/robinhood_lp/research/evaluation.py, todo/maintenance/M0008/developer-001.json, todo/maintenance/M0008/request.json
+- No path under PROTECTED_PREFIXES (.claude/, docs/intent/, docs/spec/, todo/phases/, todo/schemas/, tools/workflow/) is developer-touched
+- No PROTECTED_FILES (AGENTS.md, CLAUDE.md, todo/README.md, todo/config.yaml) and no MAINTENANCE_FORBIDDEN_FILES (pyproject.toml, requirements.in, requirements.lock.txt, tools/oracle/foundry.toml, tools/oracle/remappings.txt) are developer-touched
+- No MAINTENANCE_FORBIDDEN_PREFIXES path (.claude/, .github/, docs/intent/, docs/spec/, todo/phases/, todo/schemas/, todo/maintenance/, tools/workflow/, src/robinhood_lp/execution/, src/robinhood_lp/risk/, src/robinhood_lp/signer/) is developer-touched; the two todo/maintenance/M0008/*.json entries are controller-written per core.py:3315-3317
+
+### review_worktree_head_at_candidate — PASS
+
+The review worktree HEAD is exactly at the declared candidate commit, with a clean tree. The M0006 failure mode (reviewer committing the handoff into the development worktree) is avoided: all git operations targeted this review worktree and the controller, not this reviewer, will record the verdict.
+
+Evidence:
+
+- git -C /home/lpdev/lp-worktrees/review-m0008-attempt-001 rev-parse HEAD returns ff5738c78eb8e4204c6443fa4c7f7c1dfa889e14, identical to the declared candidate_commit
+- git -C /home/lpdev/lp-worktrees/review-m0008-attempt-001 status reports 'Not currently on any branch. nothing to commit, working tree clean'
+- No prior .workflow/review-result.json exists; only t037-lp-data-reconciliation.json from an unrelated task is present
+- No git add or git commit was run in this review session; the only write performed is the .workflow/review-result.json handoff itself
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- cast(int, parameters.get(key, default)) is a static-only annotation; if a caller supplies a non-numeric value in the mapping, int(...) still raises TypeError exactly as before, so the validation/error path is preserved.
+- Tightening the two wrapper signatures from object to DeterministicClock/SeededRandomSource is a Protocol narrowing; callers that previously passed arbitrary objects (including instances satisfying the runtime_checkable Protocols) continue to satisfy the narrower signatures, and __post_init__ still enforces isinstance at construction.
