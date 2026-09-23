@@ -376,9 +376,7 @@ class BacktestEvent:
                 ("log_index", self.log_index),
             ):
                 assert value is not None
-                _require_non_negative_int(
-                    value, field=f"BacktestEvent.{field_name}"
-                )
+                _require_non_negative_int(value, field=f"BacktestEvent.{field_name}")
         # Normalise the payload once at construction time so two equivalent
         # payloads hash to the same id regardless of insertion order.
         normalised = _normalise_payload(self.payload)

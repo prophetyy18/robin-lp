@@ -217,10 +217,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     backtest_cancel = backtest_sub.add_parser(
         "cancel",
-        help=(
-            "Cancel a queued or running run. A terminal record "
-            "is left untouched."
-        ),
+        help=("Cancel a queued or running run. A terminal record is left untouched."),
     )
     backtest_cancel.add_argument(
         "--runs-root",
@@ -367,9 +364,7 @@ def _run_rerun_manifest(args: argparse.Namespace) -> int:
             legacy_marker = legacy.legacy_marker
             source_checksum = legacy.source_checksum
         else:
-            result = rerun_manifest(
-                manifest_path, dataset_qualification=dataset_qualification
-            )
+            result = rerun_manifest(manifest_path, dataset_qualification=dataset_qualification)
             legacy_marker = None
             source_checksum = None
     except ManifestValidationError as exc:
@@ -847,9 +842,7 @@ def _run_backtest(args: argparse.Namespace) -> int:
         sys.stdout.write(json.dumps(payload, sort_keys=True) + "\n")
         return 0
     if args.backtest_command != "start":
-        sys.stderr.write(
-            f"backtest: unknown sub-command {args.backtest_command!r}\n"
-        )
+        sys.stderr.write(f"backtest: unknown sub-command {args.backtest_command!r}\n")
         return 2
     # ``start``: load the request, build the resolver / event
     # source, run the lifecycle, print the terminal record.
@@ -942,22 +935,16 @@ def _request_from_cli_payload(payload: dict[str, Any]) -> RunRequest:
         block_range_end=int(payload.get("block_range_end") or 0),
         interval_seconds=int(payload.get("interval_seconds") or 1),
         strategy_identity=str(payload.get("strategy_identity") or ""),
-        strategy_parameters=_coerce_strategy_parameters(
-            payload.get("strategy_parameters") or {}
-        ),
+        strategy_parameters=_coerce_strategy_parameters(payload.get("strategy_parameters") or {}),
         seed=int(payload.get("seed") or 0),
         clock_assumption=str(payload.get("clock_assumption") or "EVENT_TIME"),
-        fill_assumption=str(
-            payload.get("fill_assumption") or "DETERMINISTIC_FAILURE"
-        ),
+        fill_assumption=str(payload.get("fill_assumption") or "DETERMINISTIC_FAILURE"),
         cost_assumption=str(payload.get("cost_assumption") or "FLAT_GAS"),
         quote_assumption=str(payload.get("quote_assumption") or "STATIC_FEE"),
         latency_units=int(payload.get("latency_units") or 0),
         latency_ms_estimate=int(payload.get("latency_ms_estimate") or 0),
         reporting_numeraire=str(payload.get("reporting_numeraire") or "USDG"),
-        valuation_qualification=str(
-            payload.get("valuation_qualification") or "QUALIFIED"
-        ),
+        valuation_qualification=str(payload.get("valuation_qualification") or "QUALIFIED"),
         code_revision=str(payload.get("code_revision") or "UNKNOWN"),
         dependency_revisions=_coerce_dependency_revisions(
             payload.get("dependency_revisions") or {}
@@ -1003,9 +990,7 @@ def _build_cli_resolver_and_source(
                             dataset_decode_version=int(entry["dataset_decode_version"]),
                             dataset_content_hash=str(entry["dataset_content_hash"]),
                             reporting_numeraire=str(entry["reporting_numeraire"]),
-                            valuation_qualification=str(
-                                entry["valuation_qualification"]
-                            ),
+                            valuation_qualification=str(entry["valuation_qualification"]),
                             covered_start=int(entry["covered_start"]),
                             covered_end=int(entry["covered_end"]),
                         )

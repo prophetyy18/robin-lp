@@ -555,9 +555,7 @@ class BacktestEngine:
             # cursor is the canonical cursor the engine emitted at
             # trigger time; the pipeline identity is the trigger
             # event's event id, which is content-deterministic.
-            due_pending = [
-                p for p in pending_fills if p.fill_data.event_id == event.event_id
-            ]
+            due_pending = [p for p in pending_fills if p.fill_data.event_id == event.event_id]
             if due_pending:
                 # Sort by (trigger_cursor_key, pipeline_identity).
                 # ``None`` cursors sort to the beginning so they

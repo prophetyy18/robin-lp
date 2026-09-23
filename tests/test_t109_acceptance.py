@@ -1142,14 +1142,14 @@ class TestEndToEndDelayedFillCursorBinding:
         # LATENCY+FILL pair to the fill-data cursor, not the
         # DECISION+RISK pair.
         trigger_decisions = [
-            tr for tr in transitions
-            if tr["stage"] == "DECISION"
-            and _cursor_tuple(tr["cursor"]) == (10, 0, 0)
+            tr
+            for tr in transitions
+            if tr["stage"] == "DECISION" and _cursor_tuple(tr["cursor"]) == (10, 0, 0)
         ]
         trigger_risks = [
-            tr for tr in transitions
-            if tr["stage"] == "RISK"
-            and _cursor_tuple(tr["cursor"]) == (10, 0, 0)
+            tr
+            for tr in transitions
+            if tr["stage"] == "RISK" and _cursor_tuple(tr["cursor"]) == (10, 0, 0)
         ]
         assert trigger_decisions, "engine must emit DECISION audit at trigger cursor A"
         assert trigger_risks, "engine must emit RISK audit at trigger cursor A"
@@ -1209,9 +1209,7 @@ class TestEndToEndT061RunStateEquivalence:
         yield
         reset_default_registry_cache()
 
-    def test_real_engine_audit_chain_projects_byte_equivalently(
-        self, tmp_path: Path
-    ) -> None:
+    def test_real_engine_audit_chain_projects_byte_equivalently(self, tmp_path: Path) -> None:
         event_a = _swap_event_with_cursor(
             timestamp=100, block_number=10, transaction_index=0, log_index=0
         )
@@ -1292,9 +1290,7 @@ class TestEndToEndStrategyReplacementByteEquivalence:
         yield
         reset_default_registry_cache()
 
-    def test_evidence_projects_after_strategy_unbound(
-        self, tmp_path: Path
-    ) -> None:
+    def test_evidence_projects_after_strategy_unbound(self, tmp_path: Path) -> None:
         event_a = _swap_event_with_cursor(
             timestamp=100, block_number=10, transaction_index=0, log_index=0
         )
@@ -1351,17 +1347,13 @@ class TestEndToEndStrategyReplacementByteEquivalence:
                 int(cursor_dict["log_index"]),
             )
             cursors.add(market_cursor)
-            before_states[market_cursor] = projector_before.run_state(
-                market_cursor
-            ).to_dict()
+            before_states[market_cursor] = projector_before.run_state(market_cursor).to_dict()
 
         # Unbind the registered strategy. The projector must still
         # return byte-equivalent RunState at every recorded cursor.
         reset_default_registry_cache()
         evidence_after = simulation_evidence_from_dict(
-            json.loads(
-                Path(record.simulation_evidence_path).read_text(encoding="utf-8")
-            )
+            json.loads(Path(record.simulation_evidence_path).read_text(encoding="utf-8"))
         )
         projector_after = build_replay_projector(evidence_after)
         for market_cursor in cursors:
@@ -1421,8 +1413,7 @@ class TestPreEvidenceHistoricalUnavailable:
         with pytest.raises(InvalidManifestFieldError) as exc_info:
             t109_experiment_manifest_from_dict(manifest_payload)
         assert "T109_HISTORICAL_UNAVAILABLE" in str(exc_info.value), (
-            f"T109 loader must surface T109_HISTORICAL_UNAVAILABLE; "
-            f"got {exc_info.value!r}"
+            f"T109 loader must surface T109_HISTORICAL_UNAVAILABLE; got {exc_info.value!r}"
         )
 
         # The ReplayProjector surfaces the same named reason when a
@@ -1433,8 +1424,7 @@ class TestPreEvidenceHistoricalUnavailable:
         with pytest.raises(ReplayFrameBindingError) as exc_info2:
             build_replay_projector(manifest_payload)  # type: ignore[arg-type]
         assert "T109_HISTORICAL_UNAVAILABLE" in str(exc_info2.value), (
-            f"projector must surface T109_HISTORICAL_UNAVAILABLE; "
-            f"got {exc_info2.value!r}"
+            f"projector must surface T109_HISTORICAL_UNAVAILABLE; got {exc_info2.value!r}"
         )
 
         # Sanity check: the typing contract forbids a non-evidence

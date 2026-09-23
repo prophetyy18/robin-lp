@@ -1,0 +1,20 @@
+{
+  "maintenance_id": "M0004",
+  "summary": "reformat the four files that keep the repo-wide ruff format gate red",
+  "reason": "The CI step at .github/workflows/ci.yml:104 runs 'ruff format --check .'; it fails on exactly four files: src/robinhood_lp/__main__.py (unformatted since the T069 candidate 2f64e64), src/robinhood_lp/backtest/engine.py, src/robinhood_lp/protocol/contracts.py and tests/test_t109_acceptance.py. Measured with the pinned ruff 0.16.7 by reading each file through the format check's stdin path: the last three were formatted at T109 base 791fc4e and unformatted at T109 candidate c79e4c8, which was approved, while review-004 ran only 'ruff check' (lint) and recorded just __main__.py:220 as a pre-existing red. Repair: apply 'ruff format' to those four files only; every change must be formatting-only (whitespace, line joining, quote normalization) with no token, literal-value or control-flow change, which the AST check proves. No behavior, interface, dependency, schema, safety or execution change is intended.",
+  "allowed_paths": [
+    "src/robinhood_lp/__main__.py",
+    "src/robinhood_lp/backtest/engine.py",
+    "src/robinhood_lp/protocol/contracts.py",
+    "tests/test_t109_acceptance.py"
+  ],
+  "verification_commands": [
+    "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check .",
+    "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check .",
+    "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q",
+    "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -c 'import ast,subprocess,sys; same=lambda s: ast.dump(ast.parse(s)); bad=[p for p in sys.argv[1:] if same(subprocess.run([\"git\",\"show\",\"HEAD:\"+p],capture_output=True,text=True).stdout)!=same(open(p).read())]; print(\"AST_IDENTICAL\" if not bad else \"AST_DIFFERS \"+repr(bad)); sys.exit(1 if bad else 0)' src/robinhood_lp/__main__.py src/robinhood_lp/backtest/engine.py src/robinhood_lp/protocol/contracts.py tests/test_t109_acceptance.py",
+    "git diff --check"
+  ],
+  "related_task": "T109",
+  "risk_attestation": "LOW_RISK_IMPLEMENTATION_DEFECT"
+}

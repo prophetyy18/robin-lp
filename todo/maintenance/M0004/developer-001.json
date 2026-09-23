@@ -1,0 +1,41 @@
+{
+  "task_id": "M0004",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Applied the pinned formatter (ruff 0.16.7, config from pyproject.toml) to exactly the four allowed_paths files: src/robinhood_lp/__main__.py, src/robinhood_lp/backtest/engine.py, src/robinhood_lp/protocol/contracts.py and tests/test_t109_acceptance.py. Diff is 21 insertions / 50 deletions, all line joining and comprehension/parameter re-wrapping; `git diff -U0` shows no changed comment line, and the task's AST comparison against HEAD reports AST_IDENTICAL for all four files, so the changes are semantics-preserving (the __main__.py help-string edit joins two implicitly concatenated literals into one with the identical constant, and the joined f-strings likewise). The repo-wide format gate is now green (549 files already formatted), ruff check is clean, and PYTHONPATH=src pytest -q gives 3108 passed / 6 skipped with one environmental failure in tests/test_abi_artifacts.py caused by the worktree's uninitialized tools/oracle/lib Foundry submodules (forge cannot find the .sol sources); that test does not exercise the diff and previously had to be ignored per todo/maintenance/M0002/review-001.md. The exact listed pytest command cannot collect in this environment because the conda env's editable install of robinhood_lp points at the deleted worktree /home/lpdev/lp-worktrees/dev-t102-attempt-001/src (pip show robinhood-lp: Editable project location), a stale state that reproduces in the pristine main checkout at the same base commit 09e082a and is independent of this diff; the repo-established workaround, documented in todo/maintenance/M0002/review-001.json and prior review records, is the PYTHONPATH=src prefix. No behavior, public interface, dependency, schema, safety, risk, execution or spec change; no file outside allowed_paths was touched and nothing was committed.",
+  "commands": [
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check .",
+      "result": "549 files already formatted (exit 0)"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check .",
+      "result": "All checks passed! (exit 0)"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q",
+      "result": "FAILED to collect: 'Interrupted: 69 errors during collection' with 'ModuleNotFoundError: No module named robinhood_lp' in 7.59s (exit 2). Environmental, not caused by this diff: the conda env's editable install points at the deleted worktree /home/lpdev/lp-worktrees/dev-t102-attempt-001/src, and the identical collection error occurs in the pristine main checkout /home/lpdev/lp at base commit 09e082a. Confirmed at HEAD before formatting as well."
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -c 'import ast,subprocess,sys; same=lambda s: ast.dump(ast.parse(s)); bad=[p for p in sys.argv[1:] if same(subprocess.run([\"git\",\"show\",\"HEAD:\"+p],capture_output=True,text=True).stdout)!=same(open(p).read())]; print(\"AST_IDENTICAL\" if not bad else \"AST_DIFFERS \"+repr(bad)); sys.exit(1 if bad else 0)' src/robinhood_lp/__main__.py src/robinhood_lp/backtest/engine.py src/robinhood_lp/protocol/contracts.py tests/test_t109_acceptance.py",
+      "result": "AST_IDENTICAL (exit 0) - every change is formatting-only."
+    },
+    {
+      "command": "git diff --check",
+      "result": "no output (exit 0) - no whitespace errors."
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q",
+      "result": "1 failed, 3108 passed, 6 skipped in 38.68s. The single failure is tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output, which fails inside forge ('forge test failed (rc=1); pre-build rc=1') because this worktree lacks the tools/oracle/lib Foundry submodule sources (e.g. v4-core/src/types/Currency.sol: No such file or directory); the directory exists in /home/lpdev/lp but not in the worktree, and the test never imports the four reformatted files. The 6 skips are pre-existing (Foundry/gpg/unsorted-currency), matching todo/maintenance/M0002/review-001.md."
+    },
+    {
+      "command": "git status --short && git diff --stat",
+      "result": "Only the four allowed_paths files are modified (src/robinhood_lp/__main__.py, src/robinhood_lp/backtest/engine.py, src/robinhood_lp/protocol/contracts.py, tests/test_t109_acceptance.py; 4 files changed, 21 insertions(+), 50 deletions(-)); the only untracked path is the controller's .workflow/maintenance-request.json. Nothing committed."
+    }
+  ],
+  "residual_risks": [
+    "The exact listed command '<env-python> -m pytest -q' cannot reach a green result in this environment: the conda env's editable install of robinhood_lp points at the deleted worktree /home/lpdev/lp-worktrees/dev-t102-attempt-001/src, so collection fails with ModuleNotFoundError. This is pre-existing and diff-independent (it reproduces in the pristine main checkout at base 09e082a, where robinhood_lp also fails to import); no in-scope repair exists because site-packages/pyproject.toml are outside allowed_paths. Reviewers should prefix the run with PYTHONPATH=src, as recorded in todo/maintenance/M0002/review-001.json and prior review files.",
+    "tests/test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails in this worktree because tools/oracle/lib Foundry submodule sources are absent (forge pre-build cannot find the .sol files). Environmental, unrelated to the diff, and already treated as an environment limitation in todo/maintenance/M0002/review-001.md.",
+    "'mypy src tests' also aborts in this environment with 'Source file found twice under different module names: _storage_t031_fixtures and tests._storage_t031_fixtures', a consequence of the missing editable install (the M0002 review obtained 'Success: no issues found in 91 source files' only with the package installed). mypy is not among M0004's verification commands, and the diff cannot change its outcome: AST_IDENTICAL plus zero changed comment lines means no `# type: ignore` or type-relevant text moved.",
+    "The underlying formatter drift (files formatted at T109 base 791fc4e, left unformatted by the approved T109 candidate c79e4c8 whose review ran only `ruff check`) is repaired here for these four files only; any future edit that reintroduces unformatted text will fail CI step 'Ruff format check' again, which is the intended gate behavior."
+  ]
+}
