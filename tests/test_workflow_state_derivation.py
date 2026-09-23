@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tools.progress.check import project_state
 from tools.workflow.core import (
     IN_FLIGHT,
     LIFECYCLE_OF,
@@ -31,6 +32,7 @@ from tools.workflow.core import (
     WorkflowError,
     admitted_statuses,
     derive_status,
+    project_status,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -312,15 +314,27 @@ def test_every_guard_answers_the_same_over_the_whole_history() -> None:
     and every guard, the answer read from the facts must equal the answer read
     from the recorded field -- except where the two are enumerated above, with
     the reason each is safe.
+
+    Revisions written after the field was retired have nothing to compare
+    against; they are counted and pinned, because a walk that silently stopped
+    covering the oracle would still pass.
     """
     not_admitted: Counter[tuple[str, str, str, str]] = Counter()
     pair_cases: Counter[str] = Counter()
     divergences: Counter[tuple[str, str, str]] = Counter()
+    retired: Counter[str] = Counter()
     total = 0
 
     for sha in _revisions():
         config = json.loads(_git("show", f"{sha}:todo/config.yaml"))
         artifacts = GitArtifacts(sha)
+        missing = sum(1 for task in config["tasks"].values() if "status" not in task)
+        if missing:
+            # A revision is written before or after the retirement, never half of
+            # each: the field belongs to the file, not to a task.
+            assert missing == len(config["tasks"]), f"{sha[:8]} is half-retired"
+            retired[sha[:8]] += missing
+            continue
         for task_id, task in config["tasks"].items():
             recorded = task["status"]
             derived = derive_status(
@@ -355,6 +369,92 @@ def test_every_guard_answers_the_same_over_the_whole_history() -> None:
         "routing now answers differently from the recorded status in cases that "
         f"are not documented: {dict(divergences)}"
     )
+    assert len(retired) == 1, f"more than one retired revision: {dict(retired)}"
+    assert next(iter(retired.values())) > 80, "the retired revision should carry the whole plan"
+
+
+def test_the_retired_field_changes_nothing_for_any_reader() -> None:
+    """Retiring ``status`` is judged the same way the migration was: by equality.
+
+    The field was the composite the controller stored beside the two facts it is
+    built from. Removing it is safe only if nothing depended on it, so for every
+    revision of the file it is stripped and the readers are asked again: the
+    controller's projection and the progress tool's projection must both name the
+    state that revision recorded, and must agree with each other. They are
+    independent implementations -- the product tool deliberately does not import
+    the governance controller -- so the agreement is asserted here.
+    """
+    divergences: Counter[tuple[str, str, str, str]] = Counter()
+    reader_disagreements: Counter[tuple[str, str]] = Counter()
+    already_retired: Counter[str] = Counter()
+    total = 0
+
+    for sha in _revisions():
+        config = json.loads(_git("show", f"{sha}:todo/config.yaml"))
+        stripped = {**config, "tasks": {k: dict(v) for k, v in config["tasks"].items()}}
+        for task in stripped["tasks"].values():
+            recorded_here = task.pop("status", None)
+            if isinstance(recorded_here, str):
+                # Revisions from before the decomposition was stored say only
+                # what the composite was; the two facts that replace it are
+                # exactly what the backfill wrote, which is what a reader of
+                # that revision must project from.
+                lifecycle, claimed = LIFECYCLE_OF[recorded_here]
+                task["lifecycle"] = lifecycle
+                task["claimed"] = claimed
+            else:
+                already_retired[sha[:8]] += 1
+        artifacts = GitArtifacts(sha)
+        for task_id, task in config["tasks"].items():
+            recorded = task.get("status")
+            # A revision whose own declaration of the active task disagrees with
+            # the composite it recorded is one today's `validate_config` refuses
+            # (the two must match while the composite is stored). None exist in
+            # this history; one that appeared would be a finding, not a fixture.
+            assert not (
+                isinstance(recorded, str)
+                and stripped.get("active_task") == task_id
+                and stripped.get("workflow_state") != recorded
+            ), f"{sha[:8]} {task_id}: the declaration contradicts the recorded composite"
+            stripped_task = stripped["tasks"][task_id]
+            controller = project_status(
+                task_id=task_id,
+                task=stripped_task,
+                config=stripped,
+                artifacts=artifacts,
+            )
+            progress = project_state(task_id, stripped_task, config=stripped)
+            total += 1
+            if controller != progress:
+                reader_disagreements[(str(controller), str(progress))] += 1
+            if not isinstance(recorded, str):
+                continue
+            if controller != recorded:
+                derived = derive_status(
+                    phase=task["phase"],
+                    task_id=task_id,
+                    attempt=task["attempt"],
+                    approved_commit=task["approved_commit"],
+                    artifacts=artifacts,
+                )
+                divergences[(sha[:8], task_id, recorded, str(controller))] += 1
+                assert derived == "CHANGES_REQUESTED", (
+                    f"{sha[:8]} {task_id}: the projection {controller!r} differs from the "
+                    f"recorded {recorded!r} for a reason that is not the pinned revision"
+                )
+
+    assert total > 18_000, f"only {total} task-revisions walked"
+    # The readers agree everywhere except on the one revision whose record
+    # contradicts its own evidence. There they diverge by construction: the
+    # controller follows the artifacts, and the product tool follows the
+    # config's declaration, which is the only thing a reader of a committed file
+    # can see. A new entry here is a real disagreement and must be argued.
+    assert dict(reader_disagreements) == {("CHANGES_REQUESTED", "BLOCKED"): 1}, (
+        f"the two readers disagree: {dict(reader_disagreements)}"
+    )
+    # The one revision whose recorded value the artifacts do not support: the
+    # pre-2026-09-15 semantics, pinned for the derivation as well.
+    assert dict(divergences) == {("63cfb2cc", "T001", "BLOCKED", "CHANGES_REQUESTED"): 1}
 
 
 def test_derived_status_reproduces_every_historical_revision() -> None:
@@ -364,10 +464,20 @@ def test_derived_status_reproduces_every_historical_revision() -> None:
     underdetermined: Counter[str] = Counter()
     exceptions: set[tuple[str, str, str, str]] = set()
     unexpected: list[str] = []
+    retired = 0
 
     for sha in revisions:
         config = json.loads(_git("show", f"{sha}:todo/config.yaml"))
         artifacts = GitArtifacts(sha)
+        missing = sum(1 for task in config["tasks"].values() if "status" not in task)
+        if missing:
+            # Written after the composite was retired: there is no recorded value
+            # to reproduce there, and what such a revision projects to is checked
+            # by its own test. Counted so the walk cannot silently stop covering
+            # the oracle it exists to mine.
+            assert missing == len(config["tasks"]), f"{sha[:8]} is half-retired"
+            retired += missing
+            continue
         for task_id, task in config["tasks"].items():
             recorded = task["status"]
             derived = derive_status(
@@ -413,6 +523,10 @@ def test_derived_status_reproduces_every_historical_revision() -> None:
     }
     assert set(reproduced) == expected_derivable
     assert sum(reproduced.values()) > 9_000
+    assert 0 < retired <= 100, (
+        f"{retired} task-revisions carry no recorded value: they should all come "
+        "from the single revision written after the retirement"
+    )
 
     # PLANNED dominates simply because most task-revisions have not started.
     # What matters is how many *started* work items still need the control

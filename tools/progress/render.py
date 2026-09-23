@@ -31,6 +31,7 @@ from .check import (
     PLAN_STATES,
     ProgressIssue,
     is_ready,
+    project_state,
 )
 
 #: Width of the divider drawn under each top-level section header.
@@ -153,13 +154,14 @@ def _build_task_view(
     *,
     repo_root: Path,
     tasks: Mapping[str, Any],
+    config: Mapping[str, Any],
 ) -> TaskView:
     contract = _read_text(repo_root, str(task["task_file"]))
     title = parse_title(contract, task_id)
     purpose = parse_outcome(contract)
     superseded_by_raw = task.get("superseded_by")
     superseded_by = superseded_by_raw if isinstance(superseded_by_raw, str) else None
-    status = str(task.get("status"))
+    status = project_state(task_id, task, config=config)
     return TaskView(
         task_id=task_id,
         title=title,
@@ -216,6 +218,7 @@ def build_view(config: Mapping[str, Any], *, repo_root: Path) -> list[PhaseView]
                     task,
                     repo_root=repo_root,
                     tasks=tasks,
+                    config=config,
                 )
             )
         phases.append(

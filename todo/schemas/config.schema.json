@@ -77,7 +77,6 @@
       "additionalProperties": false,
       "required": [
         "phase",
-        "status",
         "lifecycle",
         "claimed",
         "depends_on",

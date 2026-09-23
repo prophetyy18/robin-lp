@@ -30,11 +30,14 @@ def test_repository_workflow_configuration_is_valid() -> None:
         for path in (ROOT / "todo" / "phases").glob("P*/T[0-9][0-9][0-9].md")
     }
     assert configured_contracts == discovered_contracts
-    assert config["tasks"]["T000"]["status"] == "APPROVED"
-    assert config["tasks"]["T004"]["status"] == "APPROVED"
+    # Delivered work is what the lifecycle says it is: the composite the
+    # controller used to store beside those facts is retired.
+    assert config["tasks"]["T000"]["lifecycle"] == "DELIVERED"
+    assert config["tasks"]["T004"]["lifecycle"] == "DELIVERED"
     assert {"T000", "T004"} <= {
-        task_id for task_id, task in config["tasks"].items() if task["status"] == "APPROVED"
+        task_id for task_id, task in config["tasks"].items() if task["lifecycle"] == "DELIVERED"
     }
+    assert not any("status" in task for task in config["tasks"].values())
 
 
 def test_python_workflow_never_launches_claude() -> None:

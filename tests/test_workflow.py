@@ -1559,7 +1559,12 @@ def test_ready_refuses_a_task_an_amendment_recorded_as_conflicting(tmp_path: Pat
     assert _pass_amendment_review(manager, "A0002", repaired) == "APPROVED"
 
     assert manager.ready("T001")
-    assert manager.load_config()["tasks"]["T001"]["status"] == "READY"
+    # Nothing writes the composite any more, so the state is asserted where it
+    # now lives: the decomposition, and the projection built from it.
+    record = manager.load_config()["tasks"]["T001"]
+    assert (record["lifecycle"], record["claimed"]) == LIFECYCLE_OF["READY"]
+    assert "status" not in record
+    assert manager.status()["task_status"] == "READY"
 
 
 def test_ready_refuses_a_task_when_an_approved_dependency_has_an_open_impact(
@@ -1900,7 +1905,8 @@ def test_abandon_task_closes_an_attempt_no_command_can_advance(tmp_path: Path) -
     result = manager.abandon_task("T001", reason="agent died before writing its handoff")
 
     assert result["status"] == "ABANDONED"
-    assert manager.load_config()["tasks"]["T001"]["status"] == "ABANDONED"
+    assert manager.status()["task_status"] == "ABANDONED"
+    assert manager.load_config()["tasks"]["T001"]["lifecycle"] == "ABANDONED"
     record = (repo / "todo" / "abandoned" / "T001.md").read_text(encoding="utf-8")
     assert "agent died before writing its handoff" in record
     # The record must state the live status, not the stale one on the last commit.
@@ -1966,8 +1972,8 @@ def test_abandon_task_refuses_to_strand_an_open_dependent(tmp_path: Path) -> Non
     manager.abandon_task("T001", reason="now nothing depends on it")
 
     config = manager.load_config()
-    assert config["tasks"]["T001"]["status"] == "ABANDONED"
-    assert config["tasks"]["T002"]["status"] == "ABANDONED"
+    assert config["tasks"]["T001"]["lifecycle"] == "ABANDONED"
+    assert config["tasks"]["T002"]["lifecycle"] == "ABANDONED"
 
 
 def test_abandon_maintenance_closes_an_escalated_repair(tmp_path: Path) -> None:

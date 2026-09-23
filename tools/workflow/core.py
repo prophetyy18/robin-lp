@@ -347,6 +347,53 @@ def admitted_statuses(
     return frozenset({derived})
 
 
+def project_status(
+    *,
+    task_id: str,
+    task: Mapping[str, Any],
+    config: Mapping[str, Any],
+    artifacts: ArtifactSource,
+    running: bool | None = None,
+) -> str | None:
+    """The one status a task's facts project to, when they project to one.
+
+    ``status`` used to hold this value. Nothing writes it any more, so a reader
+    that needs a single name -- a message, a report -- gets it here. The case
+    the facts cannot decide is a claimed task with nothing sealed: the caller's
+    knowledge of the runtime record settles it (``running`` is True for a live
+    attempt, False when there is none, and None for a reader that cannot know).
+    A reader that cannot know still has one fact available -- the config
+    declares its active task's state, and only the active task may hold the
+    lane -- so an in-flight task's declaration is read rather than guessed.
+    """
+
+    derived = derive_status(
+        phase=str(task["phase"]),
+        task_id=task_id,
+        attempt=int(task["attempt"]),
+        approved_commit=task["approved_commit"],
+        artifacts=artifacts,
+    )
+    admitted = admitted_statuses(
+        lifecycle=str(task["lifecycle"]),
+        claimed=bool(task["claimed"]),
+        derived=derived,
+    )
+    if len(admitted) == 1:
+        return next(iter(admitted))
+    if admitted == UNDERDETERMINED[IN_FLIGHT]:
+        if running is None and config.get("active_task") == task_id:
+            declared = config.get("workflow_state")
+            if declared in admitted:
+                return str(declared)
+        return "IN_DEVELOPMENT" if running else "READY"
+    # The facts add up to nothing: an inconsistent record, which `validate`
+    # refuses. A diagnostic still has to print something, so a revision that
+    # carries the retired field prints what it recorded.
+    recorded = task.get("status")
+    return recorded if isinstance(recorded, str) else None
+
+
 def derive_status(
     *,
     phase: str,
@@ -1034,7 +1081,11 @@ class WorkflowManager:
             task_file = raw.get("task_file")
             if not isinstance(phase, str) or not PHASE_PATTERN.fullmatch(phase):
                 raise WorkflowError(f"{task_id} has invalid phase")
-            if status not in STATES:
+            # `status` was the composite, and nothing writes it any more. A
+            # revision that still carries one -- every revision up to the
+            # retirement -- is checked exactly as before, so history keeps the
+            # guarantee it was written under.
+            if status is not None and status not in STATES:
                 raise WorkflowError(f"{task_id} has invalid status {status!r}")
             lifecycle = raw.get("lifecycle")
             claimed = raw.get("claimed")
@@ -1042,11 +1093,11 @@ class WorkflowManager:
                 raise WorkflowError(f"{task_id} has invalid lifecycle {lifecycle!r}")
             if not isinstance(claimed, bool):
                 raise WorkflowError(f"{task_id} claimed must be a boolean")
-            # The composite status and the facts it is built from are one fact
-            # stored twice, so a config that disagrees with itself is refused
-            # rather than silently believed -- otherwise a hand edit could move
-            # the status without moving the lane.
-            if LIFECYCLE_OF[status] != (lifecycle, claimed):
+            # Where the composite is still stored it and the facts it is built
+            # from are one fact stated twice, so a config that disagrees with
+            # itself is refused rather than silently believed -- otherwise a hand
+            # edit could move the status without moving the lane.
+            if status is not None and LIFECYCLE_OF[status] != (lifecycle, claimed):
                 raise WorkflowError(
                     f"{task_id} decomposes {status} as {LIFECYCLE_OF[status]} but "
                     f"lifecycle/claimed say {(lifecycle, claimed)}"
@@ -1068,7 +1119,10 @@ class WorkflowManager:
                     raise WorkflowError(
                         f"{task_id} superseded_by references unknown task {superseded_by}"
                     )
-                if status != "APPROVED":
+                # A retired task is one that was delivered: the lifecycle says
+                # so, and `status` -- where a revision still carries it -- is
+                # checked against that same fact a few lines up.
+                if lifecycle != DELIVERED:
                     raise WorkflowError(
                         f"{task_id} superseded_by requires APPROVED status, found {status}"
                     )
@@ -1097,7 +1151,19 @@ class WorkflowManager:
                 raise WorkflowError("active_task does not exist")
             if config.get("active_phase") != tasks[active_task]["phase"]:
                 raise WorkflowError("active_phase does not match active_task")
-            if config.get("workflow_state") != tasks[active_task]["status"]:
+            # `workflow_state` is the config's own declaration about its active
+            # task. Here it is only checked structurally, and against the stored
+            # composite where a revision still carries one; whether the evidence
+            # supports the declaration is reported by `status_conflicts`, so a
+            # config that is wrong in that way is diagnosed rather than refused
+            # at load.
+            declared_state = config.get("workflow_state")
+            if declared_state not in STATES:
+                raise WorkflowError(
+                    f"workflow_state must be a workflow state, found {declared_state!r}"
+                )
+            recorded_state = tasks[active_task].get("status")
+            if isinstance(recorded_state, str) and declared_state != recorded_state:
                 raise WorkflowError("workflow_state does not match active task status")
         # The lane is held by at most one task, and the claim is now the field
         # that says so rather than a consequence of the status enum.
@@ -1146,7 +1212,8 @@ class WorkflowManager:
         config_root = self.repo
         active = config.get("active_task")
         runtime = self.load_attempt(active) if isinstance(active, str) else None
-        if runtime is not None and Path(runtime.development_worktree).is_dir():
+        live_attempt = runtime is not None and Path(runtime.development_worktree).is_dir()
+        if live_attempt and runtime is not None:
             config_root = Path(runtime.development_worktree)
             config = self.load_config(config_root)
         active_plan = self.load_plan(active) if isinstance(active, str) else None
@@ -1172,7 +1239,14 @@ class WorkflowManager:
             "active_phase": config.get("active_phase"),
             "active_task": active,
             "workflow_state": config.get("workflow_state"),
-            "task_status": config["tasks"][active]["status"] if active else None,
+            # The projected name, not a stored field: nothing writes `status`
+            # any more, and a live runtime record is what settles the one case
+            # the facts leave open.
+            "task_status": (
+                self._projected_status(config, active, config_root, running=live_attempt)
+                if isinstance(active, str)
+                else None
+            ),
             "attempt": runtime.to_dict() if runtime else None,
             "plan": active_plan.to_dict() if active_plan else None,
             "active_maintenance": active_maintenance,
@@ -1203,12 +1277,16 @@ class WorkflowManager:
         also catches a config that contradicts itself: a status, a lifecycle and
         a lane claim that do not describe the same task, or a status the
         artifacts cannot produce.
+
+        A revision written after the field was retired carries nothing to check
+        against, so the question there is the one that still has an answer: the
+        facts must add up to some status rather than to none.
         """
         base = root or self.repo
         artifacts = RepositoryArtifacts(base)
         conflicts: list[dict[str, str]] = []
         for task_id, task in config["tasks"].items():
-            recorded = str(task["status"])
+            recorded = task.get("status")
             derived = derive_status(
                 phase=str(task["phase"]),
                 task_id=task_id,
@@ -1221,16 +1299,46 @@ class WorkflowManager:
                 claimed=bool(task["claimed"]),
                 derived=derived,
             )
-            if recorded in admitted:
-                continue
-            reason = (
-                f"the stored facts admit only {sorted(admitted)}"
-                if admitted
-                else f"the stored facts add up to no status at all (artifacts say {derived})"
-            )
+            if isinstance(recorded, str):
+                if recorded in admitted:
+                    continue
+                reason = (
+                    f"the stored facts admit only {sorted(admitted)}"
+                    if admitted
+                    else f"the stored facts add up to no status at all (artifacts say {derived})"
+                )
+            else:
+                if admitted:
+                    continue
+                reason = f"the stored facts add up to no status at all (artifacts say {derived})"
             conflicts.append(
-                {"task_id": task_id, "recorded": recorded, "derived": derived, "reason": reason}
+                {
+                    "task_id": task_id,
+                    "recorded": recorded if isinstance(recorded, str) else "",
+                    "derived": derived,
+                    "reason": reason,
+                }
             )
+        # The config also declares its active task's state at the top level.
+        # That declaration is a recorded status too, so it is judged the same
+        # way -- and through the same channel, so an operator sees it while
+        # inspecting instead of being blocked at load.
+        active = config.get("active_task")
+        declared = config.get("workflow_state")
+        if isinstance(active, str) and isinstance(declared, str):
+            admitted_active = self._admitted_states(config, active, base)
+            if declared not in admitted_active:
+                conflicts.append(
+                    {
+                        "task_id": active,
+                        "recorded": declared,
+                        "derived": "",
+                        "reason": (
+                            "workflow_state declares a state the active task's stored facts do not "
+                            f"admit ({sorted(admitted_active) if admitted_active else 'none'})"
+                        ),
+                    }
+                )
         return conflicts
 
     def validate_repository(self) -> None:
@@ -1307,6 +1415,24 @@ class WorkflowManager:
             lifecycle=str(task["lifecycle"]),
             claimed=bool(task["claimed"]),
             derived=derived,
+        )
+
+    def _projected_status(
+        self,
+        config: Mapping[str, Any],
+        task_id: str,
+        root: Path,
+        *,
+        running: bool | None = None,
+    ) -> str | None:
+        """The projection, read against a checked-out tree."""
+
+        return project_status(
+            task_id=task_id,
+            task=self._task(config, task_id),
+            config=config,
+            artifacts=RepositoryArtifacts(root),
+            running=running,
         )
 
     def _check_dependencies(self, config: Mapping[str, Any], task_id: str) -> None:
@@ -1633,20 +1759,38 @@ class WorkflowManager:
         config: dict[str, Any],
         task_id: str,
         state: str,
+        *,
+        root: Path | None = None,
         **updates: object,
     ) -> None:
         if state not in STATES:
             raise WorkflowError(f"invalid target state {state}")
         task = self._task(config, task_id)
-        current = task["status"]
-        if state != current and state not in ALLOWED_TRANSITIONS[current]:
-            raise WorkflowError(f"illegal state transition for {task_id}: {current} -> {state}")
-        task["status"] = state
-        # The decomposition is written here and nowhere else, so the composite
-        # status and the two facts it is built from cannot drift apart.
+        # The state this transition leaves is the one the facts currently admit.
+        # A record that still carries `status` -- every revision before the field
+        # was retired -- is the fallback, so a historical record is judged
+        # exactly as it was written.
+        admitted = self._admitted_states(config, task_id, root or self.repo)
+        recorded = task.get("status")
+        current = admitted or ({recorded} if isinstance(recorded, str) else set())
+        illegal = [
+            candidate
+            for candidate in current
+            if state != candidate and state not in ALLOWED_TRANSITIONS[candidate]
+        ]
+        if illegal:
+            raise WorkflowError(
+                f"illegal state transition for {task_id}: "
+                f"{sorted(current) if len(current) > 1 else next(iter(current), 'nothing')} "
+                f"-> {state}"
+            )
+        # Written here and nowhere else, so the two facts cannot drift apart --
+        # and no projection of them is stored beside them any more: `status` was
+        # that projection, and after this increment nothing writes it.
         lifecycle, claimed = LIFECYCLE_OF[state]
         task["lifecycle"] = lifecycle
         task["claimed"] = claimed
+        task.pop("status", None)
         task.update(updates)
         config["active_phase"] = task["phase"]
         config["active_task"] = task_id
@@ -1663,7 +1807,7 @@ class WorkflowManager:
             task = self._task(config, task_id)
             admitted = self._admitted_states(config, task_id, worktree)
             if "BLOCKED" in admitted:
-                self._set_state(config, task_id, "READY")
+                self._set_state(config, task_id, "READY", root=worktree)
             elif "CHANGES_REQUESTED" not in admitted:
                 raise WorkflowError(
                     "retry requires a review that requested changes or a resolved block; the "
@@ -1898,7 +2042,7 @@ class WorkflowManager:
                 "TRIAGE_REQUIRED": "TRIAGE_REQUIRED",
                 "BLOCKED": "BLOCKED",
             }[outcome]
-            self._set_state(config, task_id, state, base_commit=attempt.base_commit)
+            self._set_state(config, task_id, state, base_commit=attempt.base_commit, root=worktree)
             _write_json(worktree / "todo" / "config.yaml", config)
             (worktree / ".workflow" / "developer-result.json").unlink(missing_ok=True)
             (worktree / ".workflow" / "developer-continuation.json").unlink(missing_ok=True)
@@ -1908,7 +2052,9 @@ class WorkflowManager:
             self.save_attempt(attempt)
             return attempt
 
-        self._set_state(config, task_id, "AWAITING_REVIEW", base_commit=attempt.base_commit)
+        self._set_state(
+            config, task_id, "AWAITING_REVIEW", base_commit=attempt.base_commit, root=worktree
+        )
         _write_json(worktree / "todo" / "config.yaml", config)
         _git(worktree, "diff", "--check")
         changed = _git(worktree, "status", "--porcelain").stdout.strip()
@@ -2731,15 +2877,23 @@ class WorkflowManager:
         if not reason.strip():
             raise WorkflowError("abandon-task requires a non-empty reason")
         config = self.load_config()
+        config_root = self.repo
         attempt = self.load_attempt(task_id)
-        if attempt is not None and Path(attempt.development_worktree).is_dir():
+        live_attempt = attempt is not None and Path(attempt.development_worktree).is_dir()
+        if live_attempt and attempt is not None:
             # While an attempt is in flight the retained worktree holds the live
-            # status; the main checkout still shows whatever the last commit that
+            # facts; the main checkout still shows whatever the last commit that
             # touched it recorded. Resolve the same way `status` does, so the
-            # abandonment record states the status the work item was actually in.
-            config = self.load_config(Path(attempt.development_worktree))
+            # abandonment record states the state the work item was actually in.
+            config_root = Path(attempt.development_worktree)
+            config = self.load_config(config_root)
         task = self._task(config, task_id)
-        status = task["status"]
+        # `running` is the one thing the facts cannot say: a claimed task with
+        # nothing sealed is READY or IN_DEVELOPMENT, and this command has just
+        # looked at the runtime record, so its record states which.
+        status = (
+            self._projected_status(config, task_id, config_root, running=live_attempt) or "unknown"
+        )
         # Closedness is the task's own lifecycle, not the projected status: a
         # hand-edited status could otherwise present closed work as open (or the
         # reverse) while the decomposition disagreed.
@@ -2789,7 +2943,7 @@ class WorkflowManager:
             encoding="utf-8",
         )
         previous_active = config.get("active_task")
-        self._set_state(config, task_id, "ABANDONED")
+        self._set_state(config, task_id, "ABANDONED", root=config_root)
         if isinstance(previous_active, str) and previous_active != task_id:
             # Closing a resting task must not move the active pointer onto it.
             keeper = config["tasks"][previous_active]
@@ -2875,13 +3029,16 @@ class WorkflowManager:
             )
         config = self.load_config()
         task = self._task(config, task_id)
-        status = task["status"]
+        recorded = task.get("status")
+        status = self._projected_status(config, task_id, self.repo) or "unknown"
         closed = str(task["lifecycle"]) != OPEN
         if not closed:
             admitted = self._admitted_states(config, task_id, self.repo)
-            if status not in admitted:
+            # A record that still carries the retired field has to agree with its
+            # own evidence; a record without one has nothing to disagree with.
+            if isinstance(recorded, str) and recorded not in admitted:
                 raise WorkflowError(
-                    f"{task_id} records {status}, but its committed artifacts admit "
+                    f"{task_id} records {recorded}, but its committed artifacts admit "
                     f"{sorted(admitted) if admitted else 'no status at all'}; settle that "
                     "disagreement with 'validate' before clearing a lost attempt"
                 )
@@ -3584,7 +3741,7 @@ class WorkflowManager:
         }
         if state == "APPROVED":
             updates["approved_commit"] = attempt.candidate_commit
-        self._set_state(config, task_id, state, **updates)
+        self._set_state(config, task_id, state, **updates, root=worktree)
         _write_json(worktree / "todo" / "config.yaml", config)
         _git(worktree, "add", "todo/config.yaml", str(relative_json), str(relative_md))
         _git(
@@ -3672,7 +3829,7 @@ class WorkflowManager:
         }[classification]
         report = self._triage_report_path(attempt)
         _write_json(worktree / report, result)
-        self._set_state(config, task_id, state)
+        self._set_state(config, task_id, state, root=worktree)
         _write_json(worktree / "todo" / "config.yaml", config)
         _git(worktree, "add", "todo/config.yaml", str(report))
         _git(worktree, "commit", "-m", f"chore(workflow): triage {task_id} as {classification}")
@@ -3741,7 +3898,7 @@ class WorkflowManager:
                 worktree / decision_path,
                 {"task_id": task_id, "decision": owner_decision.strip()},
             )
-            self._set_state(config, task_id, "PLANNING")
+            self._set_state(config, task_id, "PLANNING", root=worktree)
             _write_json(worktree / "todo" / "config.yaml", config)
             _git(worktree, "add", "todo/config.yaml", str(decision_path))
             _git(worktree, "commit", "-m", f"chore(workflow): record {task_id} owner decision")
@@ -3836,13 +3993,13 @@ class WorkflowManager:
         _write_json(worktree / evidence_path, result)
         if outcome in {"BLOCKED", "OWNER_DECISION_REQUIRED"}:
             state = "BLOCKED" if outcome == "BLOCKED" else "OWNER_DECISION_REQUIRED"
-            self._set_state(config, task_id, state)
+            self._set_state(config, task_id, state, root=worktree)
             _write_json(worktree / "todo" / "config.yaml", config)
             _git(worktree, "add", "-A")
             _git(worktree, "commit", "-m", f"chore(workflow): record {task_id} planning {state}")
             return None
 
-        self._set_state(config, task_id, "AWAITING_PLAN_REVIEW")
+        self._set_state(config, task_id, "AWAITING_PLAN_REVIEW", root=worktree)
         _write_json(worktree / "todo" / "config.yaml", config)
         _git(worktree, "diff", "--check")
         _git(worktree, "add", "-A")
@@ -3946,7 +4103,7 @@ class WorkflowManager:
         markdown_report = json_report.with_suffix(".md")
         _write_json(worktree / json_report, result)
         (worktree / markdown_report).write_text(_render_plan_review(result), encoding="utf-8")
-        self._set_state(config, task_id, state)
+        self._set_state(config, task_id, state, root=worktree)
         _write_json(worktree / "todo" / "config.yaml", config)
         _git(worktree, "add", "todo/config.yaml", str(json_report), str(markdown_report))
         _git(worktree, "commit", "-m", f"chore(workflow): record {task_id} plan review")

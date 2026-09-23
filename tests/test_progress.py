@@ -36,6 +36,7 @@ from tools.progress import (
     render,
     validate,
 )
+from tools.workflow.core import LIFECYCLE_OF
 
 REPO = Path(__file__).resolve().parents[1]
 PYTHON = sys.executable
@@ -49,6 +50,18 @@ PYTHON = sys.executable
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _facts(state: str) -> dict[str, object]:
+    """The two facts that carry a state, from the controller's own table.
+
+    The fixtures read the controller's decomposition rather than a second copy
+    of it, so a change to the model fails here instead of leaving this file
+    asserting an old one.
+    """
+
+    lifecycle, claimed = LIFECYCLE_OF[state]
+    return {"lifecycle": lifecycle, "claimed": claimed}
 
 
 def _minimal_config(extra_tasks: dict[str, object] | None = None) -> str:
@@ -72,7 +85,8 @@ def _minimal_config(extra_tasks: dict[str, object] | None = None) -> str:
         "tasks": {
             "T000": {
                 "phase": "P00",
-                "status": "APPROVED",
+                "lifecycle": "DELIVERED",
+                "claimed": False,
                 "depends_on": [],
                 "task_file": "todo/phases/P00-engineering-baseline/T000.md",
                 "attempt": 0,
@@ -83,7 +97,8 @@ def _minimal_config(extra_tasks: dict[str, object] | None = None) -> str:
             },
             "T001": {
                 "phase": "P00",
-                "status": "APPROVED",
+                "lifecycle": "DELIVERED",
+                "claimed": False,
                 "depends_on": ["T000"],
                 "task_file": "todo/phases/P00-engineering-baseline/T001.md",
                 "attempt": 1,
@@ -94,7 +109,8 @@ def _minimal_config(extra_tasks: dict[str, object] | None = None) -> str:
             },
             "T010": {
                 "phase": "P01",
-                "status": "PLANNED",
+                "lifecycle": "OPEN",
+                "claimed": False,
                 "depends_on": ["T001"],
                 "task_file": "todo/phases/P01-protocol-foundation/T010.md",
                 "attempt": 0,
@@ -234,14 +250,30 @@ def test_render_output_has_no_commit_sha_count_or_timestamp() -> None:
     assert "test count" not in output.lower()
 
 
-def test_render_records_every_notable_status_as_such() -> None:
-    """Blocked / changes-requested / triage / owner-decision tasks are named."""
+@pytest.mark.parametrize(
+    ("state", "label"),
+    [
+        ("BLOCKED", "blocked"),
+        ("CHANGES_REQUESTED", "changes-requested"),
+        ("TRIAGE_REQUIRED", "triage-required"),
+        ("OWNER_DECISION_REQUIRED", "owner-decision"),
+    ],
+)
+def test_render_records_each_notable_state_as_such(state: str, label: str) -> None:
+    """A stopped work item is named, with the reason it stopped.
+
+    One state per fixture: a task in flight is *the* active task, because only
+    it may hold the single-active-work lane, so a plan cannot hold four of them
+    at once. That is also where the renderer reads the state from -- the
+    config's own declaration of its active task, which the controller checks
+    against the evidence.
+    """
 
     config_text = _minimal_config(
         extra_tasks={
             "T002": {
                 "phase": "P00",
-                "status": "BLOCKED",
+                **_facts(state),
                 "depends_on": [],
                 "task_file": "todo/phases/P00-engineering-baseline/T002.md",
                 "attempt": 0,
@@ -250,41 +282,11 @@ def test_render_records_every_notable_status_as_such() -> None:
                 "approved_commit": None,
                 "latest_review": None,
             },
-            "T003": {
-                "phase": "P00",
-                "status": "CHANGES_REQUESTED",
-                "depends_on": [],
-                "task_file": "todo/phases/P00-engineering-baseline/T003.md",
-                "attempt": 0,
-                "base_commit": None,
-                "candidate_commit": None,
-                "approved_commit": None,
-                "latest_review": None,
-            },
-            "T004": {
-                "phase": "P00",
-                "status": "TRIAGE_REQUIRED",
-                "depends_on": [],
-                "task_file": "todo/phases/P00-engineering-baseline/T004.md",
-                "attempt": 0,
-                "base_commit": None,
-                "candidate_commit": None,
-                "approved_commit": None,
-                "latest_review": None,
-            },
-            "T005": {
-                "phase": "P00",
-                "status": "OWNER_DECISION_REQUIRED",
-                "depends_on": [],
-                "task_file": "todo/phases/P00-engineering-baseline/T005.md",
-                "attempt": 0,
-                "base_commit": None,
-                "candidate_commit": None,
-                "approved_commit": None,
-                "latest_review": None,
-            },
         },
     )
+    raw = json.loads(config_text)
+    raw["active_task"] = "T002"
+    raw["workflow_state"] = state
     contract_texts = {
         "todo/phases/P00-engineering-baseline/T000.md": (
             "# T000 — Seed task\n\n## Outcome\n\nfirst task.\n"
@@ -293,29 +295,20 @@ def test_render_records_every_notable_status_as_such() -> None:
             "# T001 — Follow up\n\n## Outcome\n\nfollows T000.\n"
         ),
         "todo/phases/P00-engineering-baseline/T002.md": (
-            "# T002 — Blocked\n\n## Outcome\n\nblocked.\n"
-        ),
-        "todo/phases/P00-engineering-baseline/T003.md": (
-            "# T003 — Changes\n\n## Outcome\n\nchanges.\n"
-        ),
-        "todo/phases/P00-engineering-baseline/T004.md": (
-            "# T004 — Triage\n\n## Outcome\n\ntriage.\n"
-        ),
-        "todo/phases/P00-engineering-baseline/T005.md": (
-            "# T005 — Owner\n\n## Outcome\n\nowner.\n"
+            "# T002 — Stopped\n\n## Outcome\n\nstopped.\n"
         ),
         "todo/phases/P01-protocol-foundation/T010.md": (
             "# T010 — Independent\n\n## Outcome\n\nindependent.\n"
         ),
     }
     with pytest.MonkeyPatch.context() as mp:
-        tmp = REPO.parent / "_tmp_progress_notable"
+        tmp = REPO.parent / f"_tmp_progress_notable_{label.replace('-', '_')}"
         tmp.mkdir(exist_ok=True)
         repo = tmp / "repo"
         repo.mkdir(exist_ok=True)
         cfg_path = _make_repo(
             repo,
-            config_text=config_text,
+            config_text=json.dumps(raw),
             contract_texts=contract_texts,
         )
         mp.chdir(repo)
@@ -323,10 +316,7 @@ def test_render_records_every_notable_status_as_such() -> None:
         output = render(config, repo_root=repo)
 
     assert "Blocked / changes-requested / triage-required / owner-decision" in output
-    assert "T002 — blocked: Blocked" in output
-    assert "T003 — changes-requested: Changes" in output
-    assert "T004 — triage-required: Triage" in output
-    assert "T005 — owner-decision: Owner" in output
+    assert f"T002 — {label}: Stopped" in output
 
 
 def test_render_splits_approved_into_live_and_superseded() -> None:
@@ -336,7 +326,8 @@ def test_render_splits_approved_into_live_and_superseded() -> None:
         extra_tasks={
             "T020": {
                 "phase": "P00",
-                "status": "APPROVED",
+                "lifecycle": "DELIVERED",
+                "claimed": False,
                 "depends_on": [],
                 "task_file": "todo/phases/P00-engineering-baseline/T020.md",
                 "superseded_by": "T021",
@@ -348,7 +339,8 @@ def test_render_splits_approved_into_live_and_superseded() -> None:
             },
             "T021": {
                 "phase": "P00",
-                "status": "APPROVED",
+                "lifecycle": "DELIVERED",
+                "claimed": False,
                 "depends_on": [],
                 "task_file": "todo/phases/P00-engineering-baseline/T021.md",
                 "attempt": 0,
@@ -407,9 +399,10 @@ def test_render_response_changes_with_status_and_dependency(tmp_path: Path) -> N
     output_a = render(config_a, repo_root=repo)
 
     # Flip T001 from APPROVED to PLANNED and drop T010's dependency,
-    # so the ready-next set changes from {T010} to {}.
+    # so the ready-next set changes from {T010} to {}. The state lives in the
+    # two facts now, so flipping it means moving those.
     raw = json.loads(cfg_path.read_text(encoding="utf-8"))
-    raw["tasks"]["T001"]["status"] = "PLANNED"
+    raw["tasks"]["T001"].update(_facts("PLANNED"))
     raw["tasks"]["T010"]["depends_on"] = []
     cfg_path.write_text(json.dumps(raw), encoding="utf-8")
 
@@ -545,7 +538,8 @@ def test_check_fails_on_supersede_without_approved_status(tmp_path: Path) -> Non
         extra_tasks={
             "T020": {
                 "phase": "P00",
-                "status": "PLANNED",
+                "lifecycle": "OPEN",
+                "claimed": False,
                 "depends_on": [],
                 "task_file": "todo/phases/P00-engineering-baseline/T020.md",
                 "superseded_by": "T021",
@@ -557,7 +551,8 @@ def test_check_fails_on_supersede_without_approved_status(tmp_path: Path) -> Non
             },
             "T021": {
                 "phase": "P00",
-                "status": "APPROVED",
+                "lifecycle": "DELIVERED",
+                "claimed": False,
                 "depends_on": [],
                 "task_file": "todo/phases/P00-engineering-baseline/T021.md",
                 "attempt": 0,
@@ -634,12 +629,14 @@ def test_is_ready_respects_supersede_self_dependency() -> None:
 
     tasks = {
         "T038": {
-            "status": "APPROVED",
+            "lifecycle": "DELIVERED",
+            "claimed": False,
             "depends_on": [],
             "superseded_by": "T039",
         },
         "T039": {
-            "status": "PLANNED",
+            "lifecycle": "OPEN",
+            "claimed": False,
             "depends_on": ["T038"],
         },
     }
@@ -649,12 +646,14 @@ def test_is_ready_respects_supersede_self_dependency() -> None:
 def test_is_ready_rejects_superseded_dependency() -> None:
     tasks = {
         "T022": {
-            "status": "APPROVED",
+            "lifecycle": "DELIVERED",
+            "claimed": False,
             "depends_on": [],
             "superseded_by": "T026",
         },
         "T099": {
-            "status": "PLANNED",
+            "lifecycle": "OPEN",
+            "claimed": False,
             "depends_on": ["T022"],
         },
     }

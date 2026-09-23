@@ -47,6 +47,40 @@ PLAN_STATES: frozenset[str] = frozenset(
     }
 )
 
+#: The two facts the composite status is built from. The tool stays independent
+#: of ``tools.workflow`` -- it is a product tool, and the controller is a
+#: governance surface -- so the values are stated here and the equivalence with
+#: the controller's projection is asserted in the tests rather than shared as
+#: code.
+LIFECYCLE_VALUES: frozenset[str] = frozenset({"OPEN", "DELIVERED", "ABANDONED"})
+
+
+def project_state(task_id: str, task: Mapping[str, Any], *, config: Mapping[str, Any]) -> str:
+    """The state a task record is in.
+
+    ``status`` used to say this. It is retired: a revision that still carries one
+    is reported as recorded, and otherwise the state is projected from the facts
+    the controller writes. A task that holds the single-active-work lane is the
+    active task -- nothing else may claim it -- so the config's own declaration
+    of its active task's state is a fact about this very record.
+    """
+
+    recorded = task.get("status")
+    if isinstance(recorded, str) and recorded in PLAN_STATES:
+        return recorded
+    lifecycle = task.get("lifecycle")
+    if lifecycle == "DELIVERED":
+        return "APPROVED"
+    if lifecycle == "ABANDONED":
+        return "ABANDONED"
+    if lifecycle == "OPEN" and task.get("claimed") is True:
+        declared = config.get("workflow_state")
+        if config.get("active_task") == task_id and declared in PLAN_STATES:
+            return str(declared)
+        return "READY"
+    return "PLANNED"
+
+
 #: Statuses that close a work item without delivering it. Like a superseded
 #: task, an abandoned one is not live work: it must not be counted as
 #: in-progress, and `is_ready` already excludes it because it is not `PLANNED`.
@@ -195,8 +229,11 @@ def validate(config: Mapping[str, Any], *, repo_root: Path) -> list[ProgressIssu
             # Already recorded as TASK_ID_INVALID above; skip the rest.
             continue
 
+        # A revision that still carries the retired composite must carry a
+        # valid one; a revision written after the retirement carries the two
+        # facts instead, and those are what a reader projects from.
         status = task.get("status")
-        if not isinstance(status, str) or status not in PLAN_STATES:
+        if status is not None and (not isinstance(status, str) or status not in PLAN_STATES):
             issues.append(
                 ProgressIssue(
                     code="STATUS_OUTSIDE_STATE_MACHINE",
@@ -205,6 +242,26 @@ def validate(config: Mapping[str, Any], *, repo_root: Path) -> list[ProgressIssu
                         f"task {task_id} status {status!r} is outside the plan's "
                         f"state machine; allowed values: {sorted(PLAN_STATES)}"
                     ),
+                )
+            )
+        lifecycle = task.get("lifecycle")
+        if lifecycle not in LIFECYCLE_VALUES:
+            issues.append(
+                ProgressIssue(
+                    code="LIFECYCLE_INVALID",
+                    target=task_id,
+                    message=(
+                        f"task {task_id} lifecycle {lifecycle!r} is not one of "
+                        f"{sorted(LIFECYCLE_VALUES)}"
+                    ),
+                )
+            )
+        if not isinstance(task.get("claimed"), bool):
+            issues.append(
+                ProgressIssue(
+                    code="CLAIMED_INVALID",
+                    target=task_id,
+                    message=f"task {task_id} 'claimed' must be a boolean",
                 )
             )
 
@@ -300,14 +357,14 @@ def validate(config: Mapping[str, Any], *, repo_root: Path) -> list[ProgressIssu
                         ),
                     )
                 )
-            elif status != "APPROVED":
+            elif task.get("lifecycle") != "DELIVERED":
                 issues.append(
                     ProgressIssue(
                         code="SUPERSEDED_BUT_NOT_APPROVED",
                         target=task_id,
                         message=(
                             f"task {task_id} is superseded_by {superseded_by} "
-                            f"but is not APPROVED (found {status!r})"
+                            f"but is not APPROVED (found {project_state(task_id, task, config=config)!r})"
                         ),
                     )
                 )
@@ -320,17 +377,22 @@ def is_ready(task_id: str, task: Mapping[str, Any], tasks: Mapping[str, Any]) ->
 
     The condition mirrors the controller's ``_check_dependencies``:
 
-    - the task is currently ``PLANNED``;
+    - the task is currently ``PLANNED`` — nobody has selected it, and it
+      has not started;
     - every entry in ``depends_on`` is ``APPROVED``;
     - no entry in ``depends_on`` carries a ``superseded_by`` pointer,
       unless the task itself is the named successor.
+
+    Both facts are read from the decomposition, which is what the controller
+    routes on: ``PLANNED`` means the lifecycle is open and no lane is claimed,
+    and a delivered dependency is one whose lifecycle says so.
 
     Anything else — including a missing dependency entry — keeps the
     task out of the ready-next set, because the controller would
     refuse it for the same reason.
     """
 
-    if task.get("status") != "PLANNED":
+    if task.get("lifecycle") != "OPEN" or task.get("claimed") is not False:
         return False
     depends_on = task.get("depends_on")
     if not isinstance(depends_on, list):
@@ -341,7 +403,7 @@ def is_ready(task_id: str, task: Mapping[str, Any], tasks: Mapping[str, Any]) ->
         other = tasks.get(dependency)
         if not isinstance(other, Mapping):
             return False
-        if other.get("status") != "APPROVED":
+        if other.get("lifecycle") != "DELIVERED":
             return False
         superseded_by = other.get("superseded_by")
         if superseded_by is not None and superseded_by != task_id:
@@ -351,6 +413,7 @@ def is_ready(task_id: str, task: Mapping[str, Any], tasks: Mapping[str, Any]) ->
 
 __all__ = [
     "CLOSED_WITHOUT_DELIVERY",
+    "LIFECYCLE_VALUES",
     "NOTABLE_STATES",
     "PHASE_PATTERN",
     "PLAN_STATES",
@@ -358,5 +421,6 @@ __all__ = [
     "TASK_PATTERN",
     "is_ready",
     "load_config",
+    "project_state",
     "validate",
 ]
