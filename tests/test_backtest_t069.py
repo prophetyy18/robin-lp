@@ -40,7 +40,8 @@ The tests cover every acceptance clause of the T069 contract:
 - **CLI commands work without a Web process.** ``backtest start``,
   ``backtest list``, ``backtest observe`` and ``backtest cancel``
   start, observe and cancel a run while no Web process is
-  running.
+  running; cancelling a non-terminal (``QUEUED`` / ``RUNNING``)
+  record persists the terminal ``CANCELLED`` record.
 
 - **No credentials in the run record.** The run record carries
   no key material, endpoint alias, or secret.
@@ -1406,6 +1407,197 @@ class TestCLISubcommandsWithoutWeb:
 
 # Need ``sys`` for the subprocess invocations.
 import sys  # noqa: E402  (import after fixtures for readability)
+
+# ---------------------------------------------------------------------------
+# 10b. CLI cancel on a NON-terminal run (M0005 regression)
+# ---------------------------------------------------------------------------
+
+
+def _persist_non_terminal_record(
+    *,
+    runs_root: Path,
+    run_id: str,
+    state: RunState,
+    source_manifest_path: str | None = None,
+    source_checksum: str | None = None,
+) -> RunRecord:
+    """Persist a non-terminal record the CLI cancel must transition.
+
+    The helper writes a ``QUEUED`` / ``RUNNING`` record through the
+    durable :class:`RunStateStore` — the same surface the CLI reads
+    — so the CLI cancel branch executes its record-construction
+    path instead of short-circuiting on an already terminal state.
+    """
+    store = RunStateStore(runs_root)
+    record = RunRecord(
+        version=ORCHESTRATOR_VERSION,
+        run_id=run_id,
+        state=state,
+        request=_build_request(run_id=run_id, source_manifest_path=source_manifest_path),
+        progress=RunProgress(
+            events_total=0,
+            events_processed=0,
+            current_stage="LOADING",
+            updated_at_unix_seconds=1_700_000_000,
+        ),
+        reason_code=None,
+        error_message=None,
+        manifest_path=None,
+        report_path=None,
+        source_manifest_path=source_manifest_path,
+        source_checksum=source_checksum,
+        simulation_evidence_path=None,
+        created_at_unix_seconds=1_700_000_000,
+        updated_at_unix_seconds=1_700_000_000,
+        terminal_at_unix_seconds=None,
+    )
+    store.write(record)
+    return record
+
+
+def _cli_cancel(
+    *,
+    runs_root: Path,
+    run_id: str,
+    reason: str,
+) -> subprocess.CompletedProcess[str]:
+    """Run ``backtest cancel`` in a subprocess and return the result."""
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "robinhood_lp",
+            "backtest",
+            "cancel",
+            "--runs-root",
+            str(runs_root),
+            "--run-id",
+            run_id,
+            "--reason",
+            reason,
+        ],
+        env={"PYTHONPATH": "src"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+class TestCLICancelNonTerminalRun:
+    """The CLI cancel path transitions a non-terminal run to ``CANCELLED``.
+
+    M0005 regression: the cancel branch constructs a replacement
+    :class:`RunRecord`, so it must supply every declared field the
+    record requires. Cancelling a ``QUEUED`` / ``RUNNING`` record
+    therefore has to succeed, publish no manifest / report /
+    simulation evidence, record the operator's structured reason,
+    and persist the terminal record durably.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_registry(self) -> Iterator[None]:
+        reset_default_registry_cache()
+        yield
+        reset_default_registry_cache()
+
+    def test_cli_cancel_running_record_is_cancelled(self, tmp_path: Path) -> None:
+        runs_root = tmp_path / "runs"
+        _persist_non_terminal_record(
+            runs_root=runs_root, run_id="cli-cancel-001", state=RunState.RUNNING
+        )
+        result = _cli_cancel(
+            runs_root=runs_root,
+            run_id="cli-cancel-001",
+            reason="T069_TEST_CANCEL_NON_TERMINAL",
+        )
+        # The cancel used to raise ``TypeError`` before writing a
+        # record; a successful cancel exits 0 with the terminal
+        # record on stdout.
+        assert result.returncode == 0
+        payload = json.loads(result.stdout.strip())
+        assert payload["run_id"] == "cli-cancel-001"
+        assert payload["state"] == RunState.CANCELLED.value
+        assert payload["reason_code"] == "T069_TEST_CANCEL_NON_TERMINAL"
+        assert payload["error_message"] is None
+        # A cancelled run publishes no manifest, report or
+        # simulation evidence.
+        assert payload["manifest_path"] is None
+        assert payload["report_path"] is None
+        assert payload["simulation_evidence_path"] is None
+        # The record is terminal and keeps its original creation time.
+        assert payload["terminal_at_unix_seconds"] is not None
+        assert payload["created_at_unix_seconds"] == 1_700_000_000
+        assert payload["updated_at_unix_seconds"] == payload["terminal_at_unix_seconds"]
+        # The terminal record is durable: reload it through the store.
+        persisted = RunStateStore(runs_root).read("cli-cancel-001")
+        assert persisted.state == RunState.CANCELLED
+        assert persisted.reason_code == "T069_TEST_CANCEL_NON_TERMINAL"
+        assert persisted.simulation_evidence_path is None
+        # ``observe`` sees the same cancelled record the CLI wrote.
+        observe_result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "robinhood_lp",
+                "backtest",
+                "observe",
+                "--runs-root",
+                str(runs_root),
+                "--run-id",
+                "cli-cancel-001",
+            ],
+            env={"PYTHONPATH": "src"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert observe_result.returncode == 0
+        assert json.loads(observe_result.stdout.strip()) == payload
+        # No manifest / report / simulation evidence leaked on disk.
+        assert list(runs_root.glob("*.manifest.json")) == []
+        assert list(runs_root.glob("*.report.json")) == []
+        assert list(runs_root.glob("*.simulation_evidence.json")) == []
+
+    def test_cli_cancel_queued_record_preserves_source_link(self, tmp_path: Path) -> None:
+        runs_root = tmp_path / "runs"
+        source_checksum = "0x" + "5a" * 32
+        _persist_non_terminal_record(
+            runs_root=runs_root,
+            run_id="cli-cancel-002",
+            state=RunState.QUEUED,
+            source_manifest_path=str(tmp_path / "source.manifest.json"),
+            source_checksum=source_checksum,
+        )
+        result = _cli_cancel(
+            runs_root=runs_root,
+            run_id="cli-cancel-002",
+            reason="T069_TEST_CANCEL_QUEUED",
+        )
+        assert result.returncode == 0
+        payload = json.loads(result.stdout.strip())
+        assert payload["state"] == RunState.CANCELLED.value
+        assert payload["reason_code"] == "T069_TEST_CANCEL_QUEUED"
+        # The sibling optional fields survive the transition
+        # unchanged, and a cancelled rerun links to no new evidence.
+        assert payload["source_manifest_path"] == str(tmp_path / "source.manifest.json")
+        assert payload["source_checksum"] == source_checksum
+        assert payload["manifest_path"] is None
+        assert payload["report_path"] is None
+        assert payload["simulation_evidence_path"] is None
+
+    def test_cli_cancel_unknown_run_id_still_fails_closed(self, tmp_path: Path) -> None:
+        runs_root = tmp_path / "runs"
+        runs_root.mkdir()
+        result = _cli_cancel(
+            runs_root=runs_root,
+            run_id="cli-cancel-missing",
+            reason="T069_TEST_CANCEL_MISSING",
+        )
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert "not found" in result.stderr
+        assert RunStateStore(runs_root).list_runs() == ()
+
 
 # ---------------------------------------------------------------------------
 # 11. Orchestrator composes the existing T061 / T063 / T105 surfaces

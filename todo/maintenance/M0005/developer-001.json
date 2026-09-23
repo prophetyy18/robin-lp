@@ -1,0 +1,46 @@
+{
+  "task_id": "M0005",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Repaired the T069 CLI cancel branch in src/robinhood_lp/__main__.py: the replacement RunRecord now passes simulation_evidence_path=None beside the sibling optional fields (a cancelled run publishes no manifest, report or simulation evidence; the source link the request carried is preserved so the rerun chain stays traceable). Before the repair, `python -m robinhood_lp backtest cancel` on any non-terminal (QUEUED/RUNNING) record aborted with TypeError: RunRecord.__init__() missing 1 required positional argument: 'simulation_evidence_path' (reproduced in this worktree, and reported by scoped mypy at the same call site). Added regression coverage in tests/test_backtest_t069.py (new class TestCLICancelNonTerminalRun, three tests plus two helpers): cancelling a RUNNING record through the CLI subprocess yields exit 0 with a CANCELLED terminal record whose reason_code/creation time are preserved and whose manifest/report/simulation-evidence paths stay None; cancelling a QUEUED rerun record preserves its source link and checksum and still links to no new evidence; an unknown run_id still fails closed with exit 1, no stdout and no record written. No behavior, interface, dependency, Intent/Spec or safety-policy change; only the two declared allowed_paths were modified and nothing was committed.",
+  "commands": [
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/robinhood_lp/__main__.py",
+      "result": "PASS - Success: no issues found in 1 source file (pre-fix this reported: src/robinhood_lp/__main__.py:806: error: Missing positional argument \"simulation_evidence_path\" in call to \"RunRecord\" [call-arg])"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_backtest_t069.py -q",
+      "result": "PASS - 41 passed in 1.86s (38 pre-existing tests plus the 3 new TestCLICancelNonTerminalRun tests)"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q --ignore=tests/test_abi_artifacts.py",
+      "result": "PASS - 3077 passed, 6 skipped in 33.26s. The 6 skips are pre-existing environment skips unrelated to this repair: 3 Foundry-dependent tests in tests/test_oracle_drift.py (forge not on PATH) and 3 reserved-signature/gpg tests; none is a pass claim."
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check .",
+      "result": "PASS - 550 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check .",
+      "result": "PASS - All checks passed! (an intermediate edit left I001 import-block formatting at tests/test_backtest_t069.py:1409; corrected, then re-run clean)"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS - no output, exit code 0"
+    },
+    {
+      "command": "negative check: restore HEAD's src/robinhood_lp/__main__.py, run PYTHONPATH=src <python> -m pytest tests/test_backtest_t069.py -q -k CLICancelNonTerminalRun, then restore the fixed file",
+      "result": "EXPECTED FAILURE - 2 failed, 1 passed before the repair: test_cli_cancel_running_record_is_cancelled and test_cli_cancel_queued_record_preserves_source_link both hit exit 1 with TypeError: RunRecord.__init__() missing 1 required positional argument: 'simulation_evidence_path'; the third test (unknown run_id) passes with and without the fix because it never reaches the record construction. The fixed file was restored and git diff afterwards shows only the intended 6-line source change."
+    },
+    {
+      "command": "git status --short && git diff --stat",
+      "result": "PASS - exactly two modified paths, both declared allowed_paths: src/robinhood_lp/__main__.py (6 insertions) and tests/test_backtest_t069.py (193 insertions, 1 deletion). Nothing committed; the untracked .workflow/maintenance-request.json is the controller-frozen request, not produced by this role."
+    }
+  ],
+  "residual_risks": [
+    "The RunRecord docstring in src/robinhood_lp/orchestrator/__init__.py (outside allowed_paths) still omits simulation_evidence_path from its documented field list; documentation-only gap with no behavior impact, deliberately left unrepaired to respect scope.",
+    "The repo-wide mypy gate aborts on a duplicate-module error, which is why this call-site arity defect escaped scoped reviews; only the task-scoped mypy invocation surfaces it. Changing the gate is a governance/tooling change outside this maintenance request.",
+    "RunRecord still declares simulation_evidence_path as a required constructor argument with no default, so any future record-construction site reintroduces this same class of defect; the search for constructions in src/, tests/ and tools/ shows no remaining site other than the repaired one, but a shared constructor helper would be a design change out of scope here.",
+    "tests/test_abi_artifacts.py was not executed because the frozen request's full-suite command ignores it (no Foundry submodules in a worktree); that file's coverage is unchanged by this repair.",
+    "The 6 skipped tests listed above are unverified-by-execution in this environment; they were skipped at the same points on the base commit and are unrelated to the cancel path."
+  ]
+}

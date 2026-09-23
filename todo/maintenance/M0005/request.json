@@ -1,0 +1,19 @@
+{
+  "maintenance_id": "M0005",
+  "summary": "fix the CLI cancel path that omits a required RunRecord field, with coverage",
+  "reason": "T109 candidate fac669a added a required field simulation_evidence_path to RunRecord (src/robinhood_lp/orchestrator/__init__.py:886, no default), but the CLI cancel branch from T069 (2f64e64) at src/robinhood_lp/__main__.py:811 constructs RunRecord without it, so cancelling a non-terminal run raises TypeError (reproduced: missing 1 required positional argument simulation_evidence_path). mypy src/robinhood_lp/__main__.py reports call-arg at line 811, and the repo-wide mypy gate hides it behind a duplicate-module abort, so scoped reviews missed it; tests/test_backtest_t069.py covers only the terminal no-op branch. Repair: pass simulation_evidence_path=None beside the sibling optional fields, since a cancelled run publishes no manifest or report, and add regression coverage cancelling a NON-terminal record via the CLI. The pytest checks ignore tests/test_abi_artifacts.py (no Foundry submodules in a worktree) and use PYTHONPATH=src (the editable install points at a deleted worktree).",
+  "allowed_paths": [
+    "src/robinhood_lp/__main__.py",
+    "tests/test_backtest_t069.py"
+  ],
+  "verification_commands": [
+    "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/robinhood_lp/__main__.py",
+    "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_backtest_t069.py -q",
+    "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest -q --ignore=tests/test_abi_artifacts.py",
+    "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check .",
+    "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check .",
+    "git diff --check"
+  ],
+  "related_task": "T109",
+  "risk_attestation": "LOW_RISK_IMPLEMENTATION_DEFECT"
+}

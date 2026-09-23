@@ -802,6 +802,11 @@ def _run_backtest(args: argparse.Namespace) -> int:
         # CLI cancel does not hold the cancel token the in-flight
         # orchestrator is polling; the next ``resume`` invocation
         # will observe the terminal record.
+        # A cancelled run publishes no manifest, no report and no
+        # simulation evidence, so those publication fields stay
+        # ``None`` exactly as the successful path leaves them when
+        # it fails closed; the source link the request carried is
+        # preserved so a reviewer can still trace the rerun chain.
         now = int(_now_unix_seconds())
         cancelled = RunRecord(
             version=record.version,
@@ -815,6 +820,7 @@ def _run_backtest(args: argparse.Namespace) -> int:
             report_path=None,
             source_manifest_path=record.source_manifest_path,
             source_checksum=record.source_checksum,
+            simulation_evidence_path=None,
             created_at_unix_seconds=record.created_at_unix_seconds,
             updated_at_unix_seconds=now,
             terminal_at_unix_seconds=now,
