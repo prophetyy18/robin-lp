@@ -91,5 +91,7 @@ Write only the exact `.workflow/amendment-review-result.json` handoff path suppl
 the Manager, validated against `todo/schemas/amendment-review-result.schema.json`. Any
 other change invalidates the review. Read the matching schema before writing. A `PASS`
 must carry empty `unknowns`: if something is unresolved, say so in the result rather
-than passing over it. Use `FAIL` for an actionable defect and `BLOCKED` only for an
-external or Owner-controlled blocker.
+than passing over it. It must also carry empty `required_changes`; do not put an
+unmet review obligation only in `summary`. Uncertainty unrelated to this exact
+amendment is not a blocker of its verdict. Use `FAIL` for an actionable defect
+and `BLOCKED` only for an external or Owner-controlled blocker.

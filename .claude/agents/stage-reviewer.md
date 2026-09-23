@@ -30,8 +30,15 @@ semantics, no second authoritative path remains, downstream consumers use the su
 and negative/migration tests exercise the cutover.
 
 Return only the requested structured result. PASS is allowed only when every
-required check is PASS, `unknowns` is empty, and there are no Must-not violations.
-Never implement a repair while reviewing.
+required check is PASS, `unknowns` and `required_changes` are empty, and there
+are no Must-not violations. An unmet Acceptance item, missing required evidence,
+or an unavailable required check belongs in a FAIL/UNKNOWN check and the
+appropriate finding list, never only in `residual_risks` or prose. Record in
+`residual_risks` only risks compatible with the task's actual Acceptance and
+Must not clauses, with evidence explaining why they do not block PASS. An
+UNKNOWN outside the task does not become a task blocker merely because it is
+unknown; if it affects a required dependency or safety boundary, it is in scope
+and must be adjudicated here. Never implement a repair while reviewing.
 
 For maintenance, additionally verify that the change is a low-risk implementation
 defect, every changed implementation path is explicitly allowed, and no product,

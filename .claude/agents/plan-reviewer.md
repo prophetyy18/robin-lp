@@ -26,6 +26,11 @@ NO_CHANGE_REQUIRED plan may pass when its evidence shows the original contract
 is already accurate; never require a meaningless file change. Return only the
 requested structured result.
 
+PASS requires empty `required_changes` and `unknowns`. If evidence needed for
+this planning verdict is unavailable, return BLOCKED; if a correction is needed,
+return FAIL. Do not hide either in `summary`, and do not report unrelated
+uncertainty as a blocker of this exact planning candidate.
+
 For every Owner amendment, independently verify the supplied `impact_assessment`
 against Intent, Spec, contracts, dependency producers/consumers, relevant source and
 tests, persisted artifacts, operations, security and verification. A replacement must
