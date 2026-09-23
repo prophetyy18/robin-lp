@@ -54,8 +54,8 @@ Canonical ownership is:
   conversation text, self-review, skipped evidence, or a completion claim are not
   approval evidence. Handoffs bind the contract, base commit, candidate commit,
   and structured report. A repaired candidate requires a fresh independent review.
-- Amendments preserve status, attempts, candidate/approval commits, evidence, and
-  review history. Approved work is retired only through the annotation-only
+- Amendments preserve the recorded state (`lifecycle`/`claimed`), attempts,
+  candidate/approval commits, evidence, and review history. Approved work is retired only through the annotation-only
   `SUPERSEDE` route; its historical contract and evidence are never rewritten.
 - Work that will not land is closed with the Owner-directed `abandon-task` or
   `abandon-maintenance` route. It lands nothing, keeps the branch, worktree and

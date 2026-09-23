@@ -63,8 +63,8 @@ is still legible to a later reader.
   `.github/` are the working surface of an ordinary development task, and the dependency
   manifests are outside every amendment layer and the maintenance lane; none of the three
   is yours.
-- Change anything about a task that already exists: not its status, attempt, commits,
-  evidence pointers, review records, dependencies, phase or contract path. Adding a
+- Change anything about a task that already exists: not its recorded state, attempt,
+  commits, evidence pointers, review records, dependencies, phase or contract path. Adding a
   new task and raising the two revisions is the whole of your config authority.
 - Weaken a gate. Removing a `Must not` clause, relaxing an acceptance criterion,
   dropping a test assertion, or softening a safety or risk rule is never a goal

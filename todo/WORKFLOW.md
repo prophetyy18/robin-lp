@@ -43,53 +43,61 @@ workflow state.
 
 Every transition writes its evidence — the review, triage report, owner decision,
 planner or developer handoff, or abandonment record — in the *same commit* as the
-status it explains. So the two must agree, and the controller checks that they do:
-`derive_status` reconstructs a task's status from the committed artifacts alone,
+state it explains. So the two must agree, and the controller checks that they do:
+`derive_status` reconstructs a task's state from the committed artifacts alone,
 and
 
-- `validate` refuses a repository where a recorded status has no artifact behind
-  it, because such a value did not come from a transition — hand-editing
-  `todo/config.yaml` is how six tasks were once added with no author role and no
-  review — and running the workflow from a state nothing can explain is what must
-  not happen;
+- `validate` refuses a task whose stored facts add up to no state at all — a
+  lifecycle and artifacts that contradict each other — because such a record did
+  not come from a transition, and hand-editing `todo/config.yaml` is how six tasks
+  were once added with no author role and no review. Running the workflow from a
+  state nothing can explain is what must not happen;
 - `status` reports every disagreement under `status_conflicts`, so an operator
-  sees it while inspecting rather than when blocked.
+  sees it while inspecting rather than when blocked. A revision that still carries
+  the retired composite is judged there too: the recorded value must be one the
+  facts admit.
 
-Three values are exempt, and only these: `PLANNED`, `READY` and `IN_DEVELOPMENT`.
-No committed artifact carries the Manager's selection, so the control plane is
-allowed to decide them — though which of the three is admissible still depends on
-whether an attempt has been started. The exemption is bounded and measured: over
-all 280 revisions of `todo/config.yaml` (18,493 task-revisions, the whole history
-rather than a sample) the derivation reproduces every recorded value except one,
-and that one is a pre-2026-09-15 semantics difference that must not be rewritten.
+`PLANNED`, `READY` and `IN_DEVELOPMENT` are the states no committed artifact can
+distinguish by itself, because they differ only by the Manager's selection and by
+whether an attempt is running — and `claimed` now carries the first of those
+facts, so only the last remains. The whole history is the evidence, not a sample:
+over all 281 revisions of `todo/config.yaml` (18,580 task-revisions) the
+derivation reproduces every recorded value except one, and that one is a
+pre-2026-09-15 semantics difference that must not be rewritten.
 `tests/test_workflow_state_derivation.py` holds the walk and the named exception.
 
 ### What a task record actually says
 
-Each task now carries the two facts the composite status was hiding, so that no
-reader has to decode an enum to find them:
+Each task carries the two facts the composite status was hiding, so that no reader
+has to decode an enum to find them:
 
 - `lifecycle` — `OPEN`, `DELIVERED` or `ABANDONED`: the task's own state;
 - `claimed` — whether the task holds the single-active-work lane.
 
-`status` is the projection of those two plus the committed artifacts:
-`admitted_statuses` in `tools/workflow/core.py` is that projection, and it is the
-only place the mapping lives. `LIFECYCLE_OF` decomposes a status back into the two
-facts, and `_set_state` writes all three together so they cannot drift.
+The composite itself is retired: `status` is neither written nor stored any more,
+and a reader that needs a single name projects one from those two facts and the
+committed artifacts. `admitted_statuses` in `tools/workflow/core.py` is that
+projection, and it is the only place the mapping lives; `project_status` turns it
+into a name for a message or a report, and `LIFECYCLE_OF` turns a status back into
+the two facts, which is how the historical revisions are read.
 
-Two properties are enforced rather than assumed. A config whose `status`,
-`lifecycle` and `claimed` do not describe the same task is refused, because
-storing one fact twice is only safe while a disagreement is impossible. And a
-`lifecycle` is not self-certifying: `DELIVERED` is admitted only when
-`approved_commit` and the reviewer's verdict are present, and `ABANDONED` only
-when the Owner's record is, so setting a field by hand can never declare work
-delivered.
+Routing reads the facts, never the field: every `prepare-*` / `finish-*` guard
+asks whether the state it requires is one the facts admit, so editing a field by
+hand cannot move a command.
 
-Exactly one status remains genuinely undetermined by the artifacts: a claimed task
+Two properties are enforced rather than assumed. Where a revision still stores the
+composite it and the facts must describe the same task, because storing one fact
+twice is only safe while a disagreement is impossible. And a `lifecycle` is not
+self-certifying: `DELIVERED` is admitted only when `approved_commit` and the
+reviewer's verdict are present, and `ABANDONED` only when the Owner's record is,
+so setting a field by hand can never declare work delivered.
+
+Exactly one state remains genuinely undetermined by the artifacts: a claimed task
 that has produced nothing is either sealed for review or still being worked on,
-and *which* is a session fact no committed artifact records. Nothing in the
-workflow needs the difference — the controller knows whether an attempt is running
-from its own runtime record — so the field does not pretend to know.
+and *which* is a session fact no committed artifact records. The controller reads
+its own runtime record; a reader that has none reads the config's declaration of
+its active task, which is a statement about that very task because only the active
+task may hold the lane.
 
 ## Commands
 
@@ -301,7 +309,8 @@ python -m tools.workflow prepare-amendment \
 
 `SUPERSEDE` targets `APPROVED` tasks and may change exactly one config field —
 `superseded_by`, which must name an existing task. It may touch no contract,
-dependency, document or approval evidence: `status`, `attempt`,
+dependency, document or approval evidence: the recorded state (`lifecycle` and
+`claimed`, or the retired `status` where a revision still carries one), `attempt`,
 every commit SHA, the evidence pointer and the review record stay byte-identical,
 so the approval still describes exactly what was reviewed and the retirement is
 an annotation recorded on top of it. A successor declares `replaces`, depends on
@@ -338,8 +347,9 @@ by any agent's convenience. Two obligations apply to such a change:
 - **Keep derived state and evidence distinct.** Ownership maps, traceability tables
   and phase summaries are derived: they must agree with `todo/config.yaml` and the
   task contracts, and they may move when that authority moves. Approval evidence —
-  contract text, `status`, `attempt`, commit identities, evidence pointers, review
-  records — is immutable, and no rule may require it to move. A rule that makes a
+  contract text, the recorded state (`lifecycle`/`claimed`), `attempt`, commit
+  identities, evidence pointers, review records — is immutable, and no rule may
+  require it to move. A rule that makes a
   derived document follow an evidence field, or the reverse, has confused the two.
 
 #### The PROPHET layer: goals, plan structure and collateral

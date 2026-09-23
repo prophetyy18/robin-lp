@@ -43,20 +43,37 @@ def _impact_assessment() -> dict[str, str]:
     }
 
 
-def _decompose(status: str) -> dict[str, object]:
-    """The lifecycle and claim that belong with a status, from the one table."""
-    lifecycle, claimed = LIFECYCLE_OF[status]
-    return {"status": status, "lifecycle": lifecycle, "claimed": claimed}
+def _decompose(state: str) -> dict[str, object]:
+    """The two facts that carry a state, from the controller's one table.
+
+    Fixtures are written the way the controller writes a revision now. A fixture
+    that still carried the retired composite would exercise a shape the workflow
+    no longer produces -- and would have hidden the readers that kept asking for
+    it, which is exactly how three of them were found.
+    """
+
+    lifecycle, claimed = LIFECYCLE_OF[state]
+    return {"lifecycle": lifecycle, "claimed": claimed}
 
 
-def _set_task_state(config: dict[str, Any], task_id: str, status: str, **fields: object) -> None:
+def _set_task_state(config: dict[str, Any], task_id: str, state: str, **fields: object) -> None:
     """Move a task the way the controller would, decomposition included.
 
-    Tests that hand-edit a status now have to hand-edit the two facts it is built
+    Tests that hand-edit a state have to hand-edit the two facts it is built
     from, or `validate_config` refuses the config -- which is the point of the
     decomposition, and is asserted on its own elsewhere.
     """
-    config["tasks"][task_id].update(_decompose(status), **fields)
+    config["tasks"][task_id].update(_decompose(state), **fields)
+
+
+def _set_legacy_state(config: dict[str, Any], task_id: str, status: str, **fields: object) -> None:
+    """Move a task the way the controller did before the composite was retired.
+
+    A revision that still carries `status` is supported and checked -- every
+    revision in Git is one -- so the tests that are *about* that field write it,
+    and the tests that are about the current shape leave it out.
+    """
+    config["tasks"][task_id].update(_decompose(status), status=status, **fields)
 
 
 def _minimal_config(baseline: str) -> dict[str, object]:
@@ -390,7 +407,9 @@ def test_owner_amendment_updates_planned_contract_without_activating_task(tmp_pa
         encoding="utf-8"
     )
     config = manager.load_config()
-    assert config["tasks"]["T001"]["status"] == "PLANNED"
+    assert (config["tasks"]["T001"]["lifecycle"], config["tasks"]["T001"]["claimed"]) == (
+        LIFECYCLE_OF["PLANNED"]
+    )
     assert config["tasks"]["T001"]["attempt"] == 0
     assert config["active_task"] == "T000"
     # A closed change keeps its record: the ID stays consumed, so the next
@@ -459,7 +478,7 @@ def test_supersede_amendment_retires_an_approved_task(tmp_path: Path) -> None:
     assert after["superseded_by"] == "T001"
     # Retirement is an annotation on approved work: the approval evidence stays
     # byte-identical so the audit record still describes what was reviewed.
-    assert after["status"] == "APPROVED"
+    assert after["lifecycle"] == "DELIVERED"
     assert after["attempt"] == before["attempt"]
     assert after["approved_commit"] == before["approved_commit"]
     assert after["base_commit"] == before["base_commit"]
@@ -1809,7 +1828,7 @@ def test_prophet_change_creates_a_task_and_passes_review(tmp_path: Path) -> None
     state, _ = manager.finish_amendment_review("A0001")
     assert state == "APPROVED"
     added = manager.load_config()["tasks"]["T002"]
-    assert added["status"] == "PLANNED"
+    assert (added["lifecycle"], added["claimed"]) == LIFECYCLE_OF["PLANNED"]
     assert added["attempt"] == 0
 
 
@@ -2165,9 +2184,10 @@ def test_validate_refuses_a_status_no_artifact_supports(tmp_path: Path) -> None:
 
     config = manager.load_config()
     # Flip an approved task back to unstarted, decomposition and all, so the
-    # config is internally consistent and only the artifacts disagree. That is
-    # the shape a hand edit takes once the decomposition exists.
-    _set_task_state(config, "T000", "PLANNED")
+    # config is internally consistent and only the artifacts disagree. The
+    # composite is written too: this test is about a *recorded* status the
+    # artifacts do not support, which is the shape every revision in Git has.
+    _set_legacy_state(config, "T000", "PLANNED")
     _write_json(repo / "todo" / "config.yaml", config)
 
     # `status` reports it so an operator sees it while inspecting...
@@ -2257,10 +2277,11 @@ def test_validate_accepts_what_only_the_control_plane_can_decide(tmp_path: Path)
     assert conflicts("IN_DEVELOPMENT", 3) == []
     assert conflicts("BLOCKED", 3) != []
 
-    # A claimed task may not be recorded as unselected, and the reverse: the
-    # composite status and the facts behind it must describe the same task.
+    # A claimed task may not be recorded as unselected, and the reverse: where a
+    # revision still carries the composite it and the facts behind it must
+    # describe the same task.
     config = manager.load_config()
-    _set_task_state(config, "T001", "READY")
+    _set_legacy_state(config, "T001", "READY")
     config["tasks"]["T001"]["claimed"] = False  # now lifecycle/claimed disagree
     with pytest.raises(WorkflowError, match="decomposes READY as"):
         manager.validate_config(config)
@@ -2390,7 +2411,7 @@ def test_discard_attempt_refuses_a_record_its_artifacts_do_not_support(tmp_path:
     manager.prepare_develop("T001")
     _lose_the_worktree(manager, "T001")
     config = manager.load_config()
-    _set_task_state(config, "T001", "CHANGES_REQUESTED")
+    _set_legacy_state(config, "T001", "CHANGES_REQUESTED")
     config["workflow_state"] = "CHANGES_REQUESTED"
     _write_json(repo / "todo" / "config.yaml", config)
     _git(repo, "add", "todo/config.yaml")
@@ -2404,24 +2425,24 @@ def test_discard_attempt_refuses_a_record_its_artifacts_do_not_support(tmp_path:
         manager.validate_repository()
 
 
-def test_a_contradictory_config_is_refused_before_any_guard_runs(tmp_path: Path) -> None:
-    """The three fields must describe one task, and reading is where that holds.
+def test_a_hand_edited_lane_claim_cannot_move_a_guard(tmp_path: Path) -> None:
+    """Routing and reporting both read the facts, so editing one changes both.
 
-    A guard derives its answer from the decomposition and the artifacts, so it
-    can only be reached by a record whose status and decomposition already
-    agree: the disagreement is refused while the config is loaded, which is why
-    `prepare-develop` never gets as far as its own precondition.
+    The lane claim is the fact that separates a planned task from a selected
+    one. Dropping it by hand is not a state the workflow wrote, and the guard
+    answers what the facts now say -- which is the whole reason routing stopped
+    reading the field the claim used to be projected into.
     """
     repo, _ = _make_repo(tmp_path)
     manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
     config = manager.load_config()
+    assert manager.status()["task_status"] == "READY"
     config["tasks"]["T001"]["claimed"] = False  # the decomposition only, by hand
     _write_json(repo / "todo" / "config.yaml", config)
     _git(repo, "add", "todo/config.yaml")
     _git(repo, "commit", "-m", "hand-edit the lane claim under READY")
 
-    # Both a command and a plain read refuse the same contradiction.
-    with pytest.raises(WorkflowError, match="decomposes READY"):
+    with pytest.raises(WorkflowError, match="develop requires"):
         manager.prepare_develop("T001")
-    with pytest.raises(WorkflowError, match="decomposes READY"):
-        manager.status()
+    # The projection follows the facts as well: nobody has selected T001 now.
+    assert manager.status()["task_status"] == "PLANNED"

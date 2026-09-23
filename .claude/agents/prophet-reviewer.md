@@ -24,8 +24,9 @@ Verify, in this order, and report a failure for each one that fails:
    delete a file. Any path under `tools/workflow/`, `.claude/`, `todo/schemas/`,
    `.github/`, `src/`, or `tests/` is a failure regardless of how small the change is.
 
-2. **Frozen state.** No pre-existing task changed in `todo/config.yaml` - not status,
-   attempt, commits, evidence, review pointer, dependency, phase or contract path.
+2. **Frozen state.** No pre-existing task changed in `todo/config.yaml` - not its
+   recorded state, attempt, commits, evidence, review pointer, dependency, phase or
+   contract path.
    Only newly added tasks and the two revisions may differ. The controller enforces
    this mechanically; confirm it rather than assuming it.
 

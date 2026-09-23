@@ -159,11 +159,11 @@ lane, and is refused for `APPROVED` work, whose only retirement route remains th
 annotation-only `SUPERSEDE`. Every non-terminal status therefore has an exit that does
 not depend on the blocked actor acting.
 
-Each task also records the two facts the status was hiding: `lifecycle`
+Each task records the two facts the status was hiding: `lifecycle`
 (`OPEN`/`DELIVERED`/`ABANDONED`) and `claimed` (whether it holds the single-active-work
-lane). The status is their projection together with the committed artifacts, and a
-config whose three values disagree is refused. See `todo/WORKFLOW.md` for the projection
-and the one case the artifacts cannot decide.
+lane). The composite status is retired — nothing writes or stores it — and a reader
+projects one from those facts plus the committed artifacts. See `todo/WORKFLOW.md` for
+the projection and the one case the artifacts cannot decide.
 
 After an approved task, the Manager explicitly chooses one dependency-complete
 `PLANNED` task and runs `ready <task>`. The controller never guesses among
@@ -185,8 +185,9 @@ obligation to a contract whose approval would then describe something else.
 
 A `SUPERSEDE`-layer amendment retires work that is already `APPROVED` instead of
 planning work that is not. It records the successor in the target's
-`superseded_by` field and may change nothing else — status, attempts, commits,
-evidence pointers and review records stay byte-identical, so an approval keeps
+`superseded_by` field and may change nothing else — the recorded state
+(`lifecycle`/`claimed`, or the retired `status` where a revision still carries one),
+attempts, commits, evidence pointers and review records stay byte-identical, so an approval keeps
 describing the exact candidate it reviewed. Retirement is therefore an
 annotation on the history, not a rewrite of it, and "which approved work is
 still live" is the set of `APPROVED` tasks whose `superseded_by` is null.

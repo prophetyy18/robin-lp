@@ -475,7 +475,10 @@ def resolve_architecture_section22(
                     )
                 )
                 continue
-            status = record.get("status")
+            # A delivered task is one whose lifecycle says so: the composite the
+            # config used to store beside those facts is retired, and reading the
+            # missing field here would silently skip the module checks below.
+            delivered = record.get("lifecycle") == "DELIVERED"
             superseded_by = record.get("superseded_by")
             successor = superseded_by or replaced_by.get(task_id)
             successor_named = bool(successor) and f"superseded by {successor}" in task_cell
@@ -498,7 +501,7 @@ def resolve_architecture_section22(
                     )
                 )
                 continue
-            check_modules = status == "APPROVED" or successor_named
+            check_modules = delivered or successor_named
             if not check_modules:
                 continue
             module_tokens = _module_tokens_in_cell(module_cell)

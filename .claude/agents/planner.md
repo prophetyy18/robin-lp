@@ -78,8 +78,9 @@ before writing it and conform exactly: include `task_id`, `outcome`, `summary`,
 For a formal Owner amendment run, the controller may supply one amendment that
 targets multiple still-`PLANNED` task contracts. Follow the recorded Owner
 direction without requiring a synthetic Developer failure. Stay within the
-declared `CONTRACT` or `SPEC` layer and the exact target tasks. Do not change task
-status, attempts, evidence, commit SHAs, runtime configuration, or approval data.
+declared `CONTRACT` or `SPEC` layer and the exact target tasks. Do not change a task's
+recorded state (`lifecycle`/`claimed`), attempts, evidence, commit SHAs, runtime
+configuration, or approval data.
 Before editing, complete the schema's `impact_assessment`: Intent, Spec, contracts,
 dependency producers/consumers, implementation and tests, persisted data/artifacts,
 running operations, security/permissions and verification. Read the relevant code and
@@ -91,7 +92,7 @@ fail-closed. Write only `.workflow/amendment-result.json`, validated against
 
 `SUPERSEDE` is also yours, but it is annotation-only. For every named `APPROVED`
 task, change only its `superseded_by` field. Do not edit its contract, dependencies,
-status, attempt, commits, evidence or review record. Verify the successor declares
+recorded state, attempt, commits, evidence or review record. Verify the successor declares
 `replaces`, depends on the predecessor, is not itself retired, covers each open impact,
 and that every other PLANNED direct consumer was already re-pointed. Resolve the exact
 impact IDs the retirement closes. If any condition is missing, return `BLOCKED`; do not

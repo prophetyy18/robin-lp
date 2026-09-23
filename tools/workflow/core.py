@@ -2232,11 +2232,11 @@ class WorkflowManager:
         required_status = "APPROVED" if layer == "SUPERSEDE" else "PLANNED"
         if layer != "PROPHET":
             for task_id in normalized:
-                task = self._task(config, task_id)
                 if required_status not in self._admitted_states(config, task_id, self.repo):
                     raise WorkflowError(
                         f"{layer} amendment targets must be {required_status}, "
-                        f"found {task_id}={task['status']}"
+                        f"found {task_id}="
+                        f"{self._projected_status(config, task_id, self.repo) or 'no status'}"
                     )
         if not summary.strip() or not owner_direction.strip():
             raise WorkflowError("amendment summary and owner direction must be non-empty")
@@ -2482,11 +2482,15 @@ class WorkflowManager:
                     f"SUPERSEDE successor {successor_id} must document {task_id} in its "
                     "Replacement and migration section"
                 )
+            # A planned consumer is one whose lifecycle is open and whose lane is
+            # unclaimed -- the same two facts the controller routes on, since the
+            # composite that used to answer this is no longer stored.
             stranded = [
                 consumer_id
                 for consumer_id, consumer in candidate_config["tasks"].items()
                 if consumer_id != successor_id
-                and consumer.get("status") == "PLANNED"
+                and consumer.get("lifecycle") == OPEN
+                and consumer.get("claimed") is False
                 and task_id in consumer.get("depends_on", [])
             ]
             if stranded:
@@ -2943,13 +2947,18 @@ class WorkflowManager:
             encoding="utf-8",
         )
         previous_active = config.get("active_task")
+        # The keeper's own declaration, read before this command overwrites it:
+        # only the active task may hold the lane, so it was a statement about the
+        # keeper, and nothing in this command changes the keeper.
+        previous_state = config.get("workflow_state")
         self._set_state(config, task_id, "ABANDONED", root=config_root)
         if isinstance(previous_active, str) and previous_active != task_id:
             # Closing a resting task must not move the active pointer onto it.
             keeper = config["tasks"][previous_active]
             config["active_task"] = previous_active
             config["active_phase"] = keeper["phase"]
-            config["workflow_state"] = keeper["status"]
+            if previous_state in STATES:
+                config["workflow_state"] = previous_state
         _write_json(self.config_path, config)
         _git(self.repo, "add", str(relative_record), "todo/config.yaml")
         _git(self.repo, "commit", "-m", f"chore(workflow): abandon {task_id}")
