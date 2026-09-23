@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -2000,3 +2001,121 @@ def test_abandon_maintenance_requires_a_reason_and_refuses_closed_work(
         manager.abandon_maintenance("M0001", reason="again")
     with pytest.raises(WorkflowError, match="unknown maintenance repair"):
         manager.abandon_maintenance("M0009", reason="does not exist")
+
+
+# --------------------------------------------------------------------------
+# A lost attempt: a runtime record whose worktree no longer exists
+# --------------------------------------------------------------------------
+
+
+def _lose_the_worktree(manager: WorkflowManager, task_id: str) -> Path:
+    """Remove a development worktree the way an incident would, out of band."""
+    attempt = manager.load_attempt(task_id)
+    assert attempt is not None
+    worktree = Path(attempt.development_worktree)
+    shutil.rmtree(worktree)
+    _git(manager.repo, "worktree", "prune")
+    return worktree
+
+
+def test_discard_attempt_frees_a_task_whose_worktree_vanished(tmp_path: Path) -> None:
+    """A record outliving its worktree used to block the task forever.
+
+    ``prepare_develop`` refused with "runtime record already exists", and every
+    other command requires a different state or a worktree that is no longer
+    there, so the only escape was deleting a file under ``.git`` by hand. The
+    task could not be developed, reviewed, triaged or planned, and because a
+    started task holds the single-active-work lane by design, nothing else in
+    the plan could move either.
+    """
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    manager.prepare_develop("T001")
+    worktree = _lose_the_worktree(manager, "T001")
+
+    # The failure now names the situation and the exit instead of reporting a
+    # record as if the attempt were still live.
+    with pytest.raises(WorkflowError, match="no longer exists, so no command can use it"):
+        manager.prepare_develop("T001")
+    assert manager.status()["orphaned_attempts"] == [
+        {
+            "task_id": "T001",
+            "phase": "P00",
+            "attempt": 1,
+            "base_commit": manager.load_attempt("T001").base_commit,  # type: ignore[union-attr]
+            "candidate_commit": None,
+            "branch": "workflow/t001-attempt-001",
+            "development_worktree": str(worktree),
+            "continuation_count": 0,
+        }
+    ]
+
+    result = manager.discard_attempt("T001", reason="the worktree was removed by hand")
+
+    assert result["status"] == "READY"
+    assert result["discarded_attempt"] == 1
+    # The consumed attempt number is never handed out again.
+    assert result["next_attempt"] == 2
+    record = (repo / "todo" / "evidence" / "P00" / "T001" / "attempt-001-lost.json").read_text(
+        encoding="utf-8"
+    )
+    assert "the worktree was removed by hand" in record
+    assert "workflow/t001-attempt-001" in record
+
+    # The task can be worked on again, on the next attempt number.
+    assert manager.status()["orphaned_attempts"] == []
+    assert manager.prepare_develop("T001")["attempt"] == 2
+
+
+def test_discard_attempt_refuses_a_live_attempt(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    prepared = manager.prepare_develop("T001")
+
+    with pytest.raises(WorkflowError, match="is still live at"):
+        manager.discard_attempt("T001", reason="not actually lost")
+    # The live attempt is untouched.
+    assert manager.load_attempt("T001") is not None
+    assert Path(str(prepared["development_worktree"])).is_dir()
+
+
+def test_discard_attempt_requires_a_reason_and_a_record(tmp_path: Path) -> None:
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    with pytest.raises(WorkflowError, match="no recorded attempt to discard"):
+        manager.discard_attempt("T001", reason="nothing to discard")
+
+    manager.prepare_develop("T001")
+    _lose_the_worktree(manager, "T001")
+    with pytest.raises(WorkflowError, match="non-empty reason"):
+        manager.discard_attempt("T001", reason="   ")
+    # Still blocked: a refused discard must not half-apply.
+    assert manager.load_attempt("T001") is not None
+
+
+def test_discard_attempt_redirects_instead_of_trapping(tmp_path: Path) -> None:
+    """A state the recovery cannot serve must name a route that can.
+
+    A task branch reaches the main checkout only through an approval, so a lost
+    attempt leaves the main checkout in PLANNED or READY. Any other recorded
+    state means something outside this path moved it, and the recovery refuses
+    -- but ``abandon-task`` is reachable from every state, so the refusal always
+    has somewhere to go.
+    """
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    manager.prepare_develop("T001")
+    _lose_the_worktree(manager, "T001")
+    config = manager.load_config()
+    config["tasks"]["T001"]["status"] = "CHANGES_REQUESTED"
+    config["workflow_state"] = "CHANGES_REQUESTED"
+    _write_json(repo / "todo" / "config.yaml", config)
+    _git(repo, "add", "todo/config.yaml")
+    _git(repo, "commit", "-m", "move the task out of the recovery's reach")
+
+    with pytest.raises(WorkflowError, match="close the work item with abandon-task instead"):
+        manager.discard_attempt("T001", reason="out of reach")
+
+    # The named route really is available from here.
+    assert manager.abandon_task("T001", reason="the attempt is gone")["status"] == "ABANDONED"
+    assert manager.status()["orphaned_attempts"] == []

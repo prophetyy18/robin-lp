@@ -188,6 +188,38 @@ reached when the Developer reports that the repair does not fit the lane, and
 the documented route is then a new numbered task — outside the lane entirely.
 Nothing in the lane could close it, so `abandon-maintenance` is that exit.
 
+#### A lost attempt
+
+The other Owner exit repairs the controller's own records rather than the work
+item. An attempt whose development worktree no longer exists cannot be
+continued, finished, reviewed or triaged, and `prepare-develop` refuses to start
+a new one while its runtime record is present — so the task cannot be worked on
+at all, and every other route needs a worktree that is gone. A worktree can
+disappear outside the controller, and records also survive from earlier
+controller versions that did not clean up on approval:
+
+```bash
+python -m tools.workflow discard-attempt T015 \
+  --reason "<how the worktree was lost>"
+```
+
+The record is written to `todo/evidence/<phase>/<task>/attempt-NNN-lost.json`
+before the runtime record is deleted, because that file was the only place the
+attempt's branch and commits were named; the protected snapshot is deliberately
+kept, since the byte-exact-rebuild recovery reads it. The consumed attempt
+number is never reused — the config is raised to at least the lost attempt, so
+the next `prepare-develop` opens the one after it.
+
+It moves no status. A task branch reaches the main checkout only through an
+approval, so while an attempt is in flight the main checkout still shows
+`PLANNED` or `READY`, and recovery needs no transition from either. A task in
+any other state is refused and redirected to `abandon-task`, which is reachable
+from every state — the refusal names a route that works rather than leaving the
+operator with a message and no move.
+
+`status` reports every such record under `orphaned_attempts`, so a lost attempt
+is visible before anyone tries to start the task it blocks.
+
 The graph these rules describe is checked by
 `tests/test_workflow_state_graph.py`, which asserts that every state is
 reachable, that every non-terminal state can still reach a terminal state, that
@@ -513,6 +545,9 @@ the exact implementation candidate that the Reviewer inspected.
 - `CHANGES_REQUESTED`: preserve the branch; `retry` starts a fresh Developer.
 - no route forward: close the work item with `abandon-task` or
   `abandon-maintenance` rather than waiting for progress that cannot happen.
+- a worktree that cannot be reached or completed: `status` lists it under
+  `orphaned_attempts`; `discard-attempt` records the loss and lets the task
+  start again.
 - `CONTINUATION_REQUIRED`: keep `IN_DEVELOPMENT`, preserve the same attempt and
   uncommitted worktree, and start one fresh Developer through the continuation
   gate. It is neither a task-state transition nor exception triage.

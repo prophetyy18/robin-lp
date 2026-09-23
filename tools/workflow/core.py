@@ -1089,6 +1089,10 @@ class WorkflowManager:
             "active_maintenance": active_maintenance,
             "active_amendments": active_amendments,
             "open_impacts": open_impacts,
+            # Reported rather than left to be discovered: a lost attempt blocks
+            # `prepare-develop` on the task it belongs to, and nothing else in
+            # the workflow surfaces that until someone tries to start it.
+            "orphaned_attempts": [record.to_dict() for record in self.orphaned_attempts()],
         }
 
     def validate_repository(self) -> None:
@@ -1493,8 +1497,20 @@ class WorkflowManager:
             if task["status"] != "READY":
                 raise WorkflowError(f"develop requires READY, found {task['status']}")
             self._check_dependencies(config, task_id)
-            if self.load_attempt(task_id) is not None:
-                raise WorkflowError(f"runtime record already exists for {task_id}")
+            retained = self.load_attempt(task_id)
+            if retained is not None:
+                worktree = Path(retained.development_worktree)
+                if worktree.is_dir():
+                    raise WorkflowError(f"runtime record already exists for {task_id}")
+                # A record whose worktree is gone cannot be continued, finished,
+                # reviewed or triaged. Saying only "a record exists" made this
+                # look like a live attempt and left the operator to discover by
+                # hand that no command would accept it.
+                raise WorkflowError(
+                    f"{task_id} has a retained attempt {retained.attempt} whose worktree "
+                    f"{worktree} no longer exists, so no command can use it; record it as "
+                    f"lost with 'discard-attempt {task_id} --reason ...' and start again"
+                )
             base = _sha(self.repo)
             attempt_number = int(task["attempt"]) + 1
             branch = f"workflow/{task_id.lower()}-attempt-{attempt_number:03d}"
@@ -2594,6 +2610,107 @@ class WorkflowManager:
             "task_id": task_id,
             "status": "ABANDONED",
             "record": str(relative_record),
+            "commit": _sha(self.repo),
+        }
+
+    def _attempt_records(self) -> list[AttemptRecord]:
+        if not self.runtime_dir.is_dir():
+            return []
+        return [
+            AttemptRecord.from_dict(_load_json(path))
+            for path in sorted(self.runtime_dir.glob("T[0-9][0-9][0-9].json"))
+        ]
+
+    def orphaned_attempts(self) -> list[AttemptRecord]:
+        """Runtime records whose worktree no longer exists.
+
+        Such a record is unusable. No command can continue, finish, review or
+        triage the attempt it describes, and ``prepare_develop`` refuses to start
+        a new one while it is present -- so the task cannot be worked on at all,
+        and deleting the file by hand is the only escape. The record outlives its
+        worktree when a worktree is removed outside the controller, and it also
+        survives from earlier controller versions that did not clean up on
+        approval: ``.git/robinhood-lp-workflow/T015.json`` is such a remnant.
+        """
+        return [
+            record
+            for record in self._attempt_records()
+            if not Path(record.development_worktree).is_dir()
+        ]
+
+    def discard_attempt(self, task_id: str, *, reason: str) -> dict[str, object]:
+        """Discard a lost attempt's bookkeeping so the task can be started again.
+
+        This repairs the controller's own records, not the work item. An attempt
+        whose worktree is gone cannot be continued, finished, reviewed or
+        triaged, so the only truthful options are to close the task or to declare
+        the attempt lost; ``abandon-task`` is the first and this is the second.
+
+        It does **not** move a status. A task branch reaches the main checkout
+        only through an approval, so while an attempt is in flight the main
+        checkout still shows ``PLANNED`` or ``READY`` -- and the recovery needs
+        no transition from either. A task in any other state is refused and
+        redirected to ``abandon-task``, which is reachable from every state, so
+        the refusal cannot become a trap.
+
+        The consumed attempt number is never reused: the config is raised to at
+        least the lost attempt, so the next ``prepare-develop`` opens the one
+        after it. The lost attempt is recorded under ``todo/evidence/`` first,
+        because the runtime record is the only place its branch and commits were
+        named, and it is about to be deleted.
+        """
+        self._ensure_clean_main()
+        if not reason.strip():
+            raise WorkflowError("discard-attempt requires a non-empty reason")
+        attempt = self.load_attempt(task_id)
+        if attempt is None:
+            raise WorkflowError(f"{task_id} has no recorded attempt to discard")
+        if Path(attempt.development_worktree).is_dir():
+            raise WorkflowError(
+                f"{task_id}'s attempt is still live at {attempt.development_worktree}; "
+                "use the normal develop, review or triage route"
+            )
+        config = self.load_config()
+        task = self._task(config, task_id)
+        status = task["status"]
+        if status not in {"PLANNED", "READY"}:
+            raise WorkflowError(
+                f"{task_id} is {status}, but a lost attempt only leaves the main checkout in "
+                "PLANNED or READY; close the work item with abandon-task instead"
+            )
+
+        relative = (
+            Path("todo")
+            / "evidence"
+            / str(task["phase"])
+            / task_id
+            / f"attempt-{attempt.attempt:03d}-lost.json"
+        )
+        checkpoint = self._continuation_path(task_id)
+        _write_json(
+            self.repo / relative,
+            {
+                "task_id": task_id,
+                "attempt": attempt.attempt,
+                "reason": reason.strip(),
+                "lost_record": attempt.to_dict(),
+                "continuation_checkpoint_existed": checkpoint.is_file(),
+                "protected_snapshot_kept": self._protected_snapshot_path(task_id).is_file(),
+            },
+        )
+        consumed = max(int(task["attempt"]), attempt.attempt)
+        config["tasks"][task_id]["attempt"] = consumed
+        _write_json(self.config_path, config)
+        _git(self.repo, "add", str(relative), "todo/config.yaml")
+        _git(self.repo, "commit", "-m", f"chore(workflow): discard the lost {task_id} attempt")
+        self._attempt_path(task_id).unlink(missing_ok=True)
+        checkpoint.unlink(missing_ok=True)
+        return {
+            "task_id": task_id,
+            "status": status,
+            "discarded_attempt": attempt.attempt,
+            "next_attempt": consumed + 1,
+            "record": str(relative),
             "commit": _sha(self.repo),
         }
 

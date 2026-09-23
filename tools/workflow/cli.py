@@ -97,6 +97,14 @@ def _parser() -> argparse.ArgumentParser:
     )
     abandon_task.add_argument("task_id")
     abandon_task.add_argument("--reason", required=True)
+    # The other Owner exit: repair the controller's own bookkeeping for an
+    # attempt whose worktree is gone, so the task can be started again.
+    discard_attempt = subparsers.add_parser(
+        "discard-attempt",
+        help="record a lost attempt as evidence so its task can be started again",
+    )
+    discard_attempt.add_argument("task_id")
+    discard_attempt.add_argument("--reason", required=True)
     abandon_maintenance = subparsers.add_parser(
         "abandon-maintenance",
         help="close a maintenance repair that will not land, keeping its record",
@@ -198,6 +206,8 @@ def main(argv: list[str] | None = None) -> None:
             output = manager.withdraw_amendment(args.amendment_id, reason=args.reason)
         elif args.command == "abandon-task":
             output = manager.abandon_task(args.task_id, reason=args.reason)
+        elif args.command == "discard-attempt":
+            output = manager.discard_attempt(args.task_id, reason=args.reason)
         elif args.command == "abandon-maintenance":
             output = manager.abandon_maintenance(args.maintenance_id, reason=args.reason)
         elif args.command == "amendment-status":

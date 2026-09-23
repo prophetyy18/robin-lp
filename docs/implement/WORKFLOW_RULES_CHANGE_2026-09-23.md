@@ -148,7 +148,35 @@ owner-decision、planner/developer evidence），返回该修订**蕴含**的状
 bootstrap 提交（`d697dd7`）。`test_history_records_in_development_exactly_once` 把这个 SHA
 钉住：若将来 controller 开始提交这个值，测试会直接说出来。
 
-## 7. 仍待实施
+## 7. 增量 1b 已落地：丢失的 attempt
+
+**实测发现**：`.git/robinhood-lp-workflow/` 下六条运行时记录的**工作树全部已消失**。
+A0022–A0026 是终态记录（按设计保留、不阻塞任何东西，无害）；`T015` 是唯一的任务车道记录，
+而它是**活的死胡同**：
+
+```
+load_attempt('T015')     -> True
+worktree 目录存在         -> False
+prepare_develop('T015')  -> "runtime record already exists"   （永久拒绝）
+```
+
+今天无害（T015 已 `APPROVED`），但若该任务处于 `PLANNED`/`READY`，它就再也无法开工；由于
+「已启动的任务占用唯一活动车道」是既定不变量，**整个计划都会停住**。`T015` 的记录来自旧版
+controller（现行 `_record_review_result` 在 APPROVED 时会删除记录），所以这类遗留物也包括
+历史版本残留。
+
+`discard-attempt <T> --reason "..."`：把损耗的 attempt 记为证据
+（`todo/evidence/<phase>/<T>/attempt-NNN-lost.json`），删除不可用的运行时记录，并把
+`attempt` 提升到至少等于丢失的那次，使**已消耗的编号永不复用**。`<T>-protected.json` 刻意
+保留——逐字节重建的恢复流程要读它。`status` 新增 `orphaned_attempts`，让这类记录在卡住任何
+人之前就可见。
+
+**它不改状态，因此不放宽状态表。** 任务分支只有经过批准才进入主检出，所以 attempt 在途时
+主检出只可能显示 `PLANNED` 或 `READY`，两者都不需要迁移边。其他状态一律拒绝并指向
+`abandon-task`（该路线在每个状态都可达）——拒绝是**改道而非陷阱**，这一点有测试锁死
+（`test_discard_attempt_redirects_instead_of_trapping` 在拒绝之后真的用 `abandon-task` 走通）。
+
+## 8. 仍待实施
 
 - **增量 3**：路由改用派生事实，`status` 仍存为兼容投影。
 - **增量 4**：新修订只存 `lifecycle`；`READY`/`IN_DEVELOPMENT` 改由显式的车道声明承载。
@@ -159,7 +187,7 @@ bootstrap 提交（`d697dd7`）。`test_history_records_in_development_exactly_o
 
 ---
 
-## 8. 验证
+## 9. 验证
 
 ```
 PYTHONPATH=src python -m pytest tests/test_workflow.py tests/test_workflow_state_graph.py \
@@ -177,11 +205,15 @@ Owner 出口、车道占用者可释放车道，以及**从 `.claude/agents/*.md
 任务比对推导值与记录值，并把唯一的例外钉成具名常量。同文件还单测了每条推导规则、构件累积时
 「最新事件胜出」的顺序，以及非法取值必须响亮失败而不是悄悄推出一个错值。
 
+`tests/test_workflow.py` 为丢失的 attempt 覆盖了四种情形：正常（丢弃后可开工、编号递增、
+证据落盘）、边界（工作树仍在时拒绝）、非法输入（空理由、无记录）、失败路径（状态不在恢复
+可达范围时改道到 `abandon-task`，并在同一测试里真的走通那条路）。
+
 **一处单测发现的真实缺陷**：初版 `derive_status` 不认识 planner 的 `NO_CHANGE_REQUIRED`
 outcome（现行 `finish_plan` 会把它推进到 `AWAITING_PLAN_REVIEW`），历史遍历直接把它暴露为
 `WorkflowError`。
 
-## 9. 与在途工作的关系
+## 10. 与在途工作的关系
 
 本次不触碰任何任务状态、不迁移任何任务、不改写任何历史提交。`todo/config.yaml` 中 T109 及其
 A0026 影响链（T073/T084/T087/T088/T096/T103/T107/T108/T110/T111 的 10 条开放 impact）与本次
