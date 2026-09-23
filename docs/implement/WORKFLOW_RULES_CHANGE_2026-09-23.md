@@ -6,7 +6,10 @@
   Agent 的权限有关**，要求把流程转成 graph 来校验
 - 变更类型：bootstrap act（`tools/`、`todo/schemas/` 之外的角色与层均无权修改）
 - 实现者：Owner 指定的会话；**不由 Manager 会话顺手完成**
-- 状态：**增量 1 已落地**（堵断头路）。增量 2–4（状态分解）尚未实施，见第 6 节
+- 状态：**增量 1、1b、2、3、4a 已落地**。增量 4b（守卫迁移）尚未实施，见第 10 节
+- 文档范围：本文档记录同日推进的多个增量。第 2–5 节是最初增量 1 的目标与边界（其中
+  「目标 4」「非目标」只对该增量成立），第 6–9 节按落地顺序记录后续增量，第 10 节是唯一
+  尚未实施的部分
 
 ---
 
@@ -258,10 +261,17 @@ attempt 是否在跑），所以字段不再假装知道。
 `todo/config.yaml` 的回填是 **174 行新增、0 行删除**（87 个任务 × 2 个字段），没有任何既有
 行被改写，`status` 的历史取值一个都没动。这是「历史不可改写」在字段级的一次执行。
 
-## 10. 仍待实施
+## 10. 仍待实施：增量 4b
 
-- **增量 3**：路由改用派生事实，`status` 仍存为兼容投影。
-- **增量 4**：新修订只存 `lifecycle`；`READY`/`IN_DEVELOPMENT` 改由显式的车道声明承载。
+- **守卫迁移**：`prepare-*` / `finish-*` 的判定改读 `lifecycle` / `claimed` 与已提交构件派生出
+  的状态；`status` 保留为兼容投影，新修订不再写它。
+- **判据**：golden 等价测试——对每一条 `prepare-*` / `finish-*` 的接受与拒绝，新判定必须与旧
+  判定逐例相同。这条判据在增量 3 就已经写明（第 8 节），当时缺的是它依赖的持久归属，而不是
+  判据本身。
+- 增量 3 曾把这一步写成「路由改用派生事实」却无法实施：`READY` / `IN_DEVELOPMENT` 在仓库里没有
+  任何持久归属，纯路由迁移是循环的（第 8 节）。**该归属已由增量 4a 的 `claimed` 补上**，所以
+  4b 现在可做；第 9 节末尾那处仍未定的情形（claimed 且尚无构件时无法区分「已封存待审」与
+  「仍在开发」）只影响显示，`continue_develop` 靠运行时记录判断，不阻塞 4b。
 
 三条状态枚举副本已消除两条：`test_progress.py` 改为**与控制器表断言相等**，`PLAN_STATES`
 不再是一份可漂移的手抄本。`tools.progress` **不**导入控制器——它是产品工具，保持独立，
@@ -275,8 +285,22 @@ attempt 是否在跑），所以字段不再假装知道。
 PYTHONPATH=src python -m pytest tests/test_workflow.py tests/test_workflow_state_graph.py \
   tests/test_workflow_state_derivation.py tests/test_progress.py tests/test_workflow_contracts.py
 python -m ruff format --check . && python -m ruff check .
-PYTHONPATH=src python -m mypy tools tests
+PYTHONPATH=src python -m mypy tools
 ```
+
+**实测**：129 个测试通过；`ruff check .` 通过；`mypy tools` 31 个源文件通过。`ruff format --check .`
+与 `mypy src tests` 在仓库级是红的，原因见下（两条都与本动件无关，且都早于本动件的任何提交）。
+
+- `ruff format --check .` 报 4 个文件：`src/robinhood_lp/__main__.py`（更早的 T069 候选引入）、
+  `src/robinhood_lp/backtest/engine.py`、`src/robinhood_lp/protocol/contracts.py`、
+  `tests/test_t109_acceptance.py`。后三个在父提交 `791fc4e` 上仍是格式化状态，由 T109 的候选
+  `c79e4c8` 引入并通过了评审：`review-004` 的 `ruff check`（lint）通过，但格式门禁只在报告中
+  把 `__main__.py:220` 记为既存项。
+- `mypy src tests` / `mypy tools tests` 报 `tests/_storage_t031_fixtures.py` 的 duplicate-module
+  错误：`tests/test_storage_block_headers.py:380` 写 `from tests._storage_t031_fixtures import ...`，
+  其余文件写 `from _storage_t031_fixtures import ...`，自 2026-09-17 的 T035 起存在。
+
+因此上面第三行**不能**照抄成 `mypy tools tests`：那一行今天不通过，且失败原因不属于本动件。
 
 `tests/test_workflow_state_graph.py` 把图校验固化：状态可达性、每非终态可达终态、每非终态有
 Owner 出口、车道占用者可释放车道，以及**从 `.claude/agents/*.md` 解析权限**后逐状态核对所需
@@ -304,3 +328,7 @@ outcome（现行 `finish_plan` 会把它推进到 `AWAITING_PLAN_REVIEW`），�
 本次不触碰任何任务状态、不迁移任何任务、不改写任何历史提交。`todo/config.yaml` 中 T109 及其
 A0026 影响链（T073/T084/T087/T088/T096/T103/T107/T108/T110/T111 的 10 条开放 impact）与本次
 变更完全不相交。
+
+唯一对 `todo/config.yaml` 的写入是增量 4a 的回填：87 个任务各新增 `lifecycle` / `claimed`
+两个字段（174 行新增、0 行删除），**没有任何 `status` 取值被改写**，T109 与 A0026 影响链的
+状态、attempt、候选/批准提交、依赖图均逐字节未变。
