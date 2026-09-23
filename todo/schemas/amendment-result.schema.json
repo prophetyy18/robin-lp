@@ -14,7 +14,7 @@
   ],
   "properties": {
     "amendment_id": {"type": "string", "pattern": "^A[0-9]{4}$"},
-    "outcome": {"enum": ["AMENDMENT_READY", "NO_CHANGE_REQUIRED", "BLOCKED"]},
+    "outcome": {"enum": ["AMENDMENT_READY", "NO_CHANGE_REQUIRED", "BLOCKED", "CONTINUATION_REQUIRED"]},
     "summary": {"type": "string"},
     "rationale": {"type": "string"},
     "unresolved_questions": {"type": "array", "items": {"type": "string"}},
@@ -102,6 +102,25 @@
         "type": "string",
         "pattern": "^A[0-9]{4}:T[0-9]{3}:[a-z0-9][a-z0-9-]*$"
       }
+    },
+    "continuation": {
+      "description": "Required only when outcome is CONTINUATION_REQUIRED; describes why the amendment work paused and what remains.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "completed_work", "remaining_work", "next_actions", "changed_paths"],
+      "properties": {
+        "reason": {"const": "TURN_BUDGET"},
+        "completed_work": {"type": "array", "items": {"type": "string"}},
+        "remaining_work": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "next_actions": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "changed_paths": {"type": "array", "items": {"type": "string"}}
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"outcome": {"const": "CONTINUATION_REQUIRED"}}},
+      "then": {"required": ["continuation"]}
+    }
+  ]
 }

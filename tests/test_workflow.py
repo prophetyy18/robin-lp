@@ -2695,3 +2695,155 @@ def test_governance_predicate_ordering(tmp_path: Path) -> None:
     # invariants are violated, which the assertion above prevents).
     assert allowed(".claude/agents/prophet.md", "M") is False
     assert allowed(".claude/agents/stage-reviewer.md", "M") is True
+
+
+# ---------------------------------------------------------------------------
+# X2 bootstrap: continue-* commands and CONTINUATION_REQUIRED schema support
+# ---------------------------------------------------------------------------
+
+
+def _prepare_amendment_in_planning(tmp_path: Path) -> tuple[WorkflowManager, str, Path]:
+    """Drive a PROPHET amendment to PLANNING status without writing a result."""
+    manager, worktree = _prepare_prophet_change(tmp_path)
+    return manager, "A0001", worktree
+
+
+def test_continue_amendment_without_flag_or_handoff_raises(tmp_path: Path) -> None:
+    """continue_amendment without --max-turns-exhausted and no handoff refuses."""
+    manager, amendment_id, worktree = _prepare_amendment_in_planning(tmp_path)
+    with pytest.raises(WorkflowError, match="CONTINUATION_REQUIRED handoff"):
+        manager.continue_amendment(amendment_id)
+
+
+def test_continue_amendment_with_max_turns_exhausted_returns_prompt(tmp_path: Path) -> None:
+    """continue_amendment --max-turns-exhausted returns a fresh prompt and bumps count."""
+    manager, amendment_id, worktree = _prepare_amendment_in_planning(tmp_path)
+    out = manager.continue_amendment(amendment_id, max_turns_exhausted=True)
+    assert out["continuation_count"] == 1
+    assert "agent" in out
+    assert amendment_id in out["amendment_id"]
+    assert "checkpoint" in out["prompt"].lower() or "worktree" in out["prompt"].lower()
+    # The worktree now carries an amendment-continuation.json handoff
+    assert (worktree / ".workflow" / "amendment-continuation.json").is_file()
+
+
+def test_continue_amendment_exceeds_limit(tmp_path: Path) -> None:
+    """A second continue beyond MAX_DEVELOPMENT_CONTINUATIONS is refused."""
+    manager, amendment_id, _ = _prepare_amendment_in_planning(tmp_path)
+    manager.continue_amendment(amendment_id, max_turns_exhausted=True)
+    with pytest.raises(WorkflowError, match="amendment continuation limit reached"):
+        manager.continue_amendment(amendment_id, max_turns_exhausted=True)
+
+
+def test_continue_task_review_refuses_without_flag_when_no_handoff(
+    tmp_path: Path,
+) -> None:
+    """continue_task_review needs the explicit flag when the reviewer wrote nothing."""
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    prepared = manager.prepare_develop("T001")
+    development = Path(str(prepared["development_worktree"]))
+    (development / "src" / "value.txt").write_text("candidate\n", encoding="utf-8")
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "CANDIDATE_READY",
+            "summary": "candidate ready",
+            "commands": [],
+            "residual_risks": [],
+        },
+    )
+    manager.finish_develop("T001")
+    manager.prepare_review("T001")
+    # Reviewer wrote nothing — review-result.json does not exist.
+    with pytest.raises(WorkflowError, match="--max-turns-exhausted"):
+        manager.continue_task_review("T001")
+
+
+def test_continue_maintenance_review_with_max_turns_exhausted(tmp_path: Path) -> None:
+    """continue_maintenance_review --max-turns-exhausted bumps the maintenance continuation count."""
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    prepared = manager.prepare_maintenance(
+        summary="continue-review test repair",
+        reason="x",
+        allowed_paths=["src/value.txt"],
+        verification_commands=["test -f src/value.txt"],
+        related_task="T000",
+    )
+    development = Path(str(prepared["development_worktree"]))
+    (development / "src" / "value.txt").write_text("repaired\n", encoding="utf-8")
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "M0001",
+            "outcome": "CANDIDATE_READY",
+            "summary": "candidate ready",
+            "commands": [],
+            "residual_risks": [],
+        },
+    )
+    manager.finish_maintenance_develop("M0001")
+    review = manager.prepare_maintenance_review("M0001")
+    Path(str(review["review_worktree"]))  # ensure review worktree exists
+    out = manager.continue_maintenance_review("M0001", max_turns_exhausted=True)
+    assert out["continuation_count"] == 1
+    assert out["maintenance_id"] == "M0001"
+
+
+def test_continue_amendment_result_schema_accepts_continuation_required(
+    tmp_path: Path,
+) -> None:
+    """amendment-result.schema.json accepts outcome=CONTINUATION_REQUIRED with a continuation block.
+
+    Drive a real PROPHET amendment into the continue-amendment path with a
+    pre-existing CONTINUATION_REQUIRED handoff; controller reads it via the
+    amendment-result validator, so passing it is the schema-level acceptance
+    test.
+    """
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    prepared = manager.prepare_amendment(
+        task_ids=[],
+        layer="PROPHET",
+        summary="schema accept test",
+        owner_direction="test CONTINUATION_REQUIRED acceptance",
+    )
+    amendment_id = str(prepared["amendment_id"])
+    worktree = Path(str(prepared["worktree"]))
+    _write_json(
+        worktree / ".workflow" / "amendment-result.json",
+        {
+            "amendment_id": amendment_id,
+            "outcome": "CONTINUATION_REQUIRED",
+            "summary": "agent interrupted",
+            "rationale": "needs another session",
+            "unresolved_questions": [],
+            "impact_assessment": {
+                "intent": "no change",
+                "specification": "no change",
+                "contracts": "no change",
+                "dependencies": "no change",
+                "implementation": "no change",
+                "data": "no change",
+                "operations": "no change",
+                "security": "no change",
+                "verification": "no change",
+            },
+            "affected_existing_tasks": [],
+            "resolved_task_impacts": [],
+            "continuation": {
+                "reason": "TURN_BUDGET",
+                "completed_work": [],
+                "remaining_work": ["finish the planning"],
+                "next_actions": ["inspect git diff"],
+                "changed_paths": [],
+            },
+        },
+    )
+    # Validator must accept it without raising and bump continuation_count.
+    out = manager.continue_amendment(amendment_id, max_turns_exhausted=False)
+    assert out["continuation_count"] == 1

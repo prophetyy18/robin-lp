@@ -44,6 +44,12 @@ def _parser() -> argparse.ArgumentParser:
         "finish-review", help="validate and record a visible reviewer result"
     )
     finish_review.add_argument("task_id")
+    continue_task_review = subparsers.add_parser(
+        "continue-task-review",
+        help="continue a stage-reviewer session in the existing review worktree",
+    )
+    continue_task_review.add_argument("task_id")
+    continue_task_review.add_argument("--max-turns-exhausted", action="store_true")
     for name, help_text in (
         ("prepare-triage", "prepare a visible independent issue triager"),
         ("finish-triage", "validate and record a visible triage result"),
@@ -76,11 +82,18 @@ def _parser() -> argparse.ArgumentParser:
         ("finish-amendment", "validate and seal an Owner amendment candidate"),
         ("prepare-amendment-review", "prepare an independent Owner amendment review"),
         ("finish-amendment-review", "validate and record an Owner amendment review"),
+        (
+            "continue-amendment-review",
+            "continue an amendment review session in the existing review worktree",
+        ),
         ("prepare-amendment-retry", "prepare amendment repair after review failure"),
         ("amendment-status", "show one Owner amendment's state"),
+        ("continue-amendment", "continue a PROPHET/planner session in the same amendment attempt"),
     ):
         command = subparsers.add_parser(name, help=help_text)
         command.add_argument("amendment_id")
+        if name in {"continue-amendment", "continue-amendment-review"}:
+            command.add_argument("--max-turns-exhausted", action="store_true")
     # The Owner's exit for a change that will not land: the lane stays open, the
     # record stays as a closed entry, and nothing from the candidate is applied.
     withdraw = subparsers.add_parser(
@@ -129,11 +142,15 @@ def _parser() -> argparse.ArgumentParser:
         ("prepare-maintenance-retry", "prepare a maintenance repair after review failure"),
         ("prepare-maintenance-review", "prepare an independent maintenance review"),
         ("finish-maintenance-review", "validate and record a maintenance review"),
+        (
+            "continue-maintenance-review",
+            "continue a maintenance review session in the existing review worktree",
+        ),
         ("maintenance-status", "show one maintenance repair's state"),
     ):
         command = subparsers.add_parser(name, help=help_text)
         command.add_argument("maintenance_id")
-        if name == "continue-maintenance-develop":
+        if name in {"continue-maintenance-develop", "continue-maintenance-review"}:
             command.add_argument("--max-turns-exhausted", action="store_true")
     return parser
 
@@ -165,6 +182,11 @@ def main(argv: list[str] | None = None) -> None:
         elif args.command == "finish-review":
             state, report = manager.finish_review(args.task_id)
             output = {"status": state, "report": str(report)}
+        elif args.command == "continue-task-review":
+            output = manager.continue_task_review(
+                args.task_id,
+                max_turns_exhausted=args.max_turns_exhausted,
+            )
         elif args.command == "prepare-triage":
             output = manager.prepare_triage(args.task_id)
         elif args.command == "finish-triage":
@@ -195,11 +217,21 @@ def main(argv: list[str] | None = None) -> None:
             )
         elif args.command == "finish-amendment":
             output = manager.finish_amendment(args.amendment_id).to_dict()
+        elif args.command == "continue-amendment":
+            output = manager.continue_amendment(
+                args.amendment_id,
+                max_turns_exhausted=args.max_turns_exhausted,
+            )
         elif args.command == "prepare-amendment-review":
             output = manager.prepare_amendment_review(args.amendment_id)
         elif args.command == "finish-amendment-review":
             state, report = manager.finish_amendment_review(args.amendment_id)
             output = {"status": state, "report": str(report)}
+        elif args.command == "continue-amendment-review":
+            output = manager.continue_amendment_review(
+                args.amendment_id,
+                max_turns_exhausted=args.max_turns_exhausted,
+            )
         elif args.command == "prepare-amendment-retry":
             output = manager.prepare_amendment_retry(args.amendment_id)
         elif args.command == "withdraw-amendment":
@@ -234,6 +266,11 @@ def main(argv: list[str] | None = None) -> None:
         elif args.command == "finish-maintenance-review":
             state, report = manager.finish_maintenance_review(args.maintenance_id)
             output = {"status": state, "report": str(report)}
+        elif args.command == "continue-maintenance-review":
+            output = manager.continue_maintenance_review(
+                args.maintenance_id,
+                max_turns_exhausted=args.max_turns_exhausted,
+            )
         elif args.command == "maintenance-status":
             output = manager.maintenance_status(args.maintenance_id)
         else:  # pragma: no cover - argparse owns this boundary

@@ -570,6 +570,11 @@ class AmendmentRecord:
     #: records written before this field existed, where the attempt base is the
     #: original base.
     original_base_commit: str | None = None
+    #: Number of PROPHET/planner continuation sessions invoked on the current
+    #: attempt. Incremented by ``continue_amendment``; bounded by
+    #: ``MAX_DEVELOPMENT_CONTINUATIONS``. Absent on records written before this
+    #: field existed, where the loader defaults it to 0.
+    continuation_count: int = 0
 
     @property
     def freeze_base(self) -> str:
@@ -588,6 +593,7 @@ class AmendmentRecord:
             "branch": self.branch,
             "worktree": self.worktree,
             "original_base_commit": self.original_base_commit,
+            "continuation_count": self.continuation_count,
         }
 
     @classmethod
@@ -628,6 +634,7 @@ class AmendmentRecord:
             branch=_required_string(value, "branch"),
             worktree=_required_string(value, "worktree"),
             original_base_commit=_optional_string(value, "original_base_commit"),
+            continuation_count=cast(int, value.get("continuation_count", 0)),
         )
 
 
@@ -1540,6 +1547,9 @@ class WorkflowManager:
     def _continuation_path(self, task_id: str) -> Path:
         return self.runtime_dir / f"{task_id}-continuation.json"
 
+    def _amendment_continuation_path(self, amendment_id: str) -> Path:
+        return self.runtime_dir / f"{amendment_id}-continuation.json"
+
     def save_attempt(self, attempt: AttemptRecord) -> None:
         _write_json(self._attempt_path(attempt.task_id), attempt.to_dict())
 
@@ -1971,6 +1981,69 @@ class WorkflowManager:
                 "reason": "TURN_BUDGET",
                 "completed_work": [],
                 "remaining_work": ["Inspect the retained worktree and complete the task contract."],
+                "next_actions": ["Review git diff and current test state before making new edits."],
+                "changed_paths": changed_paths,
+            },
+        }
+
+    def _load_or_create_amendment_continuation_checkpoint(
+        self,
+        amendment_id: str,
+        worktree: Path,
+        *,
+        max_turns_exhausted: bool,
+    ) -> dict[str, Any]:
+        """Mirror of ``_load_or_create_continuation_checkpoint`` for amendment handoffs.
+
+        Reads ``.workflow/amendment-result.json``. If the file exists, it must carry
+        outcome=CONTINUATION_REQUIRED; any other outcome means the previous author
+        finished and the user should run ``finish-amendment`` instead. If the file
+        is absent the caller must either supply an explicit ``--max-turns-exhausted``
+        flag or raise, mirroring the developer path. Returns a fully-formed
+        amendment handoff dict with a TURN_BUDGET continuation block.
+        """
+        result_path = worktree / ".workflow" / "amendment-result.json"
+        if result_path.is_file():
+            result = _load_json(result_path)
+            self._validate_amendment_result(result, amendment_id)
+            if result["outcome"] != "CONTINUATION_REQUIRED":
+                raise WorkflowError("amendment result is terminal; use finish-amendment instead")
+            return result
+        if not max_turns_exhausted:
+            raise WorkflowError(
+                "continuation requires a CONTINUATION_REQUIRED handoff or the explicit "
+                "--max-turns-exhausted flag"
+            )
+        changed_paths = [
+            path
+            for path in _working_tree_changes(worktree)
+            if not path.startswith(".workflow/") and path != "todo/config.yaml"
+        ]
+        return {
+            "amendment_id": amendment_id,
+            "outcome": "CONTINUATION_REQUIRED",
+            "summary": "The previous amendment author exhausted maxTurns before writing a handoff.",
+            "rationale": "Fresh author must reconstruct progress from the actual worktree and the existing frozen request.",
+            "unresolved_questions": [],
+            "impact_assessment": {
+                "intent": "no change",
+                "specification": "no change",
+                "contracts": "no change",
+                "dependencies": "no change",
+                "implementation": "no change",
+                "data": "no change",
+                "operations": "no change",
+                "security": "no change",
+                "verification": "no change",
+            },
+            "affected_existing_tasks": [],
+            "resolved_task_impacts": [],
+            "continuation": {
+                "reason": "TURN_BUDGET",
+                "completed_work": [],
+                "remaining_work": [
+                    "Inspect the retained worktree and complete the amendment request."
+                ],
                 "next_actions": ["Review git diff and current test state before making new edits."],
                 "changed_paths": changed_paths,
             },
@@ -2491,12 +2564,18 @@ class WorkflowManager:
                 "affected_existing_tasks",
                 "resolved_task_impacts",
             },
+            optional={"continuation"},
             label="amendment result",
         )
         if result.get("amendment_id") != amendment_id:
             raise WorkflowError("amendment result identity does not match")
         outcome = result.get("outcome")
-        if outcome not in {"AMENDMENT_READY", "NO_CHANGE_REQUIRED", "BLOCKED"}:
+        if outcome not in {
+            "AMENDMENT_READY",
+            "NO_CHANGE_REQUIRED",
+            "BLOCKED",
+            "CONTINUATION_REQUIRED",
+        }:
             raise WorkflowError("amendment result outcome is invalid")
         if not isinstance(result.get("summary"), str) or not isinstance(
             result.get("rationale"), str
@@ -2642,6 +2721,94 @@ class WorkflowManager:
             "prompt": prompt,
         }
 
+    def continue_amendment_review(
+        self,
+        amendment_id: str,
+        *,
+        max_turns_exhausted: bool = False,
+    ) -> dict[str, object]:
+        """Start a fresh PROPHET/plan review session in the existing review worktree.
+
+        Mirrors ``continue_task_review`` for the amendment lane. The review
+        worktree was created by ``prepare-amendment-review`` and is the
+        detached worktree the reviewer writes
+        ``.workflow/amendment-review-result.json`` into. When the reviewer is
+        stopped by ``maxTurns`` or crashes before writing the handoff, the
+        worktree is left in place but the result file is absent.
+        ``continue-amendment-review`` reuses the same worktree, increments
+        ``continuation_count`` (bounded by ``MAX_DEVELOPMENT_CONTINUATIONS``),
+        and returns a new reviewer prompt. Reviewer must not run
+        ``git add``/``git commit``; only the
+        ``.workflow/amendment-review-result.json`` handoff is permitted.
+        """
+        record = self.load_amendment(amendment_id)
+        if record is None or record.candidate_commit is None:
+            raise WorkflowError(f"{amendment_id} has no amendment candidate")
+        if record.status != "AWAITING_REVIEW":
+            raise WorkflowError("review continuation requires AWAITING_REVIEW")
+        review_worktree = (
+            self.worktree_root / f"amendment-review-{amendment_id.lower()}-{record.attempt:03d}"
+        )
+        if not review_worktree.exists():
+            raise WorkflowError(
+                f"review worktree missing; run prepare-amendment-review again instead: "
+                f"{review_worktree}"
+            )
+        if _sha(review_worktree) != record.candidate_commit:
+            raise WorkflowError("review worktree HEAD no longer matches candidate commit")
+        result_path = review_worktree / ".workflow" / "amendment-review-result.json"
+        if result_path.is_file():
+            raise WorkflowError(
+                "review result is already written; use finish-amendment-review instead"
+            )
+        if not max_turns_exhausted:
+            raise WorkflowError(
+                "review continuation requires the explicit --max-turns-exhausted flag when "
+                "no partial result exists"
+            )
+        if record.continuation_count >= MAX_DEVELOPMENT_CONTINUATIONS:
+            raise WorkflowError(
+                f"amendment review continuation limit reached for {amendment_id}; "
+                "preserve the worktree and ask the Owner whether to expand the cumulative budget"
+            )
+        updated = AmendmentRecord(
+            amendment_id=record.amendment_id,
+            status=record.status,
+            attempt=record.attempt,
+            layer=record.layer,
+            task_ids=record.task_ids,
+            base_commit=record.base_commit,
+            candidate_commit=record.candidate_commit,
+            branch=record.branch,
+            worktree=record.worktree,
+            original_base_commit=record.freeze_base,
+            continuation_count=record.continuation_count + 1,
+        )
+        self.save_amendment(updated)
+        if record.layer == "PROPHET":
+            subject = (
+                f"Independently review PROPHET change {amendment_id}, which restates a goal, "
+                "restructures the plan or corrects high-level documents. It targets no task."
+            )
+            reviewer = "prophet-reviewer"
+        else:
+            subject = (
+                f"Independently review Owner amendment {amendment_id}. Target tasks: "
+                f"{', '.join(record.task_ids)}."
+            )
+            reviewer = "plan-reviewer"
+        prompt = (
+            f"{subject} Base commit: {record.base_commit}. Candidate commit: "
+            f"{record.candidate_commit}. Work only in {review_worktree}; do not edit "
+            f"planning files. Write the structured result only to {result_path}."
+        )
+        return {
+            **updated.to_dict(),
+            "agent": reviewer,
+            "review_worktree": str(review_worktree),
+            "prompt": prompt,
+        }
+
     def finish_amendment_review(self, amendment_id: str) -> tuple[str, Path]:
         record = self.load_amendment(amendment_id)
         if record is None or record.candidate_commit is None:
@@ -2772,6 +2939,68 @@ class WorkflowManager:
             f"result only to {worktree / '.workflow' / 'amendment-result.json'}."
         )
         return {**updated.to_dict(), "agent": author, "prompt": prompt}
+
+    def continue_amendment(
+        self,
+        amendment_id: str,
+        *,
+        max_turns_exhausted: bool = False,
+    ) -> dict[str, object]:
+        """Start a fresh PROPHET/planner session in the same unfinished amendment attempt.
+
+        Mirrors ``continue_develop`` for amendment-result handoffs. The amendment
+        must be in PLANNING status with no candidate commit; the worktree is the
+        one prepared by ``prepare-amendment`` and reused unchanged (attempt does not
+        advance, freeze base does not move). Increments ``continuation_count`` up
+        to ``MAX_DEVELOPMENT_CONTINUATIONS``; further calls raise.
+        """
+        record = self.load_amendment(amendment_id)
+        if record is None or record.status != "PLANNING" or record.candidate_commit is not None:
+            raise WorkflowError("amendment continuation requires an unfinished PLANNING amendment")
+        worktree = Path(record.worktree)
+        request = _load_json(self._amendment_request_path(amendment_id))
+        checkpoint = self._load_or_create_amendment_continuation_checkpoint(
+            amendment_id,
+            worktree,
+            max_turns_exhausted=max_turns_exhausted,
+        )
+        if record.continuation_count >= MAX_DEVELOPMENT_CONTINUATIONS:
+            raise WorkflowError(
+                f"amendment continuation limit reached for {amendment_id}; preserve the "
+                "worktree and ask the Owner whether to expand the cumulative budget"
+            )
+        updated = AmendmentRecord(
+            amendment_id=record.amendment_id,
+            status=record.status,
+            attempt=record.attempt,
+            layer=record.layer,
+            task_ids=record.task_ids,
+            base_commit=record.base_commit,
+            candidate_commit=None,
+            branch=record.branch,
+            worktree=record.worktree,
+            original_base_commit=record.freeze_base,
+            continuation_count=record.continuation_count + 1,
+        )
+        self.save_amendment(updated)
+        _write_json(self._amendment_continuation_path(amendment_id), checkpoint)
+        checkpoint_path = worktree / ".workflow" / "amendment-continuation.json"
+        _write_json(checkpoint_path, checkpoint)
+        (worktree / ".workflow" / "amendment-result.json").unlink(missing_ok=True)
+        prompt = (
+            f"Continue exactly {amendment_id} in the existing attempt {record.attempt}. "
+            f"The frozen request is {request}; approved base is {record.base_commit}. "
+            f"Work only in {worktree}. Read the prior checkpoint at {checkpoint_path}, then "
+            "inspect the actual git diff and current state because the worktree is "
+            "authoritative. Do not commit or start over. Before finishing, write the "
+            f"required structured amendment result to "
+            f"{worktree / '.workflow' / 'amendment-result.json'}."
+        )
+        return {
+            **updated.to_dict(),
+            "agent": "prophet" if record.layer == "PROPHET" else "planner",
+            "prompt": prompt,
+        }
 
     def withdraw_amendment(self, amendment_id: str, *, reason: str) -> dict[str, object]:
         """Close an amendment that will not land, without deleting its record.
@@ -3471,6 +3700,88 @@ class WorkflowManager:
             "prompt": prompt,
         }
 
+    def continue_maintenance_review(
+        self,
+        maintenance_id: str,
+        *,
+        max_turns_exhausted: bool = False,
+    ) -> dict[str, object]:
+        """Start a fresh stage-reviewer session in the existing maintenance review worktree.
+
+        Mirrors ``continue_task_review`` for the maintenance lane. The review
+        worktree was created by ``prepare-maintenance-review`` and is the
+        detached worktree the reviewer writes ``.workflow/review-result.json``
+        into. When the reviewer is stopped by ``maxTurns`` or crashes before
+        writing the handoff, the worktree is left in place but the result file
+        is absent. ``continue-maintenance-review`` reuses the same worktree,
+        increments ``continuation_count`` (bounded by
+        ``MAX_DEVELOPMENT_CONTINUATIONS``), and returns a new reviewer prompt.
+        Reviewer must not run ``git add``/``git commit``; only the
+        ``.workflow/review-result.json`` handoff is permitted.
+        """
+        record = self.load_maintenance(maintenance_id)
+        if record is None or record.candidate_commit is None:
+            raise WorkflowError(f"{maintenance_id} has no maintenance candidate")
+        if record.status != "AWAITING_REVIEW":
+            raise WorkflowError("review continuation requires AWAITING_REVIEW")
+        review_worktree = (
+            self.worktree_root / f"review-{maintenance_id.lower()}-attempt-{record.attempt:03d}"
+        )
+        if not review_worktree.exists():
+            raise WorkflowError(
+                f"review worktree missing; run prepare-maintenance-review again instead: "
+                f"{review_worktree}"
+            )
+        if _sha(review_worktree) != record.candidate_commit:
+            raise WorkflowError("review worktree HEAD no longer matches candidate commit")
+        result_path = review_worktree / ".workflow" / "review-result.json"
+        if result_path.is_file():
+            existing = _load_json(result_path)
+            provisional_attempt = AttemptRecord(
+                task_id=maintenance_id,
+                phase="maintenance",
+                attempt=record.attempt,
+                base_commit=record.base_commit,
+                candidate_commit=record.candidate_commit,
+                branch=record.branch,
+                development_worktree=record.development_worktree,
+            )
+            self._validate_review_result(existing, provisional_attempt)
+            raise WorkflowError(
+                "review result is already written; use finish-maintenance-review instead"
+            )
+        if not max_turns_exhausted:
+            raise WorkflowError(
+                "review continuation requires the explicit --max-turns-exhausted flag when "
+                "no partial result exists"
+            )
+        if record.continuation_count >= MAX_DEVELOPMENT_CONTINUATIONS:
+            raise WorkflowError(
+                f"maintenance review continuation limit reached for {maintenance_id}; "
+                "preserve the worktree and ask the Owner whether to expand the cumulative budget"
+            )
+        updated = MaintenanceRecord(
+            maintenance_id=record.maintenance_id,
+            status=record.status,
+            attempt=record.attempt,
+            base_commit=record.base_commit,
+            candidate_commit=record.candidate_commit,
+            branch=record.branch,
+            development_worktree=record.development_worktree,
+            continuation_count=record.continuation_count + 1,
+        )
+        self.save_maintenance(updated)
+        prompt = (
+            f"Continue reviewing low-risk maintenance repair {maintenance_id}. "
+            f"Base commit: {record.base_commit}. Candidate commit: "
+            f"{record.candidate_commit}. Work only in {review_worktree} (the same "
+            f"detached worktree the previous reviewer was using; do not run "
+            f"git add/git commit anywhere). Verify the exact diff, the maintenance "
+            f"eligibility boundary, allowed paths, and listed commands once. "
+            f"Write the standard review result only to {result_path}."
+        )
+        return {**updated.to_dict(), "agent": "stage-reviewer", "prompt": prompt}
+
     def finish_maintenance_review(self, maintenance_id: str) -> tuple[str, Path]:
         record = self.load_maintenance(maintenance_id)
         if record is None or record.candidate_commit is None:
@@ -3687,6 +3998,80 @@ class WorkflowManager:
         result_path.unlink()
         _git(self.repo, "worktree", "remove", str(review_worktree), check=False)
         return recorded
+
+    def continue_task_review(
+        self,
+        task_id: str,
+        *,
+        max_turns_exhausted: bool = False,
+    ) -> dict[str, object]:
+        """Start a fresh stage-reviewer session in the existing review worktree.
+
+        The review worktree was created by ``prepare-review`` and is the detached
+        worktree the reviewer writes ``.workflow/review-result.json`` into. When
+        the reviewer is stopped by ``maxTurns`` or crashes before writing the
+        handoff, the worktree is left in place but the result file is absent.
+        ``finish-review`` then fails on the missing result. ``continue-task-review``
+        reuses the same worktree, increments ``continuation_count`` (bounded by
+        ``MAX_DEVELOPMENT_CONTINUATIONS``), and returns a new reviewer prompt.
+        Reviewer must not run ``git add``/``git commit``; only the
+        ``.workflow/review-result.json`` handoff is permitted.
+        """
+        attempt = self.load_attempt(task_id)
+        if attempt is None or attempt.candidate_commit is None:
+            raise WorkflowError(f"{task_id} has no candidate commit")
+        review_worktree = (
+            self.worktree_root / f"review-{task_id.lower()}-attempt-{attempt.attempt:03d}"
+        )
+        if not review_worktree.exists():
+            raise WorkflowError(
+                f"review worktree missing; run prepare-review again instead: {review_worktree}"
+            )
+        if _sha(review_worktree) != attempt.candidate_commit:
+            raise WorkflowError("review worktree HEAD no longer matches candidate commit")
+        result_path = review_worktree / ".workflow" / "review-result.json"
+        if result_path.is_file():
+            existing = _load_json(result_path)
+            self._validate_review_result(existing, attempt)
+            raise WorkflowError("review result is already written; use finish-review instead")
+        # AWAITING_REVIEW lives in the development worktree's config.yaml because
+        # ``finish_develop`` writes it there; the main checkout only learns via
+        # fast-forward merge at APPROVED time. Read the development worktree
+        # branch to find the current state, mirroring ``finish_review``.
+        development_worktree = Path(attempt.development_worktree)
+        config = self.load_config(development_worktree)
+        if "AWAITING_REVIEW" not in self._admitted_states(config, task_id, development_worktree):
+            raise WorkflowError("review continuation requires an AWAITING_REVIEW candidate")
+        if not max_turns_exhausted:
+            raise WorkflowError(
+                "review continuation requires the explicit --max-turns-exhausted flag when "
+                "no partial result exists"
+            )
+        if attempt.continuation_count >= MAX_DEVELOPMENT_CONTINUATIONS:
+            raise WorkflowError(
+                f"review continuation limit reached for {task_id}; preserve the worktree "
+                "and ask the Owner whether to expand the cumulative budget"
+            )
+        updated = AttemptRecord(
+            task_id=attempt.task_id,
+            phase=attempt.phase,
+            attempt=attempt.attempt,
+            base_commit=attempt.base_commit,
+            candidate_commit=attempt.candidate_commit,
+            branch=attempt.branch,
+            development_worktree=attempt.development_worktree,
+            continuation_count=attempt.continuation_count + 1,
+        )
+        self.save_attempt(updated)
+        prompt = (
+            f"Continue reviewing exactly {task_id}. Base commit: {attempt.base_commit}. "
+            f"Candidate commit: {attempt.candidate_commit}. Work only in "
+            f"{review_worktree} (the same detached worktree the previous reviewer "
+            f"was using; do not run git add/git commit anywhere). Inspect the actual "
+            "diff and run every obtainable acceptance check. Write the structured "
+            f"review result only to {result_path}."
+        )
+        return {**updated.to_dict(), "agent": "stage-reviewer", "prompt": prompt}
 
     def _record_review_result(
         self,
@@ -3997,6 +4382,7 @@ class WorkflowManager:
         _validate_object_keys(
             result,
             required={"task_id", "outcome", "summary", "rationale", "unresolved_questions"},
+            optional={"continuation"},
             label="planner result",
         )
         if result.get("task_id") != task_id:
@@ -4007,6 +4393,7 @@ class WorkflowManager:
             "NO_CHANGE_REQUIRED",
             "OWNER_DECISION_REQUIRED",
             "BLOCKED",
+            "CONTINUATION_REQUIRED",
         }:
             raise WorkflowError("planner result outcome is invalid")
         if not isinstance(result.get("summary"), str) or not isinstance(
