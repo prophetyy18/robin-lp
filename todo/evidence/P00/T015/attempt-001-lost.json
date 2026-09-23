@@ -1,0 +1,17 @@
+{
+  "task_id": "T015",
+  "attempt": 1,
+  "reason": "the development worktree no longer exists on disk; the attempt record is stale bookkeeping that blocks a future attempt at the same task",
+  "lost_record": {
+    "task_id": "T015",
+    "phase": "P00",
+    "attempt": 1,
+    "base_commit": "4b7ac2daaf05a087f164ae67ecadc48e3616bcee",
+    "candidate_commit": "171f81812c373286efc5fd73f571c411d4f0f3b2",
+    "branch": "workflow/t015-attempt-001",
+    "development_worktree": "/home/lpdev/lp-worktrees/dev-t015-attempt-001",
+    "continuation_count": 0
+  },
+  "continuation_checkpoint_existed": false,
+  "protected_snapshot_kept": false
+}
