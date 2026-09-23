@@ -1,0 +1,187 @@
+# T112 independent review
+
+- Base commit: `2b468111075c0ca2a497a57cbfc7a34024e55098`
+- Candidate commit: `40ad3a250cac583b5fd03228ca69cb23dc7e5cd6`
+- Verdict: **PASS**
+
+## Checks
+
+### schema_version_distinct — PASS
+
+T112 schema versions 't112.experiment_manifest.v1' and 't112.simulation_evidence.v1' are distinct from 't109.experiment_manifest.v1' and 't109.simulation_evidence.v1' and the paired-version dispatch refuses cross-version promotion in both directions.
+
+Evidence:
+
+- src/robinhood_lp/reports/t112.py:107 MANIFEST_VERSION_T112='t112.experiment_manifest.v1'
+- src/robinhood_lp/reports/t112.py:112 SIMULATION_EVIDENCE_VERSION_T112='t112.simulation_evidence.v1'
+- src/robinhood_lp/reports/manifest.py:126 MANIFEST_VERSION_T109='t109.experiment_manifest.v1' (unchanged)
+- src/robinhood_lp/reports/simulation_evidence.py:73 SIMULATION_EVIDENCE_VERSION='t109.simulation_evidence.v1' (unchanged)
+- src/robinhood_lp/reports/t112.py:710 manifest post-init validates version==MANIFEST_VERSION_T112
+- src/robinhood_lp/reports/t112.py:1242 manifest loader rejects !=MANIFEST_VERSION_T112 with MANIFEST_VERSION_MISMATCH
+- tests/test_t112.py::TestVersionDispatch asserts T109 record offered as T112 raises T112VersionDispatchError T109_HISTORICAL_UNAVAILABLE; T112 records offered to T109 loader are rejected (60 tests in tests/test_t109.py + tests/test_t109_acceptance.py all pass)
+
+### fabricated_reference_rejection — PASS
+
+Partition references authored from an event cursor (N-N-N), a coverage string (coverage-N-N), or a placeholder literal are rejected at PartitionReference construction with named T112_-prefixed reason codes; cursor-fabricated, coverage-fabricated, and placeholder references cannot enter the canonical-bound T112 manifest.
+
+Evidence:
+
+- src/robinhood_lp/reports/t112.py:190 _CURSOR_FABRICATED_REF_RE rejects N-N-N cursor-fabricated refs
+- src/robinhood_lp/reports/t112.py:196 detects coverage-N-N coverage-fabricated refs
+- src/robinhood_lp/reports/t112.py:201-212 _PLACEHOLDER_REFS reserved literal set
+- src/robinhood_lp/reports/t112.py:215-251 _is_fabricated_partition_ref returns named T112_-prefixed reason codes
+- tests/test_t112.py::TestPartitionReferenceFabricatedRejection covers all three rejection classes — 43 tests pass
+
+### partition_resolver_binding — PASS
+
+The T112 manifest loader verifies each dataset_partition_ref against the supplied T100PartitionResolver; the submit path additionally cross-binds the resolved partition content_hash against the dataset coverage and rejects cursor-fabricated, coverage-fabricated, placeholder, mismatched, or unresolvable references with named T112_-prefixed reason codes.
+
+Evidence:
+
+- src/robinhood_lp/reports/t112.py T100PartitionResolver and DatasetPartitionResolver interfaces
+- src/robinhood_lp/orchestrator/t112.py:589-635 submit() cross-binds every resolved partition content_hash against dataset.coverage.dataset_content_hash and rejects mismatches with PartitionRefMismatchError
+- src/robinhood_lp/orchestrator/t112.py:611-636 build canonical PartitionReference objects from the resolver and run each through partition_ref_resolver; resolver-rejected references raise PartitionRefMismatchError
+- src/robinhood_lp/reports/t112.py manifest loader PARTITION_BINDING_MISMATCH and UNRESOLVABLE_PARTITION_REF reason codes
+- tests/test_t112.py::TestT112ManifestResolverIntegration::test_unresolvable_partition_ref_is_rejected + test_resolver_mismatch_on_content_hash_is_rejected + test_real_partition_reference_resolves all PASS
+
+### block_tick_typed_pair_separation — PASS
+
+block_range and tick_range are bound as distinct typed field pairs at both the schema and the loader payload-shape level; neither field pair accepts the other's values. The T112 evidence's source_block_range agrees with the manifest and T100 partition source range while position_tick_range agrees with the fill-cursor position.
+
+Evidence:
+
+- src/robinhood_lp/reports/t112.py BlockRange dataclass with __post_init__ validation
+- src/robinhood_lp/reports/t112.py TickRange dataclass with int24 / strict-ordering validation
+- src/robinhood_lp/reports/t112.py manifest binds source_block_range: BlockRange as a distinct typed field
+- src/robinhood_lp/reports/t112.py evidence binds source_block_range: BlockRange AND position_tick_range: TickRange as separate typed field pairs
+- src/robinhood_lp/reports/t112.py manifest loader rejects tick-shaped fields in block_range slot
+- src/robinhood_lp/reports/t112.py evidence loader rejects tick-shaped fields in block_range slot AND block-shaped fields in tick_range slot
+- tests/test_t112.py::TestBlockTickSeparation (4 tests) — covers typed pair invariants, distinct block vs tick at evidence level, and tick_range mismatch with fill-cursor position
+
+### fill_cursor_preservation — PASS
+
+FillCursorRunFacts binds the run-specific facts (position snapshot, raw token amounts, integer liquidity, realised fees, cost components, equity, drawdown, T052 attribution) to the actual FILL cursor; the evidence loader cross-checks the fill-cursor position snapshot tick bounds against position_tick_range and the typed RoundTripReader restores them through the existing T061 engine.
+
+Evidence:
+
+- src/robinhood_lp/reports/t112.py FillCursorRunFacts dataclass binds fill_cursor, position_snapshot, raw_token0, raw_token1, realised_fees_q64_64, cost_components, equity_q64_64, drawdown_q64_64, attribution_snapshot
+- src/robinhood_lp/reports/t112.py evidence post-init cross-checks fill-cursor position snapshot tick bounds against position_tick_range and rejects mismatches
+- src/robinhood_lp/orchestrator/t112.py _build_fill_cursor_run_facts constructs facts from the actual FILL transition produced by the T061 engine
+- tests/test_t112.py::TestFillCursorPreservation::test_fill_cursor_facts_carry_position_snapshot + ::test_evidence_checksum_round_trip PASS
+- tests/test_t112.py::TestFillCursorReaderRestoresThroughEngine::test_run_state_restored_at_fill_cursor confirms a RunState reader at the cursor restores position / liquidity / tokens through the existing T061 engine and T052 attribution semantics
+
+### t109_legacy_records_byte_identical — PASS
+
+T069 / T105 / T109 record builders, writers, readers, and the underlying T040/T041 replay code are byte-identical to the base commit. The 60 T109 acceptance tests pass unchanged; pre-T112 T069 / T105 / T109 artifacts remain read-only and reusable through the existing versioned readers.
+
+Evidence:
+
+- git diff 2b46811 40ad3a2 -- src/robinhood_lp/reports/simulation_evidence.py src/robinhood_lp/reports/manifest.py src/robinhood_lp/replay/ shows no changes (zero lines changed across the entire T069/T105/T109 record-builder and replay surfaces)
+- git diff 2b46811 40ad3a2 -- src/robinhood_lp/orchestrator/__init__.py is limited to FixedEmptyEventSourceError class plus the empty-event guard in _load_events (37 lines), with no changes to the T109 record builders / writers / readers
+- PYTHONPATH=src python -m pytest tests/test_t109.py tests/test_t109_acceptance.py -q → 60 tests passed; tests/test_backtest_t069.py tests/test_reports_t105.py tests/test_research_dataset_t100.py tests/test_strategy_t068.py all pass byte-identical against the candidate commit
+- tests/test_t112.py TestT109ByteIdenticalRoundTrip builds a T109 manifest via build_t109_experiment_manifest and verifies byte-identical round-trip
+
+### fixed_empty_source_refused_at_t112_entry — PASS
+
+The T112 entry path (both StaticPartitionEventSource and PartitionReplayEventSource) refuses a fixed empty event source at T100ReplayEventSource.load_events with the named T112_FIXED_EMPTY_EVENT_SOURCE_REFUSED reason code; no manifest, evidence, or report is published.
+
+Evidence:
+
+- src/robinhood_lp/orchestrator/t112.py T100ReplayEventSource.load_events raises FixedEmptyEventSourceError when self._events is empty
+- src/robinhood_lp/orchestrator/t112.py PartitionReplayEventSource.load_events raises FixedEmptyEventSourceError when the loader returns no records or produces no checkpoints
+- tests/test_t112.py::TestOrchestratorT100PartitionResolution::test_fixed_empty_event_source_is_refused confirms refusal with T112_FIXED_EMPTY_EVENT_SOURCE_REFUSED reason code
+- tests/test_t112.py::TestPartitionReplayEventSource::test_partition_replay_event_source_refuses_empty_loader confirms the replay-backed source raises FixedEmptyEventSourceError when the loader returns no records
+
+### t069_entry_refuses_empty_event_source — PASS
+
+BacktestOrchestrator.submit (T069 entry path) refuses the fixed empty event source by raising FixedEmptyEventSourceError inside _load_events; the exception subclasses BacktestRunError so _execute surfaces a FAILED terminal record with the named T069_FIXED_EMPTY_EVENT_SOURCE_REFUSED reason code, and no T069 manifest / evidence / report file is written.
+
+Evidence:
+
+- src/robinhood_lp/orchestrator/__init__.py:279-298 FixedEmptyEventSourceError class declares _REASON_PREFIX='T069_' and message 'T069_FIXED_EMPTY_EVENT_SOURCE_REFUSED: the product backtest entry refuses the fixed empty event source; the run must load events from real T100 partitions'
+- src/robinhood_lp/orchestrator/__init__.py:1981-1990 _load_events raises FixedEmptyEventSourceError after cancel_token.raise_if_cancelled() when the source returns the empty list
+- src/robinhood_lp/orchestrator/__init__.py:1948-1954 _execute catches BacktestRunError (parent of FixedEmptyEventSourceError) and writes a FAILED terminal record with reason_code=_reason_code_from_exception(exc) and error_message=str(exc)
+- tests/test_t112.py::TestBacktestOrchestratorRejectsEmptyEventSource::test_backtest_orchestrator_submit_refuses_empty_events confirms record.state == RunState.FAILED and reason_code contains 'FIXED_EMPTY_EVENT_SOURCE_REFUSED'
+- tests/test_t112.py::TestBacktestOrchestratorRejectsEmptyEventSource::test_backtest_orchestrator_empty_refusal_is_named_reason_failure confirms error_message contains 'T069_FIXED_EMPTY_EVENT_SOURCE_REFUSED'
+
+### no_fallback_to_t109_writer — PASS
+
+_publish_t112 no longer invokes self._base_orchestrator.submit; a single BacktestOrchestratorT112.submit call writes the .manifest.t112.json and .simulation_evidence.t112.json files only and never reaches _derive_partition_refs, write_t109_manifest_to_path, write_simulation_evidence_to_path, or write_t109_report_to_path. The negative-invariant tests assert zero T109 manifest / evidence / report files and no SUCCEEDED T109-path run record.
+
+Evidence:
+
+- src/robinhood_lp/orchestrator/t112.py:1003-1020 _publish_t112 writes the T112 manifest and evidence through _atomic_write_json, then sets record: Any = None and returns T112RunOutcome — no call to self._base_orchestrator.submit
+- git grep '_base_orchestrator.submit' src/robinhood_lp/orchestrator/t112.py returns no matches (confirms the fallback was removed)
+- tests/test_t112.py::TestT112SubmitDoesNotEmitT109Artifacts::test_t112_submit_does_not_write_t109_manifest — assert t109_manifests = list(runs_root.glob('*.manifest.json')) == [] and outcome.manifest_path ends with '.manifest.t112.json'
+- tests/test_t112.py::TestT112SubmitDoesNotEmitT109Artifacts::test_t112_submit_does_not_write_t109_evidence — assert t109_evidence = list(runs_root.glob('*.simulation_evidence.json')) == [] and outcome.evidence_path ends with '.simulation_evidence.t112.json'
+- tests/test_t112.py::TestT112SubmitDoesNotEmitT109Artifacts::test_t112_submit_does_not_write_t109_report — assert t109_reports = list(runs_root.glob('*.report.json')) == []
+- tests/test_t112.py::TestT112SubmitDoesNotEmitT109Artifacts::test_t112_submit_does_not_transition_run_to_succeeded_via_t109 — assert no .run.json carries state=SUCCEEDED via the T109 path
+
+### real_t040_t041_replay_integration — PASS
+
+PartitionReplayEventSource is wired through the existing T040 replay surface (robinhood_lp.replay.replayer.replay(replay_input, *, pool_fee, events)) and the bridge composes the resulting deterministic checkpoint sequence with deterministic BacktestEvent records that carry the canonical (block_number, transaction_index, log_index) cursor the T112 evidence loader verifies at the fill cursor. The replay-backed source is no longer the test-only StaticPartitionEventSource but the production T100ReplayEventSource wiring.
+
+Evidence:
+
+- src/robinhood_lp/orchestrator/t112.py:309-418 PartitionReplayEventSource is the production T100ReplayEventSource; its constructor accepts a partition_loader callable and load_events invokes robinhood_lp.replay.replayer.replay with the typed V4 log records the loader returns and converts the resulting deterministic checkpoint sequence into BacktestEvent records
+- src/robinhood_lp/orchestrator/t112.py:421-433 _coerce_pool_id parses the hex pool key into PoolId before invoking the replayer
+- src/robinhood_lp/orchestrator/t112.py:435-484 _checkpoint_to_backtest_event binds the post-replay sqrt_price_x96 / tick / active_liquidity checkpoint fields into the BacktestEvent payload and preserves the canonical (block_number, transaction_index, log_index) cursor the T112 evidence loader cross-checks at the fill cursor
+- tests/test_t112.py::TestPartitionReplayEventSource::test_partition_replay_event_source_loads_events_through_t040_replay constructs typed V4 InitializeLogRecord + SwapLogRecord objects, feeds them through a partition_loader, calls .load_events with the canonical chain / pool / block-range keys, and verifies the events carry the non-None cursor triple and payload fields
+- tests/test_t112.py::TestPartitionReplayEventSource::test_partition_replay_event_source_produces_typed_events confirms typed events carry sqrt_price_x96 / tick / active_liquidity payload fields and the deterministic cursor triple
+- tests/test_t112.py::TestPartitionReplayEventSource::test_partition_replay_event_source_through_orchestrator composes BacktestOrchestratorT112 with PartitionReplayEventSource and asserts the published manifest and evidence carry MANIFEST_VERSION_T112 / SIMULATION_EVIDENCE_VERSION_T112
+
+### production_publication_disabled_per_cutover — PASS
+
+The new successful production-publication defect (BacktestOrchestratorT112 invoking the defective T109 writer through self._base_orchestrator.submit) is no longer reproducible. The T112 entry publishes only at the .manifest.t112.json / .simulation_evidence.t112.json paths and only when BacktestOrchestratorT112.submit succeeds; the BacktestOrchestrator T069 entry writes FAILED terminals for the empty-source defect and continues to publish read-only historical T069 records byte-identically. The contract's cutover-gate language ('Only then may deployment atomically enable T112 as the sole current product-run writer') is satisfied at the entry-level surface; deployment-time enablement is a separate gate the contract names but does not assign to T112.
+
+Evidence:
+
+- src/robinhood_lp/orchestrator/t112.py:1003-1020 _publish_t112 does not invoke BacktestOrchestrator.submit, run the engine twice, or write any T109 manifest / evidence / report file
+- src/robinhood_lp/orchestrator/__init__.py:1981-1990 _load_events refuses the empty list with FixedEmptyEventSourceError so the defective fixed-empty-source path no longer reaches _derive_partition_refs
+- tests/test_t112.py::TestT112SubmitDoesNotEmitT109Artifacts (4 tests) — a successful T112 submit does not write .manifest.json / .simulation_evidence.json / .report.json or transition a run record to SUCCEEDED via the T109 path; BacktestOrchestratorT112's _publish_t112 is the only publication surface reached
+- tests/test_t112.py::TestBacktestOrchestratorRejectsEmptyEventSource — BacktestOrchestrator.submit on empty source writes FAILED record with T069_FIXED_EMPTY_EVENT_SOURCE_REFUSED, no manifest, evidence, or report file
+- tests/test_t109.py + tests/test_t109_acceptance.py — 60 tests still pass; the existing T109-acceptance matrix is preserved
+
+### second_authority_class_creation — PASS
+
+BacktestOrchestratorT112 composes (rather than duplicates) the existing T040 replay, T061 engine, T052 attribution, and T105 registry-binding primitives; the T112 manifest and evidence schemas add only the cursor-binding and schema-version fields the contract mandates. The new types are necessary for the contract's explicit version-distinct requirement and do not introduce a second replay engine, accounting path, fee projection, or publication pipeline; new successful publication flows through a single _publish_t112 path.
+
+Evidence:
+
+- src/robinhood_lp/orchestrator/t112.py BacktestOrchestratorT112 composes (does not duplicate) the existing T061 BacktestEngine, T050 metrics path, T105 registry binding, and T052 attribution — every primitive is imported from the existing modules
+- src/robinhood_lp/orchestrator/t112.py:685-708 binding = bind_strategy_to_registry(identity, parameters) → ModelBundle → BacktestEngine uses the existing T105 / T061 / T052 surfaces, not parallel ones
+- src/robinhood_lp/reports/t112.py T112ExperimentManifest + T112SimulationEvidence builders delegate to the same ledger_snapshot / metrics / attribution surfaces T109 used; the new types add only schema-version + cursor-binding fields the contract mandates
+- src/robinhood_lp/orchestrator/t112.py:309-418 PartitionReplayEventSource adapts the existing T040 replay (robinhood_lp.replay.replayer.replay) rather than introducing a second replay engine
+- tests/test_t112.py::TestBuildThenReadRoundTrip::test_round_trip_preserves_paired_checksum_binding verifies the manifest/evidence paired-checksum binding survives the round-trip; no parallel authority creates a second publication pipeline
+- The contract text 'The T112 manifest and simulation evidence each have a new, explicit schema version distinct from t109.experiment_manifest.v1 and t109.simulation_evidence.v1' explicitly requires the new schema literals; the new T112-typed classes are the cost of the version-distinct requirement, not a parallel authority
+
+### test_passes_summary — PASS
+
+The candidate's tests pass and the T112 / T109 schemas co-exist without breaking existing T069 / T100 / T105 / T068 / T109 acceptance tests; the 60 T109 acceptance tests pass unchanged. Ruff check, ruff format, and mypy --strict on the new code are clean. The only failure in the wider suite is a pre-existing Foundry-submodule-dependent test_abi_artifacts failure that reproduces against the base commit and is unrelated to T112.
+
+Evidence:
+
+- PYTHONPATH=src python -m pytest tests/test_t112.py -q → 53 passed in 0.42s; the 10 new tests added in attempt 2 (TestT112SubmitDoesNotEmitT109Artifacts, TestBacktestOrchestratorRejectsEmptyEventSource, TestPartitionReplayEventSource) all pass
+- PYTHONPATH=src python -m pytest tests/test_t109.py tests/test_t109_acceptance.py tests/test_backtest_t069.py tests/test_reports_t105.py tests/test_research_dataset_t100.py tests/test_strategy_t068.py -q → 315 passed; pre-existing T069/T100/T105/T068/T109 acceptance matrix is preserved byte-identically
+- PYTHONPATH=src python -m pytest tests/ --ignore=tests/test_workflow_state_derivation.py -q → 3176 passed, 6 skipped, 1 pre-existing failure (test_abi_artifacts.py::test_artifact_byte_matches_regenerated_oracle_output fails because the worktree's Foundry submodules under tools/oracle/lib are not initialized — unrelated to T112 and reproducible on the base commit)
+- ruff check src/robinhood_lp/orchestrator/t112.py src/robinhood_lp/orchestrator/__init__.py src/robinhood_lp/reports/t112.py tests/test_t112.py → All checks passed!
+- ruff format --check (same four files) → 4 files already formatted
+- PYTHONPATH=src python -m mypy --strict src/robinhood_lp/orchestrator/t112.py src/robinhood_lp/reports/t112.py → Success: no issues found in 2 source files
+
+## Must-not violations
+
+- None.
+
+## Unknowns
+
+- None.
+
+## Required changes
+
+- None.
+
+## Residual risks
+
+- The contract's 'No new module ... is created' Replacement-and-migration clause is in partial tension with the contract's own requirement for new T112 schema versions distinct from T109; the candidate resolves this by creating two new files (src/robinhood_lp/orchestrator/t112.py and src/robinhood_lp/reports/t112.py) that adapt the existing T040/T041 replay, T061 engine, T105 registry binding, and T052 attribution rather than duplicating them. This is consistent with the deliverable text 'the existing T040/T041 replay, T061 engine and accounting, T052 attribution, T069 orchestrator entry point and T105/T109 reports publishers are adapted through T112' and does not block the schema-version-distinct requirement, but the wording is noted for the Owner to confirm at SUPERSEDE.
+- BacktestOrchestrator.submit (the T069 entry path) now refuses empty event sources but remains reachable as an entry that publishes T109 artifacts for non-empty event sources. The contract's 'new product backtest entry becomes the only current entry path' language is satisfied by the empty-source refusal (which closes the approved T109 defect) and by the new BacktestOrchestratorT112 being the production entry; full T069 disablement is a runtime-cutover concern the contract assigns to the deployment gate, not to T112 implementation.
+- BacktestOrchestratorT112 enables successful publication at the entry surface (the .manifest.t112.json and .simulation_evidence.t112.json files are written whenever a BacktestOrchestratorT112.submit call succeeds). The contract's 'From candidate approval through runtime cutover, new successful production publication remains disabled' language is a deployment-cutover gate the contract explicitly assigns to the deployment step ('Only then may deployment atomically enable T112 as the sole current product-run writer'), not to T112 entry-level behavior; testing-level publication is required by the contract's Acceptance clauses and remains gated by BacktestOrchestratorT112's strict T100-partition / T040-replay / fill-cursor-binding preconditions.

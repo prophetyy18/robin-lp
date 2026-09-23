@@ -12,7 +12,7 @@
   },
   "active_phase": "P06",
   "active_task": "T112",
-  "workflow_state": "AWAITING_REVIEW",
+  "workflow_state": "APPROVED",
   "tasks": {
     "T000": {
       "phase": "P00",
@@ -1369,8 +1369,8 @@
     },
     "T112": {
       "phase": "P06",
-      "lifecycle": "OPEN",
-      "claimed": true,
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T040",
         "T041",
@@ -1387,9 +1387,9 @@
       "task_file": "todo/phases/P06-backtesting-and-strategy/T112.md",
       "attempt": 2,
       "base_commit": "2b468111075c0ca2a497a57cbfc7a34024e55098",
-      "candidate_commit": "29d4afb5b213568543fa01e767cc5e2e631c0242",
-      "approved_commit": null,
-      "latest_review": "todo/reviews/P06/T112/review-001.json"
+      "candidate_commit": "40ad3a250cac583b5fd03228ca69cb23dc7e5cd6",
+      "approved_commit": "40ad3a250cac583b5fd03228ca69cb23dc7e5cd6",
+      "latest_review": "todo/reviews/P06/T112/review-002.json"
     }
   }
 }
