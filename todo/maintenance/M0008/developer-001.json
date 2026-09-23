@@ -1,0 +1,32 @@
+{
+  "task_id": "M0008",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Tightened src/robinhood_lp/research/evaluation.py mypy signatures without behaviour change. Imported DeterministicClock, SeededRandomSource from robinhood_lp.strategy.base and typing.cast; changed the two ModelBackedRegimeModel.assess / ModelBackedFeeOpportunityModel.assess wrappers from clock: object / rng: object to clock: DeterministicClock / rng: SeededRandomSource; replaced int(parameters.get(...)) with int(cast(int, parameters.get(...))) for the six integer-backed keys in parameters_from_validated. Happy path identical; non-numeric values still raise TypeError from int() at runtime, exactly as today. Only the documented allowed path was modified.",
+  "commands": [
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/robinhood_lp/research/evaluation.py",
+      "result": "Success: no issues found in 1 source file (was 10 errors before: 4 [arg-type] at lines 1158/1282, 6 [call-overload] at lines 2498-2508)"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ -q --ignore=tests/test_abi_artifacts.py",
+      "result": "3095 passed, 6 skipped in 41.97s. Skips are pre-existing Foundry / gpg prerequisites (oracle_drift, oracle_review_provenance, protocol_ids reordered_inputs); same skip set as the base commit, unrelated to this repair."
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/research/evaluation.py",
+      "result": "1 file already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/research/evaluation.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "git diff --check",
+      "result": "clean (no whitespace/merge-conflict warnings); git status confirms the only modified file is src/robinhood_lp/research/evaluation.py"
+    }
+  ],
+  "residual_risks": [
+    "The cast(int, parameters.get(key, default)) form tells mypy the value is int but does not validate at runtime; if a caller supplies a non-numeric value in the mapping, int(...) still raises TypeError exactly as before, so behaviour is preserved.",
+    "Tightening the two wrapper signatures from object to DeterministicClock/SeededRandomSource is a Protocol type narrowing; callers that previously passed arbitrary objects (subclassing the runtime_checkable Protocols) continue to satisfy the narrower signatures. The fallbacks (.fallback.assess) declare the same Protocol types in robinhood_lp/strategy/base.py, so the wrapped call now type-checks directly.",
+    "No public API, dependency, Intent, Spec, or safety policy surface changed; allowed_paths was honoured (only src/robinhood_lp/research/evaluation.py modified)."
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "maintenance_id": "M0008",
+  "summary": "tighten evaluation.py mypy errors without behaviour change",
+  "reason": "Repository mypy reports 10 errors in src/robinhood_lp/research/evaluation.py: four [arg-type] at 1158/1282 (wrapper signatures declare clock: object, rng: object but pass them to fallback.assess expecting DeterministicClock/SeededRandomSource Protocols) and six [call-overload] at 2498-2508 (int(parameters.get(...)) on Mapping[str, object]). Repair: tighten the two wrapper signatures to the Protocol types with imports, and use typing.cast(int, parameters.get(...)) for the dict gets. Happy path identical; error path still raises TypeError on non-numeric values, as today. Docstring/import-only behaviour-preserving type narrowing.",
+  "allowed_paths": [
+    "src/robinhood_lp/research/evaluation.py"
+  ],
+  "verification_commands": [
+    "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy src/robinhood_lp/research/evaluation.py",
+    "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ -q --ignore=tests/test_abi_artifacts.py",
+    "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/research/evaluation.py",
+    "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/research/evaluation.py",
+    "git diff --check"
+  ],
+  "related_task": "T052",
+  "risk_attestation": "LOW_RISK_IMPLEMENTATION_DEFECT"
+}

@@ -95,7 +95,7 @@ import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Final, Protocol, runtime_checkable
+from typing import Final, Protocol, cast, runtime_checkable
 
 from robinhood_lp.robustness.schema_binding import (
     SURFACES_VERSION,
@@ -121,12 +121,14 @@ from robinhood_lp.strategy.base import (
     REGIME_STATE_RANGE,
     REGIME_STATE_UNCERTAIN,
     REGIME_STATE_UP_TREND,
+    DeterministicClock,
     FeeOpportunityAssessment,
     FeeOpportunityModel,
     MarketSnapshot,
     PortfolioSnapshot,
     RegimeAssessment,
     RegimeModel,
+    SeededRandomSource,
 )
 from robinhood_lp.strategy.model_backed import (
     ModelBackedEvaluationParameters,
@@ -1140,8 +1142,8 @@ class ModelBackedRegimeModel:
         *,
         market: MarketSnapshot,
         portfolio: PortfolioSnapshot,
-        clock: object,
-        rng: object,
+        clock: DeterministicClock,
+        rng: SeededRandomSource,
     ) -> RegimeAssessment:
         """Return a :class:`RegimeAssessment` from the model-backed component.
 
@@ -1272,8 +1274,8 @@ class ModelBackedFeeOpportunityModel:
         *,
         market: MarketSnapshot,
         portfolio: PortfolioSnapshot,
-        clock: object,
-        rng: object,
+        clock: DeterministicClock,
+        rng: SeededRandomSource,
     ) -> FeeOpportunityAssessment:
         """Return a :class:`FeeOpportunityAssessment` from the model-backed component."""
         if self.handle is None:
@@ -2496,16 +2498,20 @@ def parameters_from_validated(
     return ModelBackedEvaluationParameters(
         model_artifact_id=str(parameters.get("model_artifact_id", "RULE_FALLBACK")),
         staleness_seconds=int(
-            parameters.get("staleness_seconds", DEFAULT_MAX_MODEL_STALENESS_SECONDS)
+            cast(int, parameters.get("staleness_seconds", DEFAULT_MAX_MODEL_STALENESS_SECONDS))
         ),
         require_pool_set_membership=bool(parameters.get("require_pool_set_membership", True)),
-        ood_prediction_variance_q64_64=int(parameters.get("ood_prediction_variance_q64_64", 1)),
-        regime_confidence_floor_q64_64=int(
-            parameters.get("regime_confidence_floor_q64_64", Q64_SCALE // 100)
+        ood_prediction_variance_q64_64=int(
+            cast(int, parameters.get("ood_prediction_variance_q64_64", 1))
         ),
-        fee_opportunity_floor_q64_64=int(parameters.get("fee_opportunity_floor_q64_64", 0)),
-        bootstrap_iterations=int(parameters.get("bootstrap_iterations", 1000)),
-        bootstrap_seed=int(parameters.get("bootstrap_seed", 0)),
+        regime_confidence_floor_q64_64=int(
+            cast(int, parameters.get("regime_confidence_floor_q64_64", Q64_SCALE // 100))
+        ),
+        fee_opportunity_floor_q64_64=int(
+            cast(int, parameters.get("fee_opportunity_floor_q64_64", 0))
+        ),
+        bootstrap_iterations=int(cast(int, parameters.get("bootstrap_iterations", 1000))),
+        bootstrap_seed=int(cast(int, parameters.get("bootstrap_seed", 0))),
     )
 
 
