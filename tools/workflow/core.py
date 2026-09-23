@@ -2649,15 +2649,21 @@ class WorkflowManager:
         It does **not** move a status. A task branch reaches the main checkout
         only through an approval, so while an attempt is in flight the main
         checkout still shows ``PLANNED`` or ``READY`` -- and the recovery needs
-        no transition from either. A task in any other state is refused and
-        redirected to ``abandon-task``, which is reachable from every state, so
-        the refusal cannot become a trap.
+        no transition from either. A task in any other *open* state is refused
+        and redirected to ``abandon-task``, which is reachable from every state,
+        so the refusal cannot become a trap.
 
-        The consumed attempt number is never reused: the config is raised to at
-        least the lost attempt, so the next ``prepare-develop`` opens the one
-        after it. The lost attempt is recorded under ``todo/evidence/`` first,
-        because the runtime record is the only place its branch and commits were
-        named, and it is about to be deleted.
+        A closed task (``APPROVED`` or ``ABANDONED``) is served too, without the
+        attempt bump: it will never develop again, so its remnant needs no route
+        at all, and ``attempt`` on an approved task is part of what the reviewer
+        inspected. Without that, a remnant on a completed task could never be
+        cleared by any route and would sit in ``status`` for good.
+
+        The consumed attempt number is never reused: for an open task the config
+        is raised to at least the lost attempt, so the next ``prepare-develop``
+        opens the one after it. The lost attempt is recorded under
+        ``todo/evidence/`` first, because the runtime record is the only place
+        its branch and commits were named, and it is about to be deleted.
         """
         self._ensure_clean_main()
         if not reason.strip():
@@ -2673,7 +2679,8 @@ class WorkflowManager:
         config = self.load_config()
         task = self._task(config, task_id)
         status = task["status"]
-        if status not in {"PLANNED", "READY"}:
+        closed = status in CLOSED_TASK_STATES
+        if not closed and status not in {"PLANNED", "READY"}:
             raise WorkflowError(
                 f"{task_id} is {status}, but a lost attempt only leaves the main checkout in "
                 "PLANNED or READY; close the work item with abandon-task instead"
@@ -2698,8 +2705,14 @@ class WorkflowManager:
                 "protected_snapshot_kept": self._protected_snapshot_path(task_id).is_file(),
             },
         )
-        consumed = max(int(task["attempt"]), attempt.attempt)
-        config["tasks"][task_id]["attempt"] = consumed
+        # A closed task never develops again, so its remnant needs no route and
+        # its record is cleared without touching the approval evidence: `attempt`
+        # on an APPROVED task is part of what the reviewer inspected, and raising
+        # it would be rewriting that evidence.
+        consumed = int(task["attempt"])
+        if not closed:
+            consumed = max(consumed, attempt.attempt)
+            config["tasks"][task_id]["attempt"] = consumed
         _write_json(self.config_path, config)
         _git(self.repo, "add", str(relative), "todo/config.yaml")
         _git(self.repo, "commit", "-m", f"chore(workflow): discard the lost {task_id} attempt")
@@ -2709,7 +2722,7 @@ class WorkflowManager:
             "task_id": task_id,
             "status": status,
             "discarded_attempt": attempt.attempt,
-            "next_attempt": consumed + 1,
+            "next_attempt": None if closed else consumed + 1,
             "record": str(relative),
             "commit": _sha(self.repo),
         }

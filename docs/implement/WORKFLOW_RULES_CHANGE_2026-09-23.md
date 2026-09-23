@@ -172,9 +172,17 @@ controller（现行 `_record_review_result` 在 APPROVED 时会删除记录）�
 人之前就可见。
 
 **它不改状态，因此不放宽状态表。** 任务分支只有经过批准才进入主检出，所以 attempt 在途时
-主检出只可能显示 `PLANNED` 或 `READY`，两者都不需要迁移边。其他状态一律拒绝并指向
+主检出只可能显示 `PLANNED` 或 `READY`，两者都不需要迁移边。其他**未终结**状态一律拒绝并指向
 `abandon-task`（该路线在每个状态都可达）——拒绝是**改道而非陷阱**，这一点有测试锁死
 （`test_discard_attempt_redirects_instead_of_trapping` 在拒绝之后真的用 `abandon-task` 走通）。
+
+**已终结任务（`APPROVED`/`ABANDONED`）也受理，但不递增编号。** 这是初版的一个缺口：终结任务
+永不再开发，残留无所谓「阻塞」，但如果清不掉，它会永远留在 `status` 里，让诊断变成狼来了。
+而且 `APPROVED` 任务的 `attempt` 属于评审者检查过的内容，清残留时不得改动它——`git diff`
+级别的测试断言 `attempt`/`approved_commit`/`candidate_commit` 三者逐字节不变。
+
+守卫因此按「**是否存在路线**」判定，而不是按枚举的状态集合：终结态无需路线，`PLANNED`/`READY`
+需要「重开」这条路线，其余状态则指向一条确实可达的路线。
 
 ## 8. 仍待实施
 

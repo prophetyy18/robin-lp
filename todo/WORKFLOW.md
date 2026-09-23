@@ -213,9 +213,15 @@ the next `prepare-develop` opens the one after it.
 It moves no status. A task branch reaches the main checkout only through an
 approval, so while an attempt is in flight the main checkout still shows
 `PLANNED` or `READY`, and recovery needs no transition from either. A task in
-any other state is refused and redirected to `abandon-task`, which is reachable
-from every state — the refusal names a route that works rather than leaving the
-operator with a message and no move.
+any other *open* state is refused and redirected to `abandon-task`, which is
+reachable from every state — the refusal names a route that works rather than
+leaving the operator with a message and no move.
+
+An `APPROVED` or `ABANDONED` task is served too, without the attempt bump. It
+will never develop again, so its remnant needs no route; the point is that the
+remnant must be clearable at all, or it would sit in `status` for good and the
+diagnostic would stop meaning anything. `attempt` on an approved task is part of
+what the reviewer inspected, so clearing a remnant there changes nothing else.
 
 `status` reports every such record under `orphaned_attempts`, so a lost attempt
 is visible before anyone tries to start the task it blocks.

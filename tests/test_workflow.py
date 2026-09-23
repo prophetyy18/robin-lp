@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from tools.workflow import WorkflowError, WorkflowManager
-from tools.workflow.core import ALLOWED_TRANSITIONS, STATES
+from tools.workflow.core import ALLOWED_TRANSITIONS, STATES, AttemptRecord
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -2091,6 +2091,84 @@ def test_discard_attempt_requires_a_reason_and_a_record(tmp_path: Path) -> None:
         manager.discard_attempt("T001", reason="   ")
     # Still blocked: a refused discard must not half-apply.
     assert manager.load_attempt("T001") is not None
+
+
+def test_discard_attempt_clears_a_remnant_on_a_closed_task(tmp_path: Path) -> None:
+    """A completed task's remnant needs no route, so it must be clearable.
+
+    Five of the six records on the development machine belong to approved
+    amendments and one to an approved task. A closed task never develops again,
+    so nothing is being unblocked -- but if the remnant could not be cleared it
+    would sit in `status` for good, and the diagnostic would stop meaning
+    anything. Clearing it must not touch the approval evidence: `attempt` on an
+    APPROVED task is part of what the reviewer inspected.
+    """
+
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    prepared = manager.prepare_develop("T001")
+    development = Path(str(prepared["development_worktree"]))
+    (development / "src" / "value.txt").write_text("good\n", encoding="utf-8")
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "CANDIDATE_READY",
+            "summary": "fixture developer completed the task",
+            "commands": [{"command": "fixture-check", "result": "passed"}],
+            "residual_risks": [],
+        },
+    )
+    attempt = manager.finish_develop("T001")
+    review = manager.prepare_review("T001")
+    _write_json(
+        Path(str(review["review_worktree"])) / ".workflow" / "review-result.json",
+        {
+            "task_id": "T001",
+            "base_commit": attempt.base_commit,
+            "candidate_commit": attempt.candidate_commit,
+            "verdict": "PASS",
+            "checks": [
+                {
+                    "id": "fixture",
+                    "status": "PASS",
+                    "evidence": ["fixture check"],
+                    "finding": "satisfied",
+                }
+            ],
+            "must_not_violations": [],
+            "unknowns": [],
+            "required_changes": [],
+            "residual_risks": [],
+        },
+    )
+    assert manager.finish_review("T001")[0] == "APPROVED"
+    before = manager.load_config()["tasks"]["T001"]
+
+    # Approval removes the record and the worktree, so put a record back the way
+    # an older controller left it: the attempt is finished, its worktree gone.
+    manager.save_attempt(
+        AttemptRecord(
+            task_id="T001",
+            phase="P00",
+            attempt=1,
+            base_commit=attempt.base_commit,
+            candidate_commit=str(attempt.candidate_commit),
+            branch=attempt.branch,
+            development_worktree=attempt.development_worktree,
+        )
+    )
+    assert manager.status()["orphaned_attempts"] != []
+
+    result = manager.discard_attempt("T001", reason="remnant left by an older controller")
+
+    assert result["status"] == "APPROVED"
+    assert result["next_attempt"] is None
+    after = manager.load_config()["tasks"]["T001"]
+    assert after["attempt"] == before["attempt"]
+    assert after["approved_commit"] == before["approved_commit"]
+    assert after["candidate_commit"] == before["candidate_commit"]
+    assert manager.status()["orphaned_attempts"] == []
 
 
 def test_discard_attempt_redirects_instead_of_trapping(tmp_path: Path) -> None:
