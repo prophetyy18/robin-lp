@@ -124,6 +124,31 @@ ALLOWED_TRANSITIONS = {
 #: next one. Leaving it out would have let an abandonment keep the lane forever.
 RESTING_STATES = frozenset({"PLANNED", "APPROVED", "ABANDONED"})
 
+OPEN = "OPEN"
+DELIVERED = "DELIVERED"
+LIFECYCLE_VALUES = frozenset({OPEN, DELIVERED, "ABANDONED"})
+
+#: The one place the composite status is decomposed. Everything else reads this
+#: table or the projection built from it, so the two can never be written
+#: independently. `lifecycle` is the task's own state; `claimed` is whether it
+#: holds the single-active-work lane. Every in-flight status is claimed, and both
+#: terminal statuses release the lane -- a closed work item must never keep it.
+LIFECYCLE_OF: dict[str, tuple[str, bool]] = {
+    "PLANNED": (OPEN, False),
+    "READY": (OPEN, True),
+    "IN_DEVELOPMENT": (OPEN, True),
+    "AWAITING_REVIEW": (OPEN, True),
+    "CHANGES_REQUESTED": (OPEN, True),
+    "TRIAGE_REQUIRED": (OPEN, True),
+    "PLANNING": (OPEN, True),
+    "AWAITING_PLAN_REVIEW": (OPEN, True),
+    "PLAN_REVIEW_BLOCKED": (OPEN, True),
+    "OWNER_DECISION_REQUIRED": (OPEN, True),
+    "BLOCKED": (OPEN, True),
+    "APPROVED": (DELIVERED, False),
+    "ABANDONED": ("ABANDONED", False),
+}
+
 #: Statuses a task can never leave, and therefore can never satisfy a dependency
 #: again. A task depending on one of these is stranded: `_check_dependencies`
 #: requires every dependency to be `APPROVED`, so activation is impossible and
@@ -279,6 +304,47 @@ def _lookup(mapping: Mapping[str, str], value: object, path: str, field: str) ->
     if not isinstance(value, str) or value not in mapping:
         raise WorkflowError(f"artifact {path} has an unrecognised {field} {value!r}")
     return mapping[value]
+
+
+def admitted_statuses(
+    *,
+    lifecycle: str,
+    claimed: bool,
+    derived: str,
+) -> frozenset[str]:
+    """The statuses the stored facts admit -- the projection, as a set.
+
+    This is the point of the decomposition: `status` should carry no information
+    that `lifecycle`, the lane claim and the committed artifacts do not already
+    carry. A set rather than a single value, because exactly one thing is still
+    genuinely underdetermined: a claimed task that has produced nothing is either
+    sealed for review or still being worked on, and *which* of those is a session
+    fact no artifact records. Nothing in the workflow needs the difference -- the
+    controller knows whether an attempt is running from its own runtime record --
+    so the field does not have to pretend to know.
+
+    An empty set means the facts do not add up to any status at all.
+    """
+
+    # A lifecycle claim is not self-certifying. Delivery means an independent
+    # reviewer passed an exact candidate, and abandonment means the Owner
+    # recorded one, so each is admitted only when the artifact that proves it is
+    # present -- otherwise setting `lifecycle` by hand would be enough to declare
+    # a task delivered.
+    if lifecycle == DELIVERED:
+        return frozenset({"APPROVED"}) if derived == "APPROVED" else frozenset()
+    if lifecycle == "ABANDONED":
+        return frozenset({"ABANDONED"}) if derived == "ABANDONED" else frozenset()
+    if lifecycle != OPEN:
+        return frozenset()
+    if not claimed:
+        # Nothing selected: no artifact may claim otherwise.
+        return frozenset({"PLANNED"}) if derived == UNSTARTED else frozenset()
+    if derived == UNSTARTED:
+        return frozenset({"READY"})
+    if derived == IN_FLIGHT:
+        return frozenset({"READY", "IN_DEVELOPMENT"})
+    return frozenset({derived})
 
 
 def derive_status(
@@ -970,6 +1036,21 @@ class WorkflowManager:
                 raise WorkflowError(f"{task_id} has invalid phase")
             if status not in STATES:
                 raise WorkflowError(f"{task_id} has invalid status {status!r}")
+            lifecycle = raw.get("lifecycle")
+            claimed = raw.get("claimed")
+            if lifecycle not in LIFECYCLE_VALUES:
+                raise WorkflowError(f"{task_id} has invalid lifecycle {lifecycle!r}")
+            if not isinstance(claimed, bool):
+                raise WorkflowError(f"{task_id} claimed must be a boolean")
+            # The composite status and the facts it is built from are one fact
+            # stored twice, so a config that disagrees with itself is refused
+            # rather than silently believed -- otherwise a hand edit could move
+            # the status without moving the lane.
+            if LIFECYCLE_OF[status] != (lifecycle, claimed):
+                raise WorkflowError(
+                    f"{task_id} decomposes {status} as {LIFECYCLE_OF[status]} but "
+                    f"lifecycle/claimed say {(lifecycle, claimed)}"
+                )
             if not isinstance(dependencies, list) or len(set(dependencies)) != len(dependencies):
                 raise WorkflowError(f"{task_id} dependencies must be a unique list")
             for dependency in dependencies:
@@ -1018,13 +1099,13 @@ class WorkflowManager:
                 raise WorkflowError("active_phase does not match active_task")
             if config.get("workflow_state") != tasks[active_task]["status"]:
                 raise WorkflowError("workflow_state does not match active task status")
-        active_states = [
-            task_id for task_id, task in tasks.items() if task["status"] not in RESTING_STATES
-        ]
-        if active_states and active_states != (
+        # The lane is held by at most one task, and the claim is now the field
+        # that says so rather than a consequence of the status enum.
+        claimed_tasks = [task_id for task_id, task in tasks.items() if task["claimed"]]
+        if claimed_tasks and claimed_tasks != (
             [active_task] if isinstance(active_task, str) else []
         ):
-            raise WorkflowError("exactly the active task may have an in-progress or READY state")
+            raise WorkflowError("exactly the active task may hold the single-active-work lane")
         self._validate_acyclic(tasks)
         self._validate_supersession_acyclic(tasks)
 
@@ -1118,10 +1199,10 @@ class WorkflowManager:
         tasks were once added with no author role and no review -- and acting on
         it would run the workflow from a state nothing can explain.
 
-        The two underdetermined markers are not conflicts of their own: a
-        recorded ``PLANNED``/``READY``/``IN_DEVELOPMENT`` is exactly what the
-        control plane is allowed to decide, because no artifact carries the
-        Manager's selection.
+        The recorded status is checked against :func:`admitted_statuses`, so this
+        also catches a config that contradicts itself: a status, a lifecycle and
+        a lane claim that do not describe the same task, or a status the
+        artifacts cannot produce.
         """
         base = root or self.repo
         artifacts = RepositoryArtifacts(base)
@@ -1135,15 +1216,18 @@ class WorkflowManager:
                 approved_commit=task["approved_commit"],
                 artifacts=artifacts,
             )
-            tolerated = UNDERDETERMINED.get(derived)
-            if tolerated is None:
-                if derived == recorded:
-                    continue
-                reason = f"the artifacts imply {derived}"
-            elif recorded in tolerated:
+            admitted = admitted_statuses(
+                lifecycle=str(task["lifecycle"]),
+                claimed=bool(task["claimed"]),
+                derived=derived,
+            )
+            if recorded in admitted:
                 continue
-            else:
-                reason = f"no artifact decides this; it is one of {sorted(tolerated)}"
+            reason = (
+                f"the stored facts admit only {sorted(admitted)}"
+                if admitted
+                else f"the stored facts add up to no status at all (artifacts say {derived})"
+            )
             conflicts.append(
                 {"task_id": task_id, "recorded": recorded, "derived": derived, "reason": reason}
             )
@@ -1523,6 +1607,11 @@ class WorkflowManager:
         if state != current and state not in ALLOWED_TRANSITIONS[current]:
             raise WorkflowError(f"illegal state transition for {task_id}: {current} -> {state}")
         task["status"] = state
+        # The decomposition is written here and nowhere else, so the composite
+        # status and the two facts it is built from cannot drift apart.
+        lifecycle, claimed = LIFECYCLE_OF[state]
+        task["lifecycle"] = lifecycle
+        task["claimed"] = claimed
         task.update(updates)
         config["active_phase"] = task["phase"]
         config["active_task"] = task_id

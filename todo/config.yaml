@@ -17,6 +17,8 @@
     "T000": {
       "phase": "P00",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [],
       "task_file": "todo/phases/P00-engineering-baseline/T000.md",
       "attempt": 0,
@@ -28,6 +30,8 @@
     "T001": {
       "phase": "P00",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T000"
       ],
@@ -41,6 +45,8 @@
     "T002": {
       "phase": "P00",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T001"
       ],
@@ -54,6 +60,8 @@
     "T003": {
       "phase": "P00",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T001"
       ],
@@ -67,6 +75,8 @@
     "T004": {
       "phase": "P00",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T000"
       ],
@@ -80,6 +90,8 @@
     "T005": {
       "phase": "P00",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T003"
       ],
@@ -93,6 +105,8 @@
     "T006": {
       "phase": "P00",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T003"
       ],
@@ -106,6 +120,8 @@
     "T007": {
       "phase": "P00",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T006"
       ],
@@ -119,6 +135,8 @@
     "T008": {
       "phase": "P00",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [],
       "task_file": "todo/phases/P00-engineering-baseline/T008.md",
       "attempt": 1,
@@ -130,6 +148,8 @@
     "T009": {
       "phase": "P00",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T006"
       ],
@@ -143,6 +163,8 @@
     "T010": {
       "phase": "P01",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T001"
       ],
@@ -156,6 +178,8 @@
     "T011": {
       "phase": "P01",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T010"
       ],
@@ -169,6 +193,8 @@
     "T012": {
       "phase": "P01",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T010"
       ],
@@ -182,6 +208,8 @@
     "T013": {
       "phase": "P01",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T010"
       ],
@@ -195,6 +223,8 @@
     "T014": {
       "phase": "P01",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T012"
       ],
@@ -208,6 +238,8 @@
     "T015": {
       "phase": "P00",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T014"
       ],
@@ -221,6 +253,8 @@
     "T020": {
       "phase": "P02",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T002",
         "T011"
@@ -235,6 +269,8 @@
     "T021": {
       "phase": "P02",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T001"
       ],
@@ -248,6 +284,8 @@
     "T022": {
       "phase": "P02",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T010",
         "T020",
@@ -265,6 +303,8 @@
     "T023": {
       "phase": "P02",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T022"
       ],
@@ -279,6 +319,8 @@
     "T024": {
       "phase": "P02",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T002",
         "T020",
@@ -294,6 +336,8 @@
     "T025": {
       "phase": "P02",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T022",
         "T023",
@@ -309,6 +353,8 @@
     "T026": {
       "phase": "P02",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T022",
         "T024"
@@ -323,6 +369,8 @@
     "T027": {
       "phase": "P02",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T023",
         "T026"
@@ -337,6 +385,8 @@
     "T030": {
       "phase": "P03",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T011",
         "T021"
@@ -351,6 +401,8 @@
     "T031": {
       "phase": "P03",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T030"
       ],
@@ -364,6 +416,8 @@
     "T032": {
       "phase": "P03",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T020",
         "T022",
@@ -379,6 +433,8 @@
     "T033": {
       "phase": "P03",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T032"
       ],
@@ -392,6 +448,8 @@
     "T034": {
       "phase": "P03",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T032",
         "T033"
@@ -406,6 +464,8 @@
     "T035": {
       "phase": "P03",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T030",
         "T031",
@@ -423,6 +483,8 @@
     "T036": {
       "phase": "P03",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T035"
       ],
@@ -436,6 +498,8 @@
     "T037": {
       "phase": "P03",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T031",
         "T036"
@@ -450,6 +514,8 @@
     "T038": {
       "phase": "P03",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T036",
         "T037"
@@ -465,6 +531,8 @@
     "T039": {
       "phase": "P03",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T035",
         "T036",
@@ -480,6 +548,8 @@
     "T040": {
       "phase": "P04",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T012",
         "T030",
@@ -497,6 +567,8 @@
     "T041": {
       "phase": "P04",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T037",
         "T038",
@@ -512,6 +584,8 @@
     "T042": {
       "phase": "P04",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T038",
         "T041"
@@ -526,6 +600,8 @@
     "T043": {
       "phase": "P04",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T023",
         "T042"
@@ -540,6 +616,8 @@
     "T049": {
       "phase": "P05",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T012",
         "T042",
@@ -555,6 +633,8 @@
     "T050": {
       "phase": "P05",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T042"
       ],
@@ -568,6 +648,8 @@
     "T051": {
       "phase": "P05",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T012",
         "T042"
@@ -582,6 +664,8 @@
     "T052": {
       "phase": "P05",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T051",
         "T053"
@@ -596,6 +680,8 @@
     "T053": {
       "phase": "P05",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T034",
         "T049"
@@ -610,6 +696,8 @@
     "T060": {
       "phase": "P06",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T050",
         "T051",
@@ -625,6 +713,8 @@
     "T061": {
       "phase": "P06",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T052",
         "T060"
@@ -639,6 +729,8 @@
     "T062": {
       "phase": "P06",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T061"
       ],
@@ -652,6 +744,8 @@
     "T063": {
       "phase": "P06",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T062"
       ],
@@ -666,6 +760,8 @@
     "T064": {
       "phase": "P06",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T063"
       ],
@@ -680,6 +776,8 @@
     "T065": {
       "phase": "P06",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T060",
         "T064"
@@ -694,6 +792,8 @@
     "T066": {
       "phase": "P06",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T064",
         "T065"
@@ -709,6 +809,8 @@
     "T067": {
       "phase": "P06",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T060",
         "T061"
@@ -724,6 +826,8 @@
     "T068": {
       "phase": "P06",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T060",
         "T062",
@@ -739,6 +843,8 @@
     "T069": {
       "phase": "P06",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T041",
         "T053",
@@ -757,6 +863,8 @@
     "T070": {
       "phase": "P07",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T025",
         "T049",
@@ -773,6 +881,8 @@
     "T071": {
       "phase": "P07",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T061",
         "T070",
@@ -788,6 +898,8 @@
     "T072": {
       "phase": "P07",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T033",
         "T071",
@@ -803,6 +915,8 @@
     "T073": {
       "phase": "P07",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T025",
         "T027",
@@ -819,6 +933,8 @@
     "T080": {
       "phase": "P08",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T072"
       ],
@@ -832,6 +948,8 @@
     "T081": {
       "phase": "P08",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T071",
         "T080"
@@ -846,6 +964,8 @@
     "T082": {
       "phase": "P08",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T072",
         "T073",
@@ -862,6 +982,8 @@
     "T083": {
       "phase": "P08",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T082",
         "T107"
@@ -876,6 +998,8 @@
     "T084": {
       "phase": "P08",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T025",
         "T072",
@@ -892,6 +1016,8 @@
     "T085": {
       "phase": "P08",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T070",
         "T081",
@@ -907,6 +1033,8 @@
     "T086": {
       "phase": "P08",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T083",
         "T085",
@@ -923,6 +1051,8 @@
     "T087": {
       "phase": "P08",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T068",
         "T084",
@@ -938,6 +1068,8 @@
     "T088": {
       "phase": "P08",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T084",
         "T110"
@@ -952,6 +1084,8 @@
     "T090": {
       "phase": "P09",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T081",
         "T083",
@@ -967,6 +1101,8 @@
     "T091": {
       "phase": "P09",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T021",
         "T043",
@@ -985,6 +1121,8 @@
     "T092": {
       "phase": "P09",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T090",
         "T091"
@@ -999,6 +1137,8 @@
     "T093": {
       "phase": "P09",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T082",
         "T083",
@@ -1015,6 +1155,8 @@
     "T094": {
       "phase": "P09",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T093"
       ],
@@ -1028,6 +1170,8 @@
     "T095": {
       "phase": "P09",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T094"
       ],
@@ -1041,6 +1185,8 @@
     "T096": {
       "phase": "P09",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T073",
         "T087",
@@ -1060,6 +1206,8 @@
     "T097": {
       "phase": "P09",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T085",
         "T091",
@@ -1075,6 +1223,8 @@
     "T100": {
       "phase": "P10",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T026",
         "T034",
@@ -1091,6 +1241,8 @@
     "T101": {
       "phase": "P10",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T050",
         "T069",
@@ -1108,6 +1260,8 @@
     "T102": {
       "phase": "P10",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T061",
         "T101",
@@ -1123,6 +1277,8 @@
     "T103": {
       "phase": "P10",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T085",
         "T102",
@@ -1138,6 +1294,8 @@
     "T104": {
       "phase": "P10",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T039",
         "T041"
@@ -1152,6 +1310,8 @@
     "T105": {
       "phase": "P06",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T063",
         "T068"
@@ -1170,6 +1330,8 @@
     "T106": {
       "phase": "P06",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T064",
         "T068",
@@ -1188,6 +1350,8 @@
     "T107": {
       "phase": "P06",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T065",
         "T066",
@@ -1208,6 +1372,8 @@
     "T108": {
       "phase": "P06",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T067",
         "T068",
@@ -1226,6 +1392,8 @@
     "T109": {
       "phase": "P06",
       "status": "APPROVED",
+      "lifecycle": "DELIVERED",
+      "claimed": false,
       "depends_on": [
         "T041",
         "T052",
@@ -1249,6 +1417,8 @@
     "T110": {
       "phase": "P06",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T040",
         "T041",
@@ -1268,6 +1438,8 @@
     "T111": {
       "phase": "P06",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T101",
         "T102",
@@ -1284,6 +1456,8 @@
     "T112": {
       "phase": "P06",
       "status": "PLANNED",
+      "lifecycle": "OPEN",
+      "claimed": false,
       "depends_on": [
         "T040",
         "T041",

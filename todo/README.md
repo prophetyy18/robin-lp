@@ -159,6 +159,12 @@ lane, and is refused for `APPROVED` work, whose only retirement route remains th
 annotation-only `SUPERSEDE`. Every non-terminal status therefore has an exit that does
 not depend on the blocked actor acting.
 
+Each task also records the two facts the status was hiding: `lifecycle`
+(`OPEN`/`DELIVERED`/`ABANDONED`) and `claimed` (whether it holds the single-active-work
+lane). The status is their projection together with the committed artifacts, and a
+config whose three values disagree is refused. See `todo/WORKFLOW.md` for the projection
+and the one case the artifacts cannot decide.
+
 After an approved task, the Manager explicitly chooses one dependency-complete
 `PLANNED` task and runs `ready <task>`. The controller never guesses among
 multiple candidates and never activates more than one task.

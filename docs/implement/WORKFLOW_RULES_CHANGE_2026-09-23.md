@@ -219,7 +219,46 @@ controller（现行 `_record_review_result` 在 APPROVED 时会删除记录）�
 仍读 `status`。真正迁移路由的判据仍然是 golden 等价测试：对每一次 `prepare-*`/`finish-*`
 的接受与拒绝，新判定必须与旧判定完全相同。
 
-## 9. 仍待实施
+## 9. 增量 4a 已落地：把 status 藏起来的两件事写出来
+
+**动手前的推演缩小了范围。** 原以为需要「车道声明」这个复合对象，推演后发现路由真正需要的
+只有**一个**新事实：
+
+| 现在混在 `status` 里的控制面事实 | 路由真的需要吗 |
+| --- | --- |
+| `PLANNED` vs `READY`（是否被选中） | **需要**，且无其他归属 → 新增 `claimed` |
+| `READY` vs `IN_DEVELOPMENT`（是否在跑） | **不需要**：`continue_develop` 靠运行时记录的存在判断，其余守卫只看「当前 attempt 有没有封存候选」——可派生 |
+
+于是每个任务记录新增两个字段：
+
+- `lifecycle`：`OPEN` / `DELIVERED` / `ABANDONED`——任务自身的状态；
+- `claimed`：是否占用唯一活动车道。
+
+`status` 变成「这两个事实 + 已提交构件」的**投影**。`admitted_statuses()` 是投影本身（返回
+可采纳集合，因为有一处真的未定），`LIFECYCLE_OF` 是它的逆（把 status 分解回两个事实），
+`_set_state` 三者一起写，因此不可能各自漂移。
+
+### 两条被强制而不是被假设的性质
+
+1. **配置自相矛盾即拒绝。** 同一事实存两遍只在「不一致不可能发生」时才是安全的。手改
+   `status` 而不改分解、或改分解而不改 `status`，`validate_config` 直接拒绝并指出两边各是什么。
+   这不是空话——**迁移时它精确地抓出了 62 处**测试里改了 status 却没改分解的地方。
+2. **`lifecycle` 不能自证。** 初版 `admitted_statuses` 让 `lifecycle=DELIVERED` 单独就承认
+   `APPROVED`——而交付是**证据声明**。现在 `DELIVERED` 只有在 `approved_commit` 与评审结论
+   都在场时才被承认，`ABANDONED` 同理。**这个漏洞是被我自己的表驱动测试当场抓出来的。**
+
+### 唯一仍然未定的一处
+
+一个 claimed 且尚无任何构件的任务，究竟是「已封存待审」还是「仍在开发」——**没有任何已提交
+构件能区分**，因为这是会话事实。工作流也不需要这个区别（controller 从自己的运行时记录就知道
+attempt 是否在跑），所以字段不再假装知道。
+
+### 迁移是纯新增
+
+`todo/config.yaml` 的回填是 **174 行新增、0 行删除**（87 个任务 × 2 个字段），没有任何既有
+行被改写，`status` 的历史取值一个都没动。这是「历史不可改写」在字段级的一次执行。
+
+## 10. 仍待实施
 
 - **增量 3**：路由改用派生事实，`status` 仍存为兼容投影。
 - **增量 4**：新修订只存 `lifecycle`；`READY`/`IN_DEVELOPMENT` 改由显式的车道声明承载。
@@ -230,7 +269,7 @@ controller（现行 `_record_review_result` 在 APPROVED 时会删除记录）�
 
 ---
 
-## 10. 验证
+## 11. 验证
 
 ```
 PYTHONPATH=src python -m pytest tests/test_workflow.py tests/test_workflow_state_graph.py \
@@ -260,7 +299,7 @@ Owner 出口、车道占用者可释放车道，以及**从 `.claude/agents/*.md
 outcome（现行 `finish_plan` 会把它推进到 `AWAITING_PLAN_REVIEW`），历史遍历直接把它暴露为
 `WorkflowError`。
 
-## 11. 与在途工作的关系
+## 12. 与在途工作的关系
 
 本次不触碰任何任务状态、不迁移任何任务、不改写任何历史提交。`todo/config.yaml` 中 T109 及其
 A0026 影响链（T073/T084/T087/T088/T096/T103/T107/T108/T110/T111 的 10 条开放 impact）与本次

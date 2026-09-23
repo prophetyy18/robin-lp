@@ -6,10 +6,17 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 from tools.workflow import WorkflowError, WorkflowManager
-from tools.workflow.core import ALLOWED_TRANSITIONS, STATES, AttemptRecord
+from tools.workflow.core import (
+    ALLOWED_TRANSITIONS,
+    LIFECYCLE_OF,
+    STATES,
+    AttemptRecord,
+    admitted_statuses,
+)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -34,6 +41,22 @@ def _impact_assessment() -> dict[str, str]:
         "security": "checked",
         "verification": "checked",
     }
+
+
+def _decompose(status: str) -> dict[str, object]:
+    """The lifecycle and claim that belong with a status, from the one table."""
+    lifecycle, claimed = LIFECYCLE_OF[status]
+    return {"status": status, "lifecycle": lifecycle, "claimed": claimed}
+
+
+def _set_task_state(config: dict[str, Any], task_id: str, status: str, **fields: object) -> None:
+    """Move a task the way the controller would, decomposition included.
+
+    Tests that hand-edit a status now have to hand-edit the two facts it is built
+    from, or `validate_config` refuses the config -- which is the point of the
+    decomposition, and is asserted on its own elsewhere.
+    """
+    config["tasks"][task_id].update(_decompose(status), **fields)
 
 
 def _minimal_config(baseline: str) -> dict[str, object]:
@@ -61,18 +84,18 @@ def _minimal_config(baseline: str) -> dict[str, object]:
         "tasks": {
             "T000": {
                 "phase": "P00",
-                "status": "APPROVED",
                 "depends_on": [],
                 "task_file": "todo/phases/P00/T000.md",
                 "approved_commit": baseline,
+                **_decompose("APPROVED"),
                 **common,
             },
             "T001": {
                 "phase": "P00",
-                "status": "READY",
                 "depends_on": ["T000"],
                 "task_file": "todo/phases/P00/T001.md",
                 "approved_commit": None,
+                **_decompose("READY"),
                 **common,
             },
         },
@@ -286,8 +309,7 @@ def test_development_attempt_allows_only_one_continuation(tmp_path: Path) -> Non
 
 def _finish_seed_task_for_maintenance(repo: Path, manager: WorkflowManager) -> None:
     config = manager.load_config()
-    config["tasks"]["T001"]["status"] = "APPROVED"
-    config["tasks"]["T001"]["approved_commit"] = _git(repo, "rev-parse", "HEAD")
+    _set_task_state(config, "T001", "APPROVED", approved_commit=_git(repo, "rev-parse", "HEAD"))
     config["active_task"] = "T001"
     config["active_phase"] = "P00"
     config["workflow_state"] = "APPROVED"
@@ -298,7 +320,7 @@ def _finish_seed_task_for_maintenance(repo: Path, manager: WorkflowManager) -> N
 
 def _make_future_task_planned(repo: Path, manager: WorkflowManager) -> None:
     config = manager.load_config()
-    config["tasks"]["T001"]["status"] = "PLANNED"
+    _set_task_state(config, "T001", "PLANNED")
     config["active_task"] = "T000"
     config["active_phase"] = "P00"
     config["workflow_state"] = "APPROVED"
@@ -1114,12 +1136,30 @@ def test_non_m3_agent_runtime_is_rejected(tmp_path: Path) -> None:
         manager.validate_config(config)
 
 
-def test_config_rejects_more_than_one_active_task(tmp_path: Path) -> None:
+def test_config_rejects_more_than_one_claimed_task(tmp_path: Path) -> None:
     repo, _ = _make_repo(tmp_path)
     manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
     config = manager.load_config()
-    config["tasks"]["T000"]["status"] = "READY"
+    # T001 is the active task and holds the lane; claiming T000 too must fail.
+    _set_task_state(config, "T000", "READY")
     with pytest.raises(WorkflowError, match="exactly the active task"):
+        manager.validate_config(config)
+
+
+def test_config_rejects_a_status_that_contradicts_its_decomposition(
+    tmp_path: Path,
+) -> None:
+    """The composite status and the facts it is built from are one fact.
+
+    Storing it twice is only safe because a disagreement is refused: otherwise a
+    hand edit could move the status without moving the lane, and the two would
+    mean different things to different readers.
+    """
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    config = manager.load_config()
+    config["tasks"]["T001"]["status"] = "PLANNED"  # lifecycle/claimed still say READY
+    with pytest.raises(WorkflowError, match="decomposes PLANNED as .* but lifecycle/claimed"):
         manager.validate_config(config)
 
 
@@ -1165,7 +1205,7 @@ def test_ready_activates_one_dependency_complete_planned_task(tmp_path: Path) ->
     repo, _ = _make_repo(tmp_path)
     manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
     config = manager.load_config()
-    config["tasks"]["T001"]["status"] = "PLANNED"
+    _set_task_state(config, "T001", "PLANNED")
     config["active_task"] = "T000"
     config["workflow_state"] = "APPROVED"
     _write_json(repo / "todo" / "config.yaml", config)
@@ -1727,7 +1767,6 @@ def _add_task_to_config(worktree: Path, task_id: str = "T002") -> None:
     config = json.loads(config_path.read_text(encoding="utf-8"))
     config["tasks"][task_id] = {
         "phase": "P00",
-        "status": "PLANNED",
         "depends_on": ["T000"],
         "task_file": f"todo/phases/P00/{task_id}.md",
         "attempt": 0,
@@ -1735,6 +1774,7 @@ def _add_task_to_config(worktree: Path, task_id: str = "T002") -> None:
         "candidate_commit": None,
         "approved_commit": None,
         "latest_review": None,
+        **_decompose("PLANNED"),
     }
     _write_json(config_path, config)
 
@@ -1823,7 +1863,6 @@ def _add_planned_dependent(repo: Path, manager: WorkflowManager) -> None:
     config = manager.load_config()
     config["tasks"]["T002"] = {
         "phase": "P00",
-        "status": "PLANNED",
         "depends_on": ["T001"],
         "task_file": "todo/phases/P00/T002.md",
         "attempt": 0,
@@ -1831,6 +1870,7 @@ def _add_planned_dependent(repo: Path, manager: WorkflowManager) -> None:
         "candidate_commit": None,
         "approved_commit": None,
         "latest_review": None,
+        **_decompose("PLANNED"),
     }
     _write_json(repo / "todo" / "config.yaml", config)
     _git(repo, "add", "-A")
@@ -2118,7 +2158,10 @@ def test_validate_refuses_a_status_no_artifact_supports(tmp_path: Path) -> None:
     manager.validate_repository()
 
     config = manager.load_config()
-    config["tasks"]["T000"]["status"] = "PLANNED"  # approved, with the evidence
+    # Flip an approved task back to unstarted, decomposition and all, so the
+    # config is internally consistent and only the artifacts disagree. That is
+    # the shape a hand edit takes once the decomposition exists.
+    _set_task_state(config, "T000", "PLANNED")
     _write_json(repo / "todo" / "config.yaml", config)
 
     # `status` reports it so an operator sees it while inspecting...
@@ -2127,43 +2170,94 @@ def test_validate_refuses_a_status_no_artifact_supports(tmp_path: Path) -> None:
             "task_id": "T000",
             "recorded": "PLANNED",
             "derived": "APPROVED",
-            "reason": "the artifacts imply APPROVED",
+            "reason": ("the stored facts add up to no status at all (artifacts say APPROVED)"),
         }
     ]
     # ...and `validate` refuses it outright.
-    with pytest.raises(WorkflowError, match="T000=PLANNED but the artifacts imply APPROVED"):
+    with pytest.raises(WorkflowError, match="T000=PLANNED but the stored facts add up"):
         manager.validate_repository()
 
 
-def test_validate_accepts_what_only_the_control_plane_can_decide(tmp_path: Path) -> None:
-    """PLANNED, READY and IN_DEVELOPMENT are decisions, not artifact facts.
+def test_admitted_statuses_is_the_whole_projection() -> None:
+    """The projection, exhaustively: one fact decides, one stays unknown.
 
-    No committed artifact carries the Manager's selection, so these three must
-    not be reported as conflicts. They are bounded all the same: which of them
-    is admissible depends on whether an attempt has been started.
+    This is the table the whole decomposition rests on. `lifecycle` and the lane
+    claim decide everywhere except a single genuinely undetermined case -- a
+    claimed task that has produced nothing is either sealed for review or still
+    being worked on, and *which* is a session fact no artifact records. An empty
+    set means the facts contradict each other.
     """
+    empty: frozenset[str] = frozenset()
+
+    # Nothing selected: no artifact may claim otherwise.
+    assert admitted_statuses(lifecycle="OPEN", claimed=False, derived="UNSTARTED") == {"PLANNED"}
+    assert admitted_statuses(lifecycle="OPEN", claimed=False, derived="IN_FLIGHT") == empty
+    assert admitted_statuses(lifecycle="OPEN", claimed=False, derived="AWAITING_REVIEW") == empty
+
+    # Selected, nothing sealed: READY only -- a claimed task with no artifacts
+    # cannot be IN_DEVELOPMENT until an attempt has actually been opened.
+    assert admitted_statuses(lifecycle="OPEN", claimed=True, derived="UNSTARTED") == {"READY"}
+
+    # Selected, an attempt opened, nothing produced: the one open question.
+    assert admitted_statuses(lifecycle="OPEN", claimed=True, derived="IN_FLIGHT") == {
+        "READY",
+        "IN_DEVELOPMENT",
+    }
+
+    # Anything the artifacts decide is taken as decided.
+    for derived in ("AWAITING_REVIEW", "CHANGES_REQUESTED", "PLANNING", "BLOCKED"):
+        assert admitted_statuses(lifecycle="OPEN", claimed=True, derived=derived) == {derived}
+        assert admitted_statuses(lifecycle="OPEN", claimed=False, derived=derived) == empty
+
+    # The task's ending is admitted only when the artifact that proves it exists:
+    # delivery is a reviewer's verdict on an exact candidate, and abandonment is
+    # an Owner record. Neither may be declared by setting a field.
+    assert admitted_statuses(lifecycle="DELIVERED", claimed=False, derived="APPROVED") == {
+        "APPROVED"
+    }
+    assert admitted_statuses(lifecycle="ABANDONED", claimed=False, derived="ABANDONED") == {
+        "ABANDONED"
+    }
+    for derived in ("UNSTARTED", "IN_FLIGHT", "AWAITING_REVIEW"):
+        assert admitted_statuses(lifecycle="DELIVERED", claimed=False, derived=derived) == empty
+        assert admitted_statuses(lifecycle="ABANDONED", claimed=False, derived=derived) == empty
+
+    # A lifecycle nobody defines admits nothing at all.
+    assert admitted_statuses(lifecycle="MADE_UP", claimed=False, derived="UNSTARTED") == empty
+
+
+def test_validate_accepts_what_only_the_control_plane_can_decide(tmp_path: Path) -> None:
+    """The same boundary, end to end through a real config."""
     repo, _ = _make_repo(tmp_path)
     manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
     config_path = repo / "todo" / "config.yaml"
 
-    def set_state(status: str, attempt: int) -> list[dict[str, str]]:
+    def conflicts(status: str, attempt: int) -> list[dict[str, str]]:
         config = manager.load_config()
-        config["tasks"]["T001"]["status"] = status
+        _set_task_state(config, "T001", status)
         config["tasks"]["T001"]["attempt"] = attempt
         config["workflow_state"] = status
         _write_json(config_path, config)
         return manager.status_conflicts(config)
 
-    # Nothing has run: only PLANNED and READY are explainable.
-    assert set_state("PLANNED", 0) == []
-    assert set_state("READY", 0) == []
-    assert set_state("AWAITING_REVIEW", 0) != []
-    assert set_state("APPROVED", 0) != []
+    # Nothing has run.
+    assert conflicts("PLANNED", 0) == []
+    assert conflicts("READY", 0) == []
+    assert conflicts("AWAITING_REVIEW", 0) != []
+    assert conflicts("APPROVED", 0) != []
 
-    # An attempt is recorded with no artifact for it: READY or IN_DEVELOPMENT.
-    assert set_state("READY", 3) == []
-    assert set_state("IN_DEVELOPMENT", 3) == []
-    assert set_state("BLOCKED", 3) != []
+    # An attempt is recorded with no artifact for it.
+    assert conflicts("READY", 3) == []
+    assert conflicts("IN_DEVELOPMENT", 3) == []
+    assert conflicts("BLOCKED", 3) != []
+
+    # A claimed task may not be recorded as unselected, and the reverse: the
+    # composite status and the facts behind it must describe the same task.
+    config = manager.load_config()
+    _set_task_state(config, "T001", "READY")
+    config["tasks"]["T001"]["claimed"] = False  # now lifecycle/claimed disagree
+    with pytest.raises(WorkflowError, match="decomposes READY as"):
+        manager.validate_config(config)
 
 
 def test_discard_attempt_clears_a_remnant_on_a_closed_task(tmp_path: Path) -> None:
@@ -2258,7 +2352,7 @@ def test_discard_attempt_redirects_instead_of_trapping(tmp_path: Path) -> None:
     manager.prepare_develop("T001")
     _lose_the_worktree(manager, "T001")
     config = manager.load_config()
-    config["tasks"]["T001"]["status"] = "CHANGES_REQUESTED"
+    _set_task_state(config, "T001", "CHANGES_REQUESTED")
     config["workflow_state"] = "CHANGES_REQUESTED"
     _write_json(repo / "todo" / "config.yaml", config)
     _git(repo, "add", "todo/config.yaml")

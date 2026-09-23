@@ -64,6 +64,33 @@ rather than a sample) the derivation reproduces every recorded value except one,
 and that one is a pre-2026-09-15 semantics difference that must not be rewritten.
 `tests/test_workflow_state_derivation.py` holds the walk and the named exception.
 
+### What a task record actually says
+
+Each task now carries the two facts the composite status was hiding, so that no
+reader has to decode an enum to find them:
+
+- `lifecycle` — `OPEN`, `DELIVERED` or `ABANDONED`: the task's own state;
+- `claimed` — whether the task holds the single-active-work lane.
+
+`status` is the projection of those two plus the committed artifacts:
+`admitted_statuses` in `tools/workflow/core.py` is that projection, and it is the
+only place the mapping lives. `LIFECYCLE_OF` decomposes a status back into the two
+facts, and `_set_state` writes all three together so they cannot drift.
+
+Two properties are enforced rather than assumed. A config whose `status`,
+`lifecycle` and `claimed` do not describe the same task is refused, because
+storing one fact twice is only safe while a disagreement is impossible. And a
+`lifecycle` is not self-certifying: `DELIVERED` is admitted only when
+`approved_commit` and the reviewer's verdict are present, and `ABANDONED` only
+when the Owner's record is, so setting a field by hand can never declare work
+delivered.
+
+Exactly one status remains genuinely undetermined by the artifacts: a claimed task
+that has produced nothing is either sealed for review or still being worked on,
+and *which* is a session fact no committed artifact records. Nothing in the
+workflow needs the difference — the controller knows whether an attempt is running
+from its own runtime record — so the field does not pretend to know.
+
 ## Commands
 
 Run from the repository root with the project Python:

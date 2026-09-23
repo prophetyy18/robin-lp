@@ -29,6 +29,8 @@ from pathlib import Path
 import pytest
 from tools.workflow.core import (
     ALLOWED_TRANSITIONS,
+    LIFECYCLE_OF,
+    LIFECYCLE_VALUES,
     MAINTENANCE_STATES,
     RESTING_STATES,
     STATES,
@@ -186,6 +188,26 @@ def test_maintenance_lane_declares_an_exit_from_escalation() -> None:
     assert "ESCALATED" not in TERMINAL_MAINTENANCE_STATES
     assert "ABANDONED" in MAINTENANCE_STATES
     assert frozenset({"APPROVED", "ABANDONED"}) == TERMINAL_MAINTENANCE_STATES
+
+
+def test_the_decomposition_is_total_and_agrees_with_the_lane() -> None:
+    """One table decomposes every status into lifecycle and a lane claim.
+
+    The table has to be total -- a status it does not cover could be written
+    without a decomposition, and `validate_config` would then read whatever the
+    last writer left. The lane claim has to agree with the resting set, or the
+    "exactly one task holds the lane" rule and the lane-release rule would be
+    talking about different sets of tasks.
+    """
+
+    assert set(LIFECYCLE_OF) == set(STATES)
+    for state, (lifecycle, claimed) in LIFECYCLE_OF.items():
+        assert lifecycle in LIFECYCLE_VALUES
+        assert claimed is (state not in RESTING_STATES), (
+            f"{state} claims the lane inconsistently with the resting set"
+        )
+    for state in TERMINAL_TASK_STATES:
+        assert LIFECYCLE_OF[state][1] is False, f"{state} must release the lane"
 
 
 def test_every_lane_that_holds_the_work_slot_can_release_it() -> None:

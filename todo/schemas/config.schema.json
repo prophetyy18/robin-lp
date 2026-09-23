@@ -69,12 +69,17 @@
         "ABANDONED"
       ]
     },
+    "lifecycle": {
+      "enum": ["OPEN", "DELIVERED", "ABANDONED"]
+    },
     "task": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "phase",
         "status",
+        "lifecycle",
+        "claimed",
         "depends_on",
         "task_file",
         "attempt",
@@ -86,6 +91,8 @@
       "properties": {
         "phase": {"type": "string", "pattern": "^P[0-9]{2}$"},
         "status": {"$ref": "#/$defs/state"},
+        "lifecycle": {"$ref": "#/$defs/lifecycle"},
+        "claimed": {"type": "boolean"},
         "depends_on": {
           "type": "array",
           "items": {"type": "string", "pattern": "^T[0-9]{3}$"},
