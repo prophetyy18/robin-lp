@@ -110,30 +110,60 @@ maintenance Developer 报告 `TRIAGE_REQUIRED` 时写入 `ESCALATED`（`core.py:
 
 ---
 
-## 6. 本次不做，留给后续的增量
+## 6. 增量 2 已落地：派生投影与历史等价性判定
 
-Owner 同时确认了状态分解方案（生命周期 / 就绪性 / 当前构件 / 下一个行动者 / 评审结论 /
-发现 / 阻断 / 决策 / 验证证据 / 依赖与退役）。图校验改变了它的实施顺序：
+`tools/workflow/core.py` 新增 `derive_status()`：给定一次修订中已提交的构件（review、triage、
+owner-decision、planner/developer evidence），返回该修订**蕴含**的状态；**不读** `status`
+本身，**不读** `.git/` 下的运行时记录（那些在提交修订里根本不存在，这正是等价性可证明的前提）。
 
-- **增量 2**：`derive_status()` 派生投影，**不写入任何状态**；用仓库自己的 1,010 个
-  `todo/config.yaml` 历史修订做等价性判定（每个改变状态的提交里都同时提交了解释该变化的证据，
-  所以投影是该提交下仓库树的纯函数）。已知会有一处不吻合：`IN_DEVELOPMENT` 从未被提交
-  （全历史仅 1 次，且是手工 bootstrap 提交），这本身就说明它属会话/车道条件而非生命周期。
+**实测结果（全量，不是抽样）**：扫描 `todo/config.yaml` 的全部 **280 个历史修订**，共
+**18,493 个任务·修订**。
+
+| 类别 | 数量 |
+| --- | --- |
+| 精确复现 | 9,124 |
+| 控制面值（无构件可区分） | 9,368 → `PLANNED` 9,308、`READY` 59、`IN_DEVELOPMENT` 1 |
+| 无法复现 | **1** |
+
+除 `PLANNED` 外，9,185 个记录值里 9,124 个精确复现、60 个是控制面值、**1 个**例外。
+
+**那 1 个例外是历史语义漂移，且必须保留。** `63cfb2cc`（2026-09-15）记录 T001 为 `BLOCKED`，
+而 review 的 verdict 是 `FAIL`。当时的 controller 是
+`if verdict == "BLOCKED" or "UNKNOWN" in statuses or unknowns: return "BLOCKED"`——那次 review
+带着未解决的 unknowns，所以 `BLOCKED` 在当时语义下是**正确**的值。现行语义只把
+`verdict == "BLOCKED"` 映射为 BLOCKED。把它「修好」等于改写历史，所以它被作为具名例外钉在
+`tests/test_workflow_state_derivation.py:PRE_SEMANTICS_EXCEPTIONS` 里：多出一条就是新缺陷，
+少一条说明例外表过期。
+
+**由此得到的模型结论（有数据支撑，不再是推断）：**
+
+- 12 个状态里 **8 个完全可从构件推导**（`APPROVED`、`AWAITING_REVIEW`、`CHANGES_REQUESTED`、
+  `TRIAGE_REQUIRED`、`PLANNING`、`AWAITING_PLAN_REVIEW`、`OWNER_DECISION_REQUIRED`、`BLOCKED`）；
+- **2 个是控制面事实**，任何已提交构件都区分不出：`READY`（Manager 选中）与 `IN_DEVELOPMENT`
+  （attempt 在跑）——它们与 `PLANNED` 的区别只是一个不留痕迹的决定；
+- 这恰好对应目标模型里仅有的两个**显式写入**字段（`lifecycle` 与 `active_work` claim），
+  其余全部派生。
+
+**`IN_DEVELOPMENT` 不是持久状态，已被测量证实**：全历史被提交过**恰好 1 次**，且那一次是手工
+bootstrap 提交（`d697dd7`）。`test_history_records_in_development_exactly_once` 把这个 SHA
+钉住：若将来 controller 开始提交这个值，测试会直接说出来。
+
+## 7. 仍待实施
+
 - **增量 3**：路由改用派生事实，`status` 仍存为兼容投影。
-- **增量 4**：新修订只存 `lifecycle`。
+- **增量 4**：新修订只存 `lifecycle`；`READY`/`IN_DEVELOPMENT` 改由显式的车道声明承载。
 
-三条状态枚举副本（`tools/workflow/core.py:STATES`、`tools/progress/check.py:PLAN_STATES`、
-`tests/test_progress.py` 里的字面量）本次已消除两条：`test_progress.py` 改为**与控制器表断言
-相等**，`PLAN_STATES` 不再是一份可漂移的手抄本。`tools.progress` **不**导入控制器——它是产品
-工具，保持独立，等价性在测试中断言。
+三条状态枚举副本已消除两条：`test_progress.py` 改为**与控制器表断言相等**，`PLAN_STATES`
+不再是一份可漂移的手抄本。`tools.progress` **不**导入控制器——它是产品工具，保持独立，
+等价性在测试中断言。
 
 ---
 
-## 7. 验证
+## 8. 验证
 
 ```
 PYTHONPATH=src python -m pytest tests/test_workflow.py tests/test_workflow_state_graph.py \
-  tests/test_progress.py tests/test_workflow_contracts.py
+  tests/test_workflow_state_derivation.py tests/test_progress.py tests/test_workflow_contracts.py
 python -m ruff format --check . && python -m ruff check .
 PYTHONPATH=src python -m mypy tools tests
 ```
@@ -143,7 +173,15 @@ Owner 出口、车道占用者可释放车道，以及**从 `.claude/agents/*.md
 角色是否够得着（并断言检查者**没有** `Edit`、生产者**不能** `Agent`、Manager **不能**实现或
 写 handoff）。权限表不硬编码，删掉某个定义里的能力会在这里失败，而不是在运行中途才发现。
 
-## 8. 与在途工作的关系
+`tests/test_workflow_state_derivation.py` 把等价性判定固化：遍历全部 280 个历史修订，逐个
+任务比对推导值与记录值，并把唯一的例外钉成具名常量。同文件还单测了每条推导规则、构件累积时
+「最新事件胜出」的顺序，以及非法取值必须响亮失败而不是悄悄推出一个错值。
+
+**一处单测发现的真实缺陷**：初版 `derive_status` 不认识 planner 的 `NO_CHANGE_REQUIRED`
+outcome（现行 `finish_plan` 会把它推进到 `AWAITING_PLAN_REVIEW`），历史遍历直接把它暴露为
+`WorkflowError`。
+
+## 9. 与在途工作的关系
 
 本次不触碰任何任务状态、不迁移任何任务、不改写任何历史提交。`todo/config.yaml` 中 T109 及其
 A0026 影响链（T073/T084/T087/T088/T096/T103/T107/T108/T110/T111 的 10 条开放 impact）与本次

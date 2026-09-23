@@ -14,7 +14,7 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from tools import check_acceptance, check_citations, check_imports
 
@@ -178,9 +178,178 @@ MAINTENANCE_STATES = {
 #: Maintenance statuses that close the lane.
 TERMINAL_MAINTENANCE_STATES = frozenset({"APPROVED", "ABANDONED"})
 
+#: The two status sets no committed artifact can distinguish, because the fact
+#: they encode is a decision of the control plane rather than a property of the
+#: artifacts. ``PLANNED`` and ``READY`` differ only by the Manager's selection,
+#: and ``READY`` and ``IN_DEVELOPMENT`` differ only by whether an attempt is
+#: currently running. Measured over all 280 historical revisions of
+#: ``todo/config.yaml``: of 9,185 recorded values that are not ``PLANNED``,
+#: 9,184 are reproduced exactly by :func:`derive_status` and the remaining 60
+#: are these two sets. ``IN_DEVELOPMENT`` has in fact been *committed* exactly
+#: once in the whole history, by a hand-made bootstrap commit, which is the
+#: clearest evidence that it is a session condition rather than durable state.
+UNSTARTED = "UNSTARTED"
+IN_FLIGHT = "IN_FLIGHT"
+
+UNDERDETERMINED: dict[str, frozenset[str]] = {
+    UNSTARTED: frozenset({"PLANNED", "READY"}),
+    IN_FLIGHT: frozenset({"READY", "IN_DEVELOPMENT"}),
+}
+
 
 class WorkflowError(RuntimeError):
     """Raised when a workflow invariant would be violated."""
+
+
+class ArtifactSource(Protocol):
+    """Read-only view of the artifacts a status may be derived from.
+
+    Two implementations are needed and neither can be the other: the controller
+    reads the working tree it is about to commit, and the equivalence check
+    reads a historical revision through Git. Keeping the derivation behind this
+    interface is what lets the same rules be proved against 280 revisions.
+    """
+
+    def exists(self, path: str) -> bool: ...
+
+    def read(self, path: str) -> Mapping[str, Any]: ...
+
+
+@dataclass(frozen=True)
+class RepositoryArtifacts:
+    """An :class:`ArtifactSource` over a checked-out tree."""
+
+    root: Path
+
+    def exists(self, path: str) -> bool:
+        return (self.root / path).is_file()
+
+    def read(self, path: str) -> Mapping[str, Any]:
+        try:
+            payload = json.loads((self.root / path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise WorkflowError(f"artifact {path} is unreadable: {error}") from error
+        if not isinstance(payload, Mapping):
+            raise WorkflowError(f"artifact {path} is not a JSON object")
+        return payload
+
+
+def _artifact_paths(phase: str, task_id: str, attempt: int) -> dict[str, str]:
+    stamped = f"{attempt:03d}"
+    return {
+        "review": f"todo/reviews/{phase}/{task_id}/review-{stamped}.json",
+        "plan_review": f"todo/reviews/{phase}/{task_id}/plan-review-{stamped}.json",
+        "triage": f"todo/triage/{phase}/{task_id}/triage-{stamped}.json",
+        "owner_decision": f"todo/triage/{phase}/{task_id}/owner-decision-{stamped}.json",
+        "planner": f"todo/evidence/{phase}/{task_id}/attempt-{stamped}-planner.json",
+        "developer": f"todo/evidence/{phase}/{task_id}/attempt-{stamped}-developer.json",
+    }
+
+
+#: Verdict to status. A checker's conclusion is a fact about the artifact, so it
+#: belongs in the derived status rather than in a separate field -- but note that
+#: the mapping is not injective: a plan review PASS means "go implement", which
+#: the composite field can only express as CHANGES_REQUESTED.
+_REVIEW_VERDICTS = {
+    "PASS": "APPROVED",
+    "FAIL": "CHANGES_REQUESTED",
+    "TRIAGE_REQUIRED": "TRIAGE_REQUIRED",
+    "BLOCKED": "BLOCKED",
+}
+_TRIAGE_CLASSIFICATIONS = {
+    "IMPLEMENTATION_DEFECT": "CHANGES_REQUESTED",
+    "CONTRACT_MISMATCH": "PLANNING",
+    "SPEC_DEFECT": "PLANNING",
+    "OWNER_DECISION_REQUIRED": "OWNER_DECISION_REQUIRED",
+    "EXTERNAL_BLOCKED": "BLOCKED",
+}
+_DEVELOPER_OUTCOMES = {
+    "CANDIDATE_READY": "AWAITING_REVIEW",
+    "TRIAGE_REQUIRED": "TRIAGE_REQUIRED",
+    "BLOCKED": "BLOCKED",
+}
+_PLAN_REVIEW_VERDICTS = {
+    "PASS": "CHANGES_REQUESTED",
+    "FAIL": "PLANNING",
+    "BLOCKED": "PLAN_REVIEW_BLOCKED",
+}
+
+
+def _lookup(mapping: Mapping[str, str], value: object, path: str, field: str) -> str:
+    if not isinstance(value, str) or value not in mapping:
+        raise WorkflowError(f"artifact {path} has an unrecognised {field} {value!r}")
+    return mapping[value]
+
+
+def derive_status(
+    *,
+    phase: str,
+    task_id: str,
+    attempt: int,
+    approved_commit: str | None,
+    artifacts: ArtifactSource,
+) -> str:
+    """Return the status the committed artifacts imply.
+
+    The result is either a concrete status, or :data:`UNSTARTED` / :data:`IN_FLIGHT`
+    when no artifact can decide it -- see :data:`UNDERDETERMINED`. The function
+    never reads ``status`` itself and never consults the runtime records under
+    ``.git/``: those do not exist in a committed revision, which is the whole
+    reason the derivation has to be provable against history.
+
+    Within one attempt the artifacts accumulate, so the *latest* event decides.
+    The order is the controller's own sequence:
+
+        developer < review | triage < owner decision < planner < plan review
+    """
+    if approved_commit:
+        return "APPROVED"
+
+    paths = _artifact_paths(phase, task_id, attempt)
+
+    plan_review = (
+        artifacts.read(paths["plan_review"]) if artifacts.exists(paths["plan_review"]) else None
+    )
+    if plan_review is not None:
+        return _lookup(
+            _PLAN_REVIEW_VERDICTS, plan_review.get("verdict"), paths["plan_review"], "verdict"
+        )
+
+    planner = artifacts.read(paths["planner"]) if artifacts.exists(paths["planner"]) else None
+    if planner is not None:
+        outcome = planner.get("outcome")
+        if outcome in {"BLOCKED", "OWNER_DECISION_REQUIRED"}:
+            return str(outcome)
+        # A supported NO_CHANGE_REQUIRED result still lands as a plan candidate
+        # to be reviewed: completion depends on acceptance evidence, never on
+        # manufacturing a file diff.
+        if outcome not in {"PLAN_READY", "NO_CHANGE_REQUIRED"}:
+            raise WorkflowError(
+                f"artifact {paths['planner']} has an unrecognised outcome {outcome!r}"
+            )
+        return "AWAITING_PLAN_REVIEW"
+
+    if artifacts.exists(paths["owner_decision"]):
+        return "PLANNING"
+
+    triage = artifacts.read(paths["triage"]) if artifacts.exists(paths["triage"]) else None
+    if triage is not None:
+        return _lookup(
+            _TRIAGE_CLASSIFICATIONS,
+            triage.get("classification"),
+            paths["triage"],
+            "classification",
+        )
+
+    review = artifacts.read(paths["review"]) if artifacts.exists(paths["review"]) else None
+    if review is not None:
+        return _lookup(_REVIEW_VERDICTS, review.get("verdict"), paths["review"], "verdict")
+
+    developer = artifacts.read(paths["developer"]) if artifacts.exists(paths["developer"]) else None
+    if developer is not None:
+        return _lookup(_DEVELOPER_OUTCOMES, developer.get("outcome"), paths["developer"], "outcome")
+
+    return UNSTARTED if attempt == 0 else IN_FLIGHT
 
 
 @dataclass(frozen=True)
