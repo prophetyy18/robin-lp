@@ -1,0 +1,10 @@
+{
+  "amendment_id": "A0045",
+  "task_ids": [
+    "T073"
+  ],
+  "layer": "CONTRACT",
+  "target_status": "PLANNED",
+  "summary": "remove T109 from T073.md Dependencies section",
+  "owner_direction": "T073.md Dependencies section (line 8) currently reads 'T025, T027, T107, T109, T112'. After A0039 cleanup, the config.yaml depends_on for T073 is [T025, T027, T107, T112] (T109 was removed). The Dependencies section is a list of CURRENT dependencies, not historical predecessors; T109 is now a historical read-only predecessor only and must not appear in Dependencies. Repair: edit ONLY todo/phases/P07-risk-and-paper/T073.md, changing the Dependencies section from 'T025, T027, T107, T109, T112' to 'T025, T027, T107, T112'. Preserve all other T109 mentions in the contract text (they appear in Acceptance clauses, Must-not clauses, and References — all legitimately historical). Do NOT modify todo/config.yaml (it is already correct). Do NOT add any other change. No Must-not / safety / execution / signer change. The A0026:T073:prepaper-current-evidence impact is already closed by A0030; do not list it in resolved_task_impacts (controller would reject). Leave affected_existing_tasks EMPTY."
+}

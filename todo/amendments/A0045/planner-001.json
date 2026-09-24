@@ -1,0 +1,20 @@
+{
+  "amendment_id": "A0045",
+  "outcome": "AMENDMENT_READY",
+  "summary": "Aligned T073.md Dependencies section with todo/config.yaml by removing T109 from the current-dependency list (T025, T027, T107, T109, T112 -> T025, T027, T107, T112).",
+  "rationale": "After A0039 removed T109 from T073's depends_on in todo/config.yaml, the authoritative machine-readable dependency list is [T025, T027, T107, T112]. The Dependencies section of T073.md (line 8) still listed T109 as a current dependency, creating a contract+config drift. T109 is the historical read-only predecessor; the Dependencies section is semantically a list of CURRENT dependencies, not historical predecessors. Other T109 mentions in T073.md (Acceptance clauses, Must-not clauses, References) are legitimate historical-predecessor references that must remain. config.yaml already correct; no other edits required.",
+  "unresolved_questions": [],
+  "impact_assessment": {
+    "intent": "Not applicable. Intent (docs/intent/PROJECT_GOALS.md, G-PAPER-AUTHORIZE-01, section 7.1 permission entry rule) is unchanged. This amendment is contract-text bookkeeping that brings the contract into alignment with the already-recorded Intent-equivalent dependency decision from A0039.",
+    "specification": "Not applicable. No spec under docs/spec/ is modified. The product, strategy, operations, security, architecture, and protocol specifications are unaffected. T073's contract text continues to describe the same bounded Web entry point with the same three journeys and the same registry-bound evidence binding to T112; only the contract-internal CURRENT-dependencies list is being corrected.",
+    "contracts": "Single edit applied: todo/phases/P07-risk-and-paper/T073.md line 8 (the ## Dependencies body) changed from 'T025, T027, T107, T109, T112' to 'T025, T027, T107, T112'. Every other T109 mention in T073.md is in Acceptance clauses, Must-not clauses, or References and is a legitimate historical-predecessor reference; these were preserved verbatim. todo/config.yaml was NOT edited; its T073.depends_on is already [T025, T027, T107, T112] after A0039.",
+    "dependencies": "T109 is removed from T073's CURRENT dependency list in the contract text. T109 remains the historical read-only predecessor and continues to be cited as such in T073's Acceptance/Must-not/References clauses. The authoritative machine-readable dependency list in todo/config.yaml was already correct after A0039 and is unchanged. No other task's depends_on is affected.",
+    "implementation": "Not applicable. No business code is modified. T073 is in PLANNED status with no implementation record. This is contract-only bookkeeping.",
+    "data": "Not applicable. No persisted data, ledger entry, audit event, manifest, report, or artifact is created, modified, or invalidated. No cutover concerns; no historical data requires backfill, re-binding, or migration.",
+    "operations": "Not applicable. No running operation, background process, deployment, signer, RPC client, or web process is affected. The amendment does not grant, defer, or remove any operational authority.",
+    "security": "Not applicable in scope change. The amendment strengthens clarity by aligning the contract's declared CURRENT dependencies with the authoritative config.yaml list, removing an ambiguity that could mislead a future reader about whether T109's historical artifacts are current authorization evidence. The contract text's security guarantees (no private key, no Keystore password, no seed, no RPC credential; fail-closed on absent/mismatched/downgraded manifest or candidate lock) are preserved verbatim.",
+    "verification": "Not applicable. Acceptance criteria are unchanged. Future verification of T073 still tests the same journeys, fail-closed behaviors, evidence-display rules, and contract+phase-entry-gate consistency. The post-amendment acceptance test that compares 'the P07 phase entry gate and this contract name the same entry point' continues to pass; the contract's CURRENT-dependencies line now matches config.yaml exactly."
+  },
+  "affected_existing_tasks": [],
+  "resolved_task_impacts": []
+}
