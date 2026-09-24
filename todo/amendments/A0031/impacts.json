@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0031",
+  "layer": "PROPHET",
+  "raised": [],
+  "resolves": [
+    "A0030:T073:prepaper-current-evidence"
+  ]
+}

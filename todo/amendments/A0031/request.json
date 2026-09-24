@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0031",
+  "task_ids": [],
+  "layer": "PROPHET",
+  "target_status": null,
+  "summary": "resolve A0030:T073 self-impact and charter 5 direct-consumer CONTRACT amendments",
+  "owner_direction": "Two-part Owner direction: (1) resolve the A0030 self-impact A0030:T073:prepaper-current-evidence by recording it in resolved_task_impacts — this impact was raised by A0030 against its own target task T073, making it unresolvable by any future amendment and leaving T073 permanently locked. The T073 evidence retarget from T109 to T112 already shipped in A0030; the self-impact is bookkeeping-only. (2) Charter the five remaining direct T109-consumer CONTRACT amendments against T084, T107, T108, T110 and the indirect consumer T087 as a planning-only result, with a uniform owner-direction template each amendment will reuse. Do not implement the five amendments in this A0031 attempt — this amendment only writes the planning result and resolves the self-impact."
+}
