@@ -1,0 +1,12 @@
+{
+  "amendment_id": "A0046",
+  "base_commit": "a69bad87fefdcb1f6a41aa1b6d4ac84d6acfc2f1",
+  "candidate_commit": "dcd9855613137b7456f99402c7d7ef3d5e75bb27",
+  "verdict": "FAIL",
+  "summary": "The planning change is within PROPHET authority and its task/config structure validates, but the candidate leaves live architecture/security documentation internally inconsistent with the corrected implementation status and T113 migration scope.",
+  "required_changes": [
+    "Update docs/spec/security/THREAT_MODEL.md T-17, T-18 and T-22. At lines 373-380, 465-474 and 496-504 it still says T112 must repair defects or is a planned writer/cutover, and T-18 assigns old-path removal to T111. T112 is now approved; T113 owns the remaining CLI composition, while T111 owns approved research-consumer compatibility. Correct the live controls and owner assignments consistently with A0046, without weakening any security control.",
+    "Correct docs/spec/architecture/ARCHITECTURE.md §2.2 line 157, which says the T109 orchestrator publication path is retained only for versioned read-only history. The same candidate acknowledges at lines 211-213 that BacktestOrchestrator remains callable from Python with an injected non-empty source, and the implementation exposes submit/resume_in_flight (src/robinhood_lp/orchestrator/__init__.py:1407 onward). T113 only cuts the CLI start/resume route. Describe this reachable legacy writer accurately and scope the planned unreachability claim to the supported CLI/product entry, or expand the successor contract if full writer disablement is intended."
+  ],
+  "unknowns": []
+}
