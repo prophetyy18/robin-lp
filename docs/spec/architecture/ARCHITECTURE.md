@@ -234,9 +234,10 @@ execution inside the one T061 engine schedule, not a
 projection-layer reorder: a future fill remains queued until its actual fill-data MarketCursor is
 reached, so intervening callbacks and accounting views remain pre-fill. Audit ordinal and cursor
 order agree when created; T112 must refuse publication instead of sorting a non-causal audit history
-afterward. T110 projects validated T112 evidence without callbacks; T111 performs the approved-consumer
-cutover. Historical predecessor artifacts remain read-only and unavailable for exact RunState, not
-reinterpreted under the corrected schedule.
+afterward. T110 projects validated T112 evidence without callbacks; T111 owns the approved T101/T102/T106
+consumer compatibility view, and T113 owns the supported CLI composition and old-path cutover. Historical
+predecessor artifacts remain read-only and unavailable for exact RunState, not reinterpreted under the
+corrected schedule.
 
 ### 2.3 Public component contracts and composition
 
