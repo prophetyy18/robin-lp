@@ -1,0 +1,17 @@
+# A0046 owner amendment review
+
+- Base commit: `33aac5259435a85a07a09755e77acf75b60a2fb7`
+- Candidate commit: `5782b0a4cc9ea25e944833a8215b72af609d42c0`
+- Verdict: **FAIL**
+
+## Summary
+
+The repair candidate correctly updates docs/spec/security/THREAT_MODEL.md (T-17/T-21/T-22 controls, owner rows, evidence rows and the §4 severity matrix) and docs/spec/architecture/ARCHITECTURE.md §2.2 T109 row to match the A0046 ownership split, and the candidate is internally byte-identical on every protected surface (no task contract, config.yaml state, governance file, schema, reviewer prompt or source tree is touched; `python -m tools.workflow validate` reports OK; the plan-structure revision line in todo/README.md already names A0046 and remains accurate because prophet-002 is a documentation repair, not a structural change). However, the candidate leaves an internal contradiction inside its own write surface (docs/spec/*). The new THREAT_MODEL T-21 controls (line 472-474) and the §4 severity matrix (lines 551, 555, 556) consistently say T111 owns the approved T101/T102/T106 consumer compatibility view and T113 owns the supported CLI composition and the old-path cutover; the unchanged ARCHITECTURE.md §2.2 prose at line 237-238 still reads 'T111 performs the approved-consumer cutover'. That sentence names T111 as the actor that performs the cutover, in direct conflict with the new T-21 wording that gives the cutover to T113. Both passages live under docs/spec/, so a PROPHET amendment must repair them in the same change rather than leaving a contradictory sentence inside its own write surface.
+
+## Required changes
+
+- Update docs/spec/architecture/ARCHITECTURE.md §2.2 line 237-238: replace 'T111 performs the approved-consumer cutover' so the sentence aligns with the corrected A0046 ownership split recorded in docs/spec/security/THREAT_MODEL.md T-21 / §4 severity matrix. T111 should be described as performing the approved-consumer compatibility view over T112 artifacts, and the supported CLI composition / old-path cutover must be attributed to T113. No other text in §2.2 should change, and no gate may be weakened.
+
+## Unknowns
+
+- None.
