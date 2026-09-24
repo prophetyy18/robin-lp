@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0046",
+  "task_ids": [],
+  "layer": "PROPHET",
+  "target_status": null,
+  "summary": "align architecture with current implementation and contract-first module design",
+  "owner_direction": "Owner authorizes the PROPHET layer to update the architecture specification to match current repository state and the desired contract-first modular program design, correct contradictions and stale T109/T112 status, clarify stable public module contracts and dependency ownership/enforcement, and add any necessary new implementation task contracts. Preserve all existing task contracts and task state, approval evidence, and review records; do not implement runtime code in this planning amendment. Independently review the exact candidate before accepting it."
+}

@@ -1,0 +1,86 @@
+{
+  "amendment_id": "A0046",
+  "layer": "PROPHET",
+  "raised": [
+    {
+      "impact_id": "A0046:T084:t109-retirement-status",
+      "task_id": "T084",
+      "reason": "T084 calls T109 historical evidence pending the SUPERSEDE amendment recorded by A0040, but todo/config.yaml now records T109 as superseded by approved T112. The stale qualifier misstates current governance status. The repository contract test also exposes a pre-existing dependency-list mismatch: T084 references T109 while its configured dependencies intentionally omit the superseded predecessor.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "A reviewed CONTRACT amendment must replace the pending-SUPERSEDE wording with T109 historical/read-only and T112 current-authority status, and align the References task IDs with declared dependencies without reintroducing a dependency on superseded T109. Preserve the existing read-model behavior and other dependencies, and verify current versus legacy rendering. Do not rewrite approved evidence or historical artifacts; no data migration, operations change, or security-authority change is applicable."
+    },
+    {
+      "impact_id": "A0046:T087:backtest-public-api",
+      "task_id": "T087",
+      "reason": "T087 specifies triggering the T112 run entry point indirectly through T084/T110 and carries stale A0040 pending-SUPERSEDE wording. A0046 establishes robinhood_lp.application.backtest as the supported public use-case API and records T113 as its provider/CLI composition task; task-numbered implementation modules are not stable consumer contracts.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "VERIFICATION"
+      ],
+      "required_disposition": "A reviewed CONTRACT amendment must depend on T113 and name the documented stable application API as the Web trigger boundary, remove the stale pending-SUPERSEDE qualifier, preserve T087 page behavior and T112 artifact validation, and require consumer conformance/failure tests against that API. T087 must not implement the provider or reach into adapter internals. Historical records/data and operations/security authority are unchanged and not applicable to this interface migration."
+    },
+    {
+      "impact_id": "A0046:T088:t109-retirement-status",
+      "task_id": "T088",
+      "reason": "T088 labels T109 historical evidence as pending the SUPERSEDE amendment recorded by A0040, while current task state marks T109 superseded by T112. This makes the result-page contract inconsistent with the recorded artifact authority.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "A reviewed CONTRACT amendment must update the status wording to T109 historical/read-only and T112 current artifact authority, preserve exact T112 cursor/evidence semantics and current dependencies, and verify current, legacy and unavailable rendering. Do not rewrite historical artifacts or alter the result-page authority; no data migration, operations change, or security-authority change is applicable."
+    },
+    {
+      "impact_id": "A0046:T096:t109-retirement-status",
+      "task_id": "T096",
+      "reason": "T096 repeatedly describes T109 as historical evidence pending the SUPERSEDE amendment recorded by A0040, but T109 is already annotated superseded by T112. Its final readiness matrix would therefore report the wrong governance state.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "A reviewed CONTRACT amendment must correct the stale status in the readiness matrix and references while retaining T112 as current and T109 as historical/read-only, preserve the exact evidence matrix and existing dependencies, and test the current-versus-predecessor classification. No historical data rewrite, operational change, or security-authority change is applicable."
+    },
+    {
+      "impact_id": "A0046:T103:backtest-public-api-and-retirement-status",
+      "task_id": "T103",
+      "reason": "T103 still says T109 awaits the A0040 SUPERSEDE amendment and specifies training/evaluation triggers through the T112 run entry point. A0046 records T109 superseded and establishes a stable application API provided by T113; leaving T103 unchanged would preserve both a false status and a task-named consumer boundary.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "VERIFICATION"
+      ],
+      "required_disposition": "A reviewed CONTRACT amendment must remove the pending-SUPERSEDE wording, add T113 as a dependency for backtest run triggers, and name the stable application API for those consumers while retaining the separate T040/T041 MarketState read boundary. Require API consumer conformance and failure tests; do not move provider composition into T103 or duplicate replay. Preserve existing artifacts and unrelated page behavior; data migration, operations, and security-authority changes are not applicable."
+    },
+    {
+      "impact_id": "A0046:T110:public-replay-contract",
+      "task_id": "T110",
+      "reason": "T110 creates robinhood_lp.application.historical_replay and typed RunState/ReplayFrame behavior, but the open contract does not identify its supported public import path, provider/consumer ownership, compatibility policy, or provider/consumer conformance obligations required by the new boundary Spec.",
+      "categories": [
+        "CONTRACT",
+        "IMPLEMENTATION",
+        "VERIFICATION"
+      ],
+      "required_disposition": "A reviewed CONTRACT amendment must name the public replay boundary/import path, typed operations and failures, owner/providers/consumers, semantic and compatibility rules, and conformance checks under COMPONENT_CONTRACTS.md. Preserve the single T040/T041/T104/T112 authorities and historical T109-unavailable behavior. No data migration, operational change, or security-authority change is applicable."
+    },
+    {
+      "impact_id": "A0046:T111:public-evidence-adapter-contract",
+      "task_id": "T111",
+      "reason": "T111 creates robinhood_lp.reports.evidence_adapter as a cross-module consumer boundary, but the open contract does not state the supported public import path, typed API/error semantics, owner/provider/consumer obligations, or contract-conformance checks required by the new boundary Spec.",
+      "categories": [
+        "CONTRACT",
+        "IMPLEMENTATION",
+        "VERIFICATION"
+      ],
+      "required_disposition": "A reviewed CONTRACT amendment must name the supported public adapter boundary/import path, typed operations and failures, provider/consumer ownership, version compatibility and conformance checks under COMPONENT_CONTRACTS.md. Preserve current T112 artifact validation, approved consumer semantics, and read-only T109 legacy handling. No data migration, operational change, or security-authority change is applicable."
+    }
+  ],
+  "resolves": []
+}

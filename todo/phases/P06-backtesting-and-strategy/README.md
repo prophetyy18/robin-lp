@@ -2,7 +2,7 @@
 
 **Purpose:** evaluate generic strategies under explicit information, fill, latency,
 cost, and robustness assumptions, and expose that evaluation through one product-level
-run entry point that names the registered strategy, its parameters and its data range.
+application API that names the registered strategy, its parameters and its data range.
 
 **Entry:** Phase 5 exit gate and target pools at `backtest` support.
 
@@ -10,21 +10,11 @@ run entry point that names the registered strategy, its parameters and its data 
 tests pass; results include honest USDG cash/HODL/rebalancing benchmarks and full costs;
 T068's registry is the identity source for every strategy a run can execute; T105–T108
 are the designated registry-bound successors for the manifest, robustness,
-candidate-lock and authoring-guide paths; and T069's
-product-level run entry point turns a registered strategy, its parameters and a data range
-into a reproducible manifest and report with observable run state; T109 adds causally bound,
-dataset-addressed run evidence and atomic current publication, T110 qualifies exact historical
-market/run state and replay frames while composing rather than replacing T104, and T111 cuts
-the approved research consumers over to that current artifact chain; T112, the A0026
-successor repair task, closes the three defects A0026 confirmed in the code paths that
-produce new T109 artifacts — routing the backtest entry through real T100 partitions
-via T040/T041 replay and T050 point-in-time features, binding the manifest to real
-T100 partition refs and recording separately versioned `SimulationEvidence` run
-facts sufficient to recover positions, integer inventory, equity, drawdown and T052
-attribution at the actual fill cursor — without mutating T109's contract or its
-historical approved evidence. T112 approval precedes reviewed consumer CONTRACT
-amendments and T109 SUPERSEDE; current production publication resumes only after
-an atomic T112-only cutover. T107 produces an
+candidate-lock and authoring-guide paths; T112 is approved as the current registry-bound
+manifest and evidence authority; T110 qualifies exact historical market/run state while
+composing rather than replacing T104; T111 migrates the approved research consumers; and
+T113 exposes the stable backtest application contract and completes the T112-only CLI
+composition. Product publication remains disabled until that cutover passes. T107 produces an
 explicitly provisional candidate marked `EXPERIMENTAL_NOT_LIVE_APPROVED`, or an honest
 `NO_TRADE`. Neither is live approval.
 
@@ -51,3 +41,4 @@ parameter selection on held-out data, or profitability-based acceptance.
 - [T110 — Qualify exact historical market and run-state replay](T110.md)
 - [T111 — Cut approved research consumers over to replay artifacts](T111.md)
 - [T112 — Repair product backtest entry to bind real partitions and fill-cursor run facts](T112.md)
+- [T113 — Expose the backtest application contract and wire the approved T112 path](T113.md)

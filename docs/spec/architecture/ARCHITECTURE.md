@@ -1,7 +1,7 @@
 # Architecture
 
-> Status: living document. Owned by Phase 0 / T000. Mutated only via ADR or
-> reviewable pull request. Does not ship executable code.
+> Status: living document. T000 records the initial baseline; the human Owner
+> holds architectural decision authority. Changes follow the repository's reviewed planning and ADR process. This document does not ship executable code.
 
 This document records the architectural choices for the Robinhood Chain /
 Uniswap V4 LP V1 system from research through gated mainnet execution. It is the single entry
@@ -30,8 +30,8 @@ Goals (binding for the technical framework):
   promotion and demotion (the five levels are still defined for forward
   compatibility, but only Robinhood Chain can be promoted above
   `rejected` in V1 — see ADR-005);
-- live signing material inside the main application, generic arbitrary-call signing, or
-  mainnet enablement that bypasses the promotion gates;
+- isolate live signing material in the signer, restrict signing to approved
+  execution requests, and require the promotion gates for mainnet use;
 
 Non-goals (binding for V1):
 
@@ -49,8 +49,9 @@ Non-goals (binding for V1):
 
 ## 2. Layered model
 
-Each planned module has one primary layer. Imports follow ADR-006; runtime composition is
-shown below and does not grant one component permission to import or control another.
+Each module has one primary layer. Cross-module calls use explicit, documented public
+contracts. Imports follow ADR-006; the application composition root wires implementations
+behind those contracts and does not grant one component permission to control another.
 
 ```
 presentation / reports
@@ -83,7 +84,7 @@ application / backtest orchestration
 | backtest / research | event-driven engine, baseline strategies, manifests, robustness analysis | use future data, retune on held-out data |
 | risk | centralized approve/reject gateway with reason codes | be bypassed by execution, strategy, or manual override |
 | execution | paper intent→fill→ledger; deterministic V4 planner; separately packaged live executor and isolated signer (G-SIGNER-01) | let strategy bypass risk/planning, hold signing material outside signer, or expose arbitrary calls |
-| application / orchestration | ingestion workflows and strategy → risk → execution wiring through ports | move policy into adapters or bypass a component's public contract |
+| application / orchestration | public use cases, process composition, and strategy → risk → execution wiring through ports | move policy into adapters, select hidden defaults, or bypass a component's public contract |
 | presentation / reports | structured reports, charts, dossiers, release evidence | mutate upstream state, leak credentials |
 
 ### 2.2 Module-to-layer mapping
@@ -153,10 +154,11 @@ application / backtest orchestration
 | 6 | T068 | `robinhood_lp.strategy.registry` (registered strategy identities, parameter schemas and code provenance) | strategy |
 | 6 | T069 (superseded by T109) | `robinhood_lp.orchestrator` (predecessor product-run lifecycle delivery: durable identity, queue/progress/status, cancellation and atomic publication of the registry-bound manifest/report) | application / orchestration |
 | 6 | T105 (superseded by T109) | `robinhood_lp.reports.{manifest,validation,rerun,run_identity,metrics}` (predecessor registry-bound manifest and artifact-rerun delivery) | backtest / research |
-| 6 | T109 (superseded by T112 upon formal retirement; current until then) | `robinhood_lp.orchestrator` (product-run lifecycle, causal scheduling and atomic evidence publication; the backtest / research row below names the rest of attempt-4's module set) | application / orchestration |
-| 6 | T109 (superseded by T112 upon formal retirement; current until then) | `robinhood_lp.backtest.engine`, `robinhood_lp.reports.{manifest,run_state,validation}` (causal-scheduling engine extension and atomic manifest/run-state/validation publication) | backtest / research |
-| 6 | T112 | `robinhood_lp.orchestrator` (planned repair of the product entry and T100 partition resolution through T040/T041 replay and T050 point-in-time features) | application / orchestration |
-| 6 | T112 | `robinhood_lp.backtest.engine`, `robinhood_lp.reports.{manifest,run_state,validation,simulation_evidence}` (planned repaired fill-cursor facts and distinct versioned manifest/evidence reader dispatch) | backtest / research |
+| 6 | T109 (superseded by T112) | `robinhood_lp.orchestrator` (historical predecessor product-run lifecycle and publication path; retained only for versioned read-only history) | application / orchestration |
+| 6 | T109 (superseded by T112) | `robinhood_lp.backtest.engine`, `robinhood_lp.reports.{manifest,run_state,validation}` (historical causal-scheduling and artifact implementation) | backtest / research |
+| 6 | T112 (approved; CLI composition pending T113) | `robinhood_lp.orchestrator.t112` (T100 partition-bound product-run implementation) | application / orchestration |
+| 6 | T112 (approved; current artifact schema) | `robinhood_lp.backtest.engine`, `robinhood_lp.reports.{t112,manifest,run_state,validation,simulation_evidence}` (T112-versioned manifest/evidence and fill-cursor facts) | backtest / research |
+| 6 | T113 (planned) | `robinhood_lp.application.backtest` (stable public backtest use case and T112 composition root) | application / orchestration |
 | 6 | T110 | `robinhood_lp.application.historical_replay` (qualified MarketState/RunState composition and replay frames) | application / orchestration |
 | 6 | T111 | `robinhood_lp.reports.evidence_adapter` (validated T101/T102/T106 compatibility view over current artifacts) | backtest / research |
 | 6 | T106 | `robinhood_lp.robustness` (schema-bound surfaces, splits, scenarios, runner and reports) | backtest / research |
@@ -202,21 +204,25 @@ layer and describes the rest in prose: T105 extends the artifact-rerun entry thr
 `robinhood_lp.__main__` CLI surface, which the map classifies as application /
 orchestration and which the T097 row already maps.
 
-T109 replaces the T069/T105 current-write authorities and owns causal evidence plus atomic
-publication. A0026 records that its approved implementation still permits a fixed empty
-event source, fabricated partition references and block-range-as-tick-range evidence;
-that implementation cannot establish repaired current partition/run evidence. T112 is
-the planned successor repair, with separate manifest/evidence versions and fail-closed
-reader dispatch. T112 approval precedes reviewed CONTRACT consumer rewiring, followed
-by SUPERSEDE on T109, then an atomic runtime cutover to T112-only new publication;
-new successful production publication stays disabled until that cutover. T110
-composes the already-approved reconstruction primitives rather than absorbing
-them: T040/T041 own post-event pool/tick reconstruction and T104 remains the sole dataset/window/
-cursor/reconstruction-bound fee-growth and exact range-fee projection. T110 and the Web read
-models may compose T104 but may not implement another fee path. T111's versioned compatibility
-view preserves the logical run/dataset/pool/range/registry/schema bindings consumed by approved
-T101 and T106 and the T102 path through them, resolving canonical event bytes from T100 references
-instead of reopening T069/T105 publication.
+T109 has been superseded by T112 as the current manifest and simulation-evidence authority.
+Its approved records remain historical and read-only. T112 is independently approved, and its
+consumers now reference the T112 artifact versions. The product CLI has not completed runtime
+composition: `backtest start` and `resume` still construct the predecessor `BacktestOrchestrator`;
+the default CLI event source returns no events and fails closed. That predecessor class remains
+callable from Python with an injected non-empty source, so the retirement annotation alone does
+not prove old-writer unreachability. T112's resolver and replay adapters are not wired into the
+CLI composition root. T113 is the planned cutover: expose a stable in-process application API,
+compose the existing T100 reader and T040/T041/T050/T061 path through T112, route current run
+consumers through that API, and make the predecessor writer unreachable as a current product
+entry. No production cutover is complete until those conditions are reviewed.
+
+T110 composes the already-approved reconstruction primitives rather than absorbing them: T040/T041
+own post-event pool/tick reconstruction and T104 remains the sole dataset/window/cursor/reconstruction-
+bound fee-growth and exact range-fee projection. T110 and the Web read models may compose T104 but
+may not implement another fee path. T111's versioned compatibility view preserves the logical
+run/dataset/pool/range/registry/schema bindings consumed by approved T101 and T106 and the T102 path
+through them, resolving canonical event bytes from T100 references rather than reopening the
+predecessor publication path.
 
 The T109 row above spans three layers because attempt-4 also extends `robinhood_lp.protocol.contracts`
 at protocol/domain: the optional `block_number` / `transaction_index` / `log_index` cursor triple
@@ -231,6 +237,26 @@ order agree when created; T112 must refuse publication instead of sorting a non-
 afterward. T110 projects validated T112 evidence without callbacks; T111 performs the approved-consumer
 cutover. Historical predecessor artifacts remain read-only and unavailable for exact RunState, not
 reinterpreted under the corrected schedule.
+
+### 2.3 Public component contracts and composition
+
+The normative interface rules are in [`COMPONENT_CONTRACTS.md`](COMPONENT_CONTRACTS.md)
+and ADR-016. V1 remains an in-process application: module decoupling does not by itself
+require HTTP, RPC, a queue, or a distributed-service split.
+
+Every new or materially changed cross-module boundary declares its public operations, typed
+requests/results, error vocabulary, semantic invariants, side effects, version policy, and
+ownership in the task contract and the referenced interface documentation. Shared types and
+ports live at the lowest layer their providers and consumers can both import without
+violating ADR-006. Concrete storage, RPC, replay, and feature implementations remain adapters;
+they do not import sibling implementations. The application composition root selects and
+wires those adapters behind the declared ports.
+
+Task IDs identify planning and review records, not production APIs. New production modules
+and exported symbols use stable domain or boundary names. Existing task-named modules remain
+legacy implementation details until a separately reviewed task migrates their callers.
+Existing modules are not declared compliant retroactively; migration applies only through
+contracts that name the affected boundary.
 
 ## 3. Cross-cutting policies
 
@@ -281,6 +307,7 @@ superseding decisions are new ADRs that explicitly reference the prior one.
 | ADR-013 | Finalized window pinning and partition reconciliation | accepted (addendum to ADR-002 / ADR-010 / ADR-012); window rule replaced by ADR-015 |
 | ADR-014 | Research universe, numeraire hierarchy, and the execution boundary | accepted (bounds ADR-005 and ADR-004 for the research scope) |
 | ADR-015 | Per-pool extended-history research window | accepted (addendum to ADR-002 / ADR-010 / ADR-011 / ADR-012; replaces ADR-013's window rule) |
+| ADR-016 | Contract-first component interfaces and application composition | accepted |
 
 ## 5. Open decisions (not blocking research)
 

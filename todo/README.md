@@ -11,25 +11,36 @@ Last plan review: **2026-09-14**. Network and deployment facts are mutable;
 the links in this file are evidence sources, not values that may be copied into
 code without the verification required by T024.
 
-Plan structure revision: **OWNER_AMENDMENT_A0026_T109_REPAIR_SUCCESSOR_2026_09_22**. This names the last
-Owner-authorized plan-structure change. A0026 confirmed three defects in the code paths that
+Plan structure revision: **OWNER_AMENDMENT_A0046_CONTRACT_FIRST_BACKTEST_API_2026_09_25**. This names the latest
+Owner-authorized plan-structure change. A0046 adds ADR-016 and the component-interface
+contract standard, corrects the architecture and traceability status of T112, and adds T113
+in `P06` to expose a stable in-process backtest API and wire the CLI through the approved
+T112 authority. At the base commit, T112 is approved and T109 is marked superseded; however,
+the CLI `start` and `resume` still construct the predecessor orchestrator with an empty event
+source, so they fail closed and do not expose the approved T112 path. Until T113 is approved,
+the old successful writer remains reachable only through the predecessor Python class, not
+through a supported product entry; T113 must close that path before current publication resumes.
+A0046 records the exact affected open contracts for reviewed Planner amendments before activation: stale
+T109-retirement wording (T084/T088/T096/T103), stable application-API adoption by run consumers
+(T087/T103), and explicit public boundaries for replay and evidence adapters (T110/T111). Those
+amendments must preserve each existing contract and evidence history while closing its recorded impact.
+Existing approved task contracts, recorded task state, review evidence, and historical artifacts remain
+unchanged.
+
+Previous plan-structure revision: **OWNER_AMENDMENT_A0026_T109_REPAIR_SUCCESSOR_2026_09_22**. A0026 confirmed three defects in the code paths that
 produce new T109 artifacts after T109 was APPROVED, and the Owner directed a legal successor repair
-task. The plan now adds T112 in `P06` as the successor that routes the product backtest entry through
+task. The plan added T112 in `P06` as the successor that routes the product backtest entry through
 real T100 partitions via the existing replay / features surfaces into T061 (no fixed empty event
 source), binds the T109 manifest to real T100 partition refs that resolve to the canonical bytes the
 dataset content hash covers (no cursor or coverage-string forgery), and records
 `SimulationEvidence` run facts sufficient to recover positions, integer inventory, equity,
 drawdown and T052 attribution at the actual fill cursor (no block range written into the tick
 range, no zero-valued run facts). T109's contract and its historical approved evidence remain
-byte-identical, read-only and explicitly unavailable for exact replay (`T109_HISTORICAL_UNAVAILABLE`);
-The direct T109 consumers are T073, T084, T107, T108 and T110; T087, T088, T103,
-T111 and T096 also make downstream current-artifact claims. Their contracts and
-dependencies remain unchanged now and carry open impact records. The legal order is
-T112 independent approval with new production publication disabled, reviewed CONTRACT
-amendments to rewire direct consumers and repair indirect claims, reviewed SUPERSEDE
-annotation on T109, then atomic runtime cutover to T112-only current publication.
-Until those gates pass, no dependent task may treat defective T109 artifacts as
-repaired current evidence. The previous plan-structure revision
+byte-identical, read-only and explicitly unavailable for exact replay (`T109_HISTORICAL_UNAVAILABLE`).
+The direct T109 consumers were T073, T084, T107, T108 and T110; T087, T088, T103,
+T111 and T096 also made downstream current-artifact claims. Reviewed amendments repointed the
+consumers, and T109 is now annotated as superseded by T112. The runtime CLI composition remains
+to be completed by T113. The earlier plan-structure revision
 remains documented below for traceability.
 
 Previous plan-structure revision: **OWNER_BOOTSTRAP_T109_SPLIT_2026_09_21**. The bootstrap retained
