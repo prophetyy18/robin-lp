@@ -1,0 +1,100 @@
+{
+  "amendment_id": "A0046",
+  "outcome": "AMENDMENT_READY",
+  "summary": "Repair A0046 review findings: align docs/spec/security/THREAT_MODEL.md T-17/T-21/T-22 controls, owner lists and evidence rows with A0046's corrected T112/T113/T111 ownership, and clarify docs/spec/architecture/ARCHITECTURE.md §2.2 T109 row to acknowledge the still Python-reachable legacy writer pending T113 CLI cutover.",
+  "rationale": "Independent review-001 returned FAIL because the live architecture/security documentation still named T112 as 'planned' or 'must repair' and attributed the old-path cutover to T111, and because ARCHITECTURE.md §2.2 described the T109 orchestrator as 'retained only for versioned read-only history' even though the same candidate acknowledged in §2.2 prose that BacktestOrchestrator remains Python-callable with an injected non-empty source. This repair preserves the unchanged amendment intent (contract-first in-process component APIs, T113 as the new CLI composition root, the affected-existing-task impact set) and rewrites only the two review-flagged document passages: every T112 reference now reads as the approved current manifest/evidence/run authority, every T111 reference is scoped to approved-consumer compatibility, and every T113 reference names CLI composition/cutover; the T109 entry now scopes unreachability to the supported CLI/product surface pending T113, matching the prose the same candidate already published. No gate is weakened, no contract wording was touched, and the seven task-contract impacts recorded by review-001 remain open because they live in Planner-owned task contracts that a future CONTRACT amendment must revise before activation. The intent/specification/contracts/dependencies/implementation/data/operations/security/verification impact summary mirrors the candidate, with the architecture/security specification dimension updated to reflect this repair.",
+  "unresolved_questions": [],
+  "impact_assessment": {
+    "intent": "No product intent or V1 boundary change. This repair clarifies software boundaries and records a required backtest entry migration, identical in scope to the previous candidate.",
+    "specification": "Aligned ARCHITECTURE.md §2.2 T109 row with the §2.2 prose published by the same candidate (legacy writer remains Python-callable with an injected non-empty source until T113 closes the CLI surface); aligned THREAT_MODEL.md T-17, T-21 and T-22 controls/owner/evidence rows and the §4 severity matrix with A0046 (T112 approved current authority; T111 approved-consumer compatibility; T113 CLI composition/cutover). The Spec revision v1-2026-09-25-contract-first-component-boundaries and intent_revision are unchanged.",
+    "contracts": "No contract file rewritten. Added only T113 in the previous candidate; the seven impact-gated open contracts (T084, T087, T088, T096, T103, T110, T111) remain open and require a reviewed CONTRACT amendment before activation.",
+    "dependencies": "Existing dependency records remain unchanged. T113 still depends on the approved replay, feature, engine, dataset and T112 authorities; T087/T103 impacts still require a later reviewed dependency amendment to T113.",
+    "implementation": "No application code changes. The repair edits only documentation. Current CLI start/resume still use predecessor BacktestOrchestrator and default empty source; T113 will compose T100→T040/T041→T050→T061→T112 and close the CLI old-writer path.",
+    "data": "No persisted data format is changed by this planning amendment. T113 must preserve approved T112 and historical artifact bytes and keep predecessor records read-only.",
+    "operations": "CLI currently fails closed with its default empty event source; successful current publication stays unavailable until reviewed T113 cutover. No operational procedure changes.",
+    "security": "No signer, key, signing, execution, risk, or promotion authority is added or weakened by the documentation repair. Existing security boundaries remain binding.",
+    "verification": "Author review: workflow configuration validation, documentation links/citations, import-graph consistency, plan structure, and diff checks remain required before review. Independent amendment review remains required; no implementation test suite is applicable because no code changed and the repair only rewrites documentation already bound to the same evidence."
+  },
+  "affected_existing_tasks": [
+    {
+      "impact_id": "A0046:T084:t109-retirement-status",
+      "task_id": "T084",
+      "reason": "T084 calls T109 historical evidence pending the SUPERSEDE amendment recorded by A0040, but todo/config.yaml now records T109 as superseded by approved T112. The stale qualifier misstates current governance status. The repository contract test also exposes a pre-existing dependency-list mismatch: T084 references T109 while its configured dependencies intentionally omit the superseded predecessor.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "A reviewed CONTRACT amendment must replace the pending-SUPERSEDE wording with T109 historical/read-only and T112 current-authority status, and align the References task IDs with declared dependencies without reintroducing a dependency on superseded T109. Preserve the existing read-model behavior and other dependencies, and verify current versus legacy rendering. Do not rewrite approved evidence or historical artifacts; no data migration, operations change, or security-authority change is applicable."
+    },
+    {
+      "impact_id": "A0046:T087:backtest-public-api",
+      "task_id": "T087",
+      "reason": "T087 specifies triggering the T112 run entry point indirectly through T084/T110 and carries stale A0040 pending-SUPERSEDE wording. A0046 establishes robinhood_lp.application.backtest as the supported public use-case API and records T113 as its provider/CLI composition task; task-numbered implementation modules are not stable consumer contracts.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "VERIFICATION"
+      ],
+      "required_disposition": "A reviewed CONTRACT amendment must depend on T113 and name the documented stable application API as the Web trigger boundary, remove the stale pending-SUPERSEDE qualifier, preserve T087 page behavior and T112 artifact validation, and require consumer conformance/failure tests against that API. T087 must not implement the provider or reach into adapter internals. Historical records/data and operations/security authority are unchanged and not applicable to this interface migration."
+    },
+    {
+      "impact_id": "A0046:T088:t109-retirement-status",
+      "task_id": "T088",
+      "reason": "T088 labels T109 historical evidence as pending the SUPERSEDE amendment recorded by A0040, while current task state marks T109 superseded by T112. This makes the result-page contract inconsistent with the recorded artifact authority.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "A reviewed CONTRACT amendment must update the status wording to T109 historical/read-only and T112 current artifact authority, preserve exact T112 cursor/evidence semantics and current dependencies, and verify current, legacy and unavailable rendering. Do not rewrite historical artifacts or alter the result-page authority; no data migration, operations change, or security-authority change is applicable."
+    },
+    {
+      "impact_id": "A0046:T096:t109-retirement-status",
+      "task_id": "T096",
+      "reason": "T096 repeatedly describes T109 as historical evidence pending the SUPERSEDE amendment recorded by A0040, but T109 is already annotated superseded by T112. Its final readiness matrix would therefore report the wrong governance state.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "VERIFICATION"
+      ],
+      "required_disposition": "A reviewed CONTRACT amendment must correct the stale status in the readiness matrix and references while retaining T112 as current and T109 as historical/read-only, preserve the exact evidence matrix and existing dependencies, and test the current-versus-predecessor classification. No historical data rewrite, operational change, or security-authority change is applicable."
+    },
+    {
+      "impact_id": "A0046:T103:backtest-public-api-and-retirement-status",
+      "task_id": "T103",
+      "reason": "T103 still says T109 awaits the A0040 SUPERSEDE amendment and specifies training/evaluation triggers through the T112 run entry point. A0046 records T109 superseded and establishes a stable application API provided by T113; leaving T103 unchanged would preserve both a false status and a task-named consumer boundary.",
+      "categories": [
+        "CONTRACT",
+        "DEPENDENCY",
+        "IMPLEMENTATION",
+        "VERIFICATION"
+      ],
+      "required_disposition": "A reviewed CONTRACT amendment must remove the pending-SUPERSEDE wording, add T113 as a dependency for backtest run triggers, and name the stable application API for those consumers while retaining the separate T040/T041 MarketState read boundary. Require API consumer conformance and failure tests; do not move provider composition into T103 or duplicate replay. Preserve existing artifacts and unrelated page behavior; data migration, operations, and security-authority changes are not applicable."
+    },
+    {
+      "impact_id": "A0046:T110:public-replay-contract",
+      "task_id": "T110",
+      "reason": "T110 creates robinhood_lp.application.historical_replay and typed RunState/ReplayFrame behavior, but the open contract does not identify its supported public import path, provider/consumer ownership, compatibility policy, or provider/consumer conformance obligations required by the new boundary Spec.",
+      "categories": [
+        "CONTRACT",
+        "IMPLEMENTATION",
+        "VERIFICATION"
+      ],
+      "required_disposition": "A reviewed CONTRACT amendment must name the public replay boundary/import path, typed operations and failures, owner/providers/consumers, semantic and compatibility rules, and conformance checks under COMPONENT_CONTRACTS.md. Preserve the single T040/T041/T104/T112 authorities and historical T109-unavailable behavior. No data migration, operational change, or security-authority change is applicable."
+    },
+    {
+      "impact_id": "A0046:T111:public-evidence-adapter-contract",
+      "task_id": "T111",
+      "reason": "T111 creates robinhood_lp.reports.evidence_adapter as a cross-module consumer boundary, but the open contract does not state the supported public import path, typed API/error semantics, owner/provider/consumer obligations, or contract-conformance checks required by the new boundary Spec.",
+      "categories": [
+        "CONTRACT",
+        "IMPLEMENTATION",
+        "VERIFICATION"
+      ],
+      "required_disposition": "A reviewed CONTRACT amendment must name the supported public adapter boundary/import path, typed operations and failures, provider/consumer ownership, version compatibility and conformance checks under COMPONENT_CONTRACTS.md. Preserve current T112 artifact validation, approved consumer semantics, and read-only T109 legacy handling. No data migration, operational change, or security-authority change is applicable."
+    }
+  ],
+  "resolved_task_impacts": []
+}
