@@ -1,0 +1,22 @@
+{
+  "amendment_id": "A0033",
+  "outcome": "AMENDMENT_READY",
+  "summary": "A0033 re-points T107 contract current-evidence references from T109 to T112 manifest and paired simulation-evidence and adds T112 to T107 dependencies in todo/config.yaml. T109 is kept on the contract only as the historical read-only predecessor pending SUPERSEDE; Must-not clauses are unchanged.",
+  "rationale": "The Owner directed A0026 to make T112 the current product-run evidence source, but T107's PLANNED contract still named T109 manifest/report/simulation-evidence as the current candidate-lock binding. This amendment makes the contract and the config agree on T112 without weakening any safety, evidence-binding, fail-closed, no-promotion or no-republish Must-not, and without editing any task's recorded lifecycle, attempt, commit, evidence, review, superseded_by, replaces or workflow state. Only the affected T107 contract text and the T107.depends_on list change.",
+  "unresolved_questions": [],
+  "impact_assessment": {
+    "intent": "not applicable: docs/intent/PROJECT_GOALS.md is unchanged; this amendment only repoints a current-evidence reference inside a PLANNED task contract and is consistent with the V1 boundary that the current product-run evidence source is the registry-bound manifest/canonical dataset/paired simulation-evidence already declared in T112.",
+    "specification": "not applicable: no docs/spec/ document is edited; the change is confined to the T107 contract and todo/config.yaml and tracks the A0026 cutover already declared in spec_revision v1-2026-09-23-a0026-run-evidence-cutover.",
+    "contracts": "T107 PLANNED contract at todo/phases/P06-backtesting-and-strategy/T107.md: Dependencies now list T112 alongside T065, T066, T068, T106, T109; Outcome, Replacement-and-migration (Runtime cutover and rollback/fail closed), Verification and Acceptance current-evidence language moved from T109 to T112 manifest and paired simulation-evidence; References reclassify T109 as historical read-only predecessor and add a sentence noting T112 is the current registry-bound source per A0026. All Must-not clauses remain byte-identical: T109 remains only as a historical reference in the historical-data, Must-not and References paragraphs. No other task contract is edited.",
+    "dependencies": "todo/config.yaml tasks.T107.depends_on changed from [T065, T066, T068, T106, T109] to [T065, T066, T068, T106, T109, T112]. No other task depends_on, lifecycle, claimed, attempt, base_commit, candidate_commit, approved_commit, latest_repository, supersession or replaces field is touched. active_task / active_phase / workflow_state / intent_revision / spec_revision / agent_runtime / product_baseline_commit are unchanged.",
+    "implementation": "not applicable: this amendment does not implement business code or alter tests; only contract and config files are changed, matching the schema and the A0026 cutover.",
+    "data": "not applicable: no raw data, lock, manifest, dataset, audit or persisted artifact is created, deleted or rewritten. T066 historical locks and any pre-T109 T105-only locks remain byte-identical legacy data and remain ineligible as a current candidate under the unchanged Must-not.",
+    "operations": "not applicable: no runtime, harness, signer, web, signing, broadcast, deployment or operational configuration is altered.",
+    "security": "not applicable: no secret, key, signer, permission, paper/live authority, credential, signing payload, environment value or webhook surface is touched. The lock still carries identity and checksums only, grants no paper/live permission, cannot satisfy T094 and fails closed on tampering, substitution or downgrade to the old lock format, exactly as the unchanged Must-not requires.",
+    "verification": "Verification clause in T107 now lists T112 manifest and paired simulation-evidence binding as the new frozen field that requires new-version positive and negative test cases; missing/mismatched/tampered/downgraded registry and schema cases, evidence-unavailable fixtures and old-path-unreachable tests proving the current harness cannot evaluate with an old lock or consult T105 as current authority remain in force. The independent reviewer's drift test will re-read the T107 contract text and the T107.depends_on list and confirm exact agreement without weakening."
+  },
+  "affected_existing_tasks": [],
+  "resolved_task_impacts": [
+    "A0026:T107:candidate-lock-current-evidence"
+  ]
+}

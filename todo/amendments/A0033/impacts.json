@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0033",
+  "layer": "CONTRACT",
+  "raised": [],
+  "resolves": [
+    "A0026:T107:candidate-lock-current-evidence"
+  ]
+}
