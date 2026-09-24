@@ -1324,6 +1324,7 @@
         "T105"
       ],
       "task_file": "todo/phases/P06-backtesting-and-strategy/T109.md",
+      "superseded_by": "T112",
       "attempt": 4,
       "base_commit": "0ef2ce08dbd7bbbf727b892ef2cfa16a41269ebf",
       "candidate_commit": "c79e4c83debd0dc7e8996afb612c103fcb8b2e97",

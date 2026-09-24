@@ -1,0 +1,10 @@
+{
+  "amendment_id": "A0040",
+  "task_ids": [
+    "T109"
+  ],
+  "layer": "SUPERSEDE",
+  "target_status": "APPROVED",
+  "summary": "SUPERSEDE T109 by T112 — annotate T109 superseded_by T112",
+  "owner_direction": "T109 (approved product-run evidence pipeline, DELIVERED) is replaced by T112 (DELIVERED, declares replaces=[T109]). All five direct T109 consumers (T073, T084, T107, T108, T110) and one indirect consumer (T087) have been repointed to T112 through CONTRACT amendments A0030/A0032-A0036; A0039 just removed T109 from their depends_on lists. Remaining indirect consumers (T088, T103, T096, T111) still reference T109 in their contracts and will be authored separately; T109 remains readable through them as historical read-only predecessor. SUPERSEDE T109 by T112: annotate T109.superseded_by = T112 in todo/config.yaml. Do not edit T109 contract (frozen at base 6c31778). Do not modify any other task record. Do not change active_task/active_phase/workflow_state/intent_revision/spec_revision/agent_runtime. SUPERSEDE is annotation-only per todo/WORKFLOW.md. Leave resolved_task_impacts EMPTY (no A0026-prefixed impact on T109 directly; T109 was not in A0026 raised set)."
+}
