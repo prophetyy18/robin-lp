@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0036",
+  "layer": "CONTRACT",
+  "raised": [],
+  "resolves": [
+    "A0026:T087:repoint-web-runs-page-to-t112-when-approved"
+  ]
+}

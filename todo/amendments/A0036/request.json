@@ -1,0 +1,10 @@
+{
+  "amendment_id": "A0036",
+  "task_ids": [
+    "T087"
+  ],
+  "layer": "CONTRACT",
+  "target_status": "PLANNED",
+  "summary": "rep T087 web runs page evidence reference from T109 to T112",
+  "owner_direction": "T087 contract asserts current-evidence reference: T109 manifest coverage and simulation-evidence availability for displaying run list. T087 is an indirect consumer of T109 (via T084 web provenance and T110 replay). T112 replaces T109 as the current product-run evidence source per A0026 impact A0026:T087:repoint-web-runs-page-to-t112-when-approved. Repair: change current-evidence reference language in T087 from T109 to T112 manifest and paired simulation-evidence; preserve T109 as historical read-only predecessor pending the SUPERSEDE amendment. T087 depends_on (T068, T084, T110) need NOT change because the indirect path is already established through T084 and T110, both of which already bind to T112. No Must-not / safety / execution / signer change. CRITICAL: in resolved_task_impacts you MUST list the EXACT A0026-prefixed impact ID 'A0026:T087:repoint-web-runs-page-to-t112-when-approved', NOT a freshly minted A0036-prefixed ID. Leave affected_existing_tasks EMPTY."
+}
