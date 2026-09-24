@@ -1,0 +1,17 @@
+# A0033 owner amendment review
+
+- Base commit: `66eaafe6ce7a24e0567590ae2ec89c9ecb4cbb26`
+- Candidate commit: `70da6d277f2927316b1d96cab87f844eab6a0cb8`
+- Verdict: **PASS**
+
+## Summary
+
+A0033 (CONTRACT layer) correctly repoints T107 from T109 to T112 as the current product-run evidence source while preserving T109 as the historical read-only predecessor. The candidate touches exactly five files: todo/amendments/A0033/{impacts.json, planner-001.json, request.json}, todo/config.yaml, and todo/phases/P06-backtesting-and-strategy/T107.md. todo/config.yaml only changes the T107.depends_on list, extending it from [T065, T066, T068, T106, T109] to [T065, T066, T068, T106, T109, T112]; every other field of T107 (lifecycle=OPEN, claimed=false, replaces=[T066], task_file, attempt=0, base_commit=null, candidate_commit=null, approved_commit=null, latest_review=null) and every other task record is byte-identical to the base. T107.md updates are confined to: Dependencies (adds T112), Outcome/Deliverables (T109 -> T112 manifest and paired simulation-evidence), Runtime cutover clause, Verification clause, Acceptance clause, and References (T109 reclassified as historical read-only predecessor; T112 added as the current registry-bound source per A0026). The Must-not clause is byte-identical between base and candidate, preserving the pre-T109 T105-only, evidence-unavailable, no-republish, no-promotion and no-execution constraints. affected_existing_tasks is empty (post-A0032 self-impact guard), and resolved_task_impacts is exactly ["A0026:T107:candidate-lock-current-evidence"] — the required A0026-prefixed ID, not a freshly minted A0033-prefixed one. No Intent, product/strategy/operations/security/architecture/protocol spec, ADR, plan structure, tools/workflow, .claude, or todo/schemas surface is modified. T112 is APPROVED (DELIVERED lifecycle, approved_commit 40ad3a250cac583b5fd03228ca69cb23dc7e5cd6, replaces=[T109]) so adding it as a T107 dependency is dependency-aligned. The T109 row remains byte-identical and is preserved only as a read-only predecessor pending its own SUPERSEDE route. The T107 depends_on list and the contract text are now in agreement on T112 as the current registry-bound source.
+
+## Required changes
+
+- None.
+
+## Unknowns
+
+- None.
