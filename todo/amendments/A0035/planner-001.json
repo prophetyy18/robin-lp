@@ -1,0 +1,22 @@
+{
+  "amendment_id": "A0035",
+  "outcome": "AMENDMENT_READY",
+  "summary": "Repointed T110's current-evidence references from T109 to T112 simulation evidence; preserved T109 as historical read-only predecessor; added T112 to T110 dependencies in todo/config.yaml and to the contract References section; kept all Must-not clauses intact.",
+  "rationale": "A0026 flagged T110 as asserting T109 as the current product-run simulation evidence source while T112 has since replaced T109 as the current registry-bound source. A0035 implements the minimal contract and dependency edits required to repair that open impact: the Outcome/Deliverables language now sources RunState from T112 simulation evidence, T109 is explicitly retained as a historical read-only predecessor only, T112 is added to the contract Dependencies and References, and todo/config.yaml's T110.depends_on is extended from [T040, T041, T052, T061, T100, T104, T109] to [T040, T041, T052, T061, T100, T104, T109, T112]. The T109 A/B/C delayed-fill fixture reference in Acceptance is preserved as a historical test artifact. No Must-not, safety, execution, signer, or live-authority clause was weakened. No field of T110 outside depends_on was touched in todo/config.yaml; no other task record was touched; workflow_state, active_task, active_phase, intent_revision, spec_revision, and agent_runtime remain unchanged. The drift check at finish-amendment will see contract and config agree that T110 depends on T112.",
+  "unresolved_questions": [],
+  "impact_assessment": {
+    "intent": "Not applicable. A0026's intent-level cutover already moved T112 into the V1 simulation-evidence surface; A0035 only repoints a contract that referenced the superseded source. PROJECT_GOALS.md intent is unchanged.",
+    "specification": "Not applicable. The current registry-bound simulation-evidence source is already T112 per the post-A0026 spec revision; A0035 only re-aligns a contract that lagged behind the spec cutover. No spec document is edited.",
+    "contracts": "Applicable. todo/phases/P06-backtesting-and-strategy/T110.md: Dependencies extended from 'T040, T041, T052, T061, T100, T104, T109' to 'T040, T041, T052, T061, T100, T104, T109, T112'; Outcome now reads 'one successful T112 simulation evidence run at the same cursor' instead of 'one successful T109 run'; Deliverables for RunState now read 'T112's immutable simulation evidence through the existing T061 engine/accounting semantics ... T109 is preserved as a historical read-only predecessor only and is not the current product-run evidence source'; References now list T112 alongside T109 and add a sentence noting T112 is the current registry-bound source while T109 is retained only as a historical read-only predecessor. Must-not section is unchanged. T109 A/B/C delayed-fill fixture reference is preserved as a historical test artifact.",
+    "dependencies": "Applicable. todo/config.yaml tasks.T110.depends_on extended from [T040, T041, T052, T061, T100, T104, T109] to [T040, T041, T052, T061, T100, T104, T109, T112]. No other task's record or dependencies were touched. The phase/active_task/workflow_state/intent_revision/spec_revision/agent_runtime top-level fields remain unchanged.",
+    "implementation": "Not applicable. A0035 is contract-only. No business code is implemented, modified, or tested. The Developer will follow the updated contract on a future T110 attempt.",
+    "data": "Not applicable. No data layout, schema, retention, or storage rule changes. T112 is already the registry-bound simulation-evidence source per A0026; A0035 only updates how T110 names that source.",
+    "operations": "Not applicable. No operational runbook, lifecycle hook, replay path, or live-process surface changes.",
+    "security": "Not applicable. No signer, key, permission, signing-payload, broadcast, or live-authority clause is touched. Must-not clause continues to forbid granting execution, approval, risk, signer, or live authority.",
+    "verification": "Not applicable. No test, golden, fixture, oracle, or tolerance change. The T109 A/B/C delayed-fill fixture reference in Acceptance is preserved as a historical test artifact; the Developer will run the existing T110 acceptance matrix against the updated contract on a future attempt."
+  },
+  "affected_existing_tasks": [],
+  "resolved_task_impacts": [
+    "A0026:T110:repoint-to-t112-when-approved"
+  ]
+}

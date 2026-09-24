@@ -1345,7 +1345,8 @@
         "T061",
         "T100",
         "T104",
-        "T109"
+        "T109",
+        "T112"
       ],
       "task_file": "todo/phases/P06-backtesting-and-strategy/T110.md",
       "attempt": 0,
