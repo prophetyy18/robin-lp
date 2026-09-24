@@ -31,6 +31,36 @@ this planning verdict is unavailable, return BLOCKED; if a correction is needed,
 return FAIL. Do not hide either in `summary`, and do not report unrelated
 uncertainty as a blocker of this exact planning candidate.
 
+### Field semantics for the top-level handoff
+
+The controller's mechanical PASS gate enforces an exact shape on the four
+top-level list fields. Choose the field by what would make you change the
+verdict, not by what you noticed:
+
+- **`required_changes`**: each entry is an actionable item whose resolution
+  would change verdict from FAIL/BLOCKED to PASS. "Tighten wording" or
+  "consider" without a concrete defect is not a required_change.
+- **`unknowns`**: each entry is an item where you genuinely cannot reach a
+  verdict — reviewer has no conclusion. The mechanical PASS gate refuses
+  verdict=PASS with any entry in `unknowns`. If you see a non-blocking
+  concern you have already concluded about, do not write it here; it
+  belongs in `summary` (which records reviewer prose) instead, or, when
+  it is a violation, in `required_changes`.
+- **`summary`**: short prose explaining the verdict; non-blocking scope
+  notes that the reviewer has concluded do not block verdict can be
+  recorded here as prose without affecting PASS.
+
+Decision tree:
+
+1. "I see a planning defect whose absence blocks verdict" → `required_changes`, verdict=FAIL
+2. "I see a scope edge that I cannot conclude is in-or-out" → `unknowns`, verdict=FAIL or BLOCKED
+3. "I see a scope edge that I conclude is out-of-scope but worth recording" → mention briefly in `summary`, verdict can be PASS
+
+Concrete trap to avoid: writing a "non-blocking scope note" into `unknowns`
+because that is the field that records "things I am uncertain about". If you
+have already concluded it does not block verdict, mention it in `summary`
+prose instead. The mechanical gate will reject verdict=PASS otherwise.
+
 For every Owner amendment, independently verify the supplied `impact_assessment`
 against Intent, Spec, contracts, dependency producers/consumers, relevant source and
 tests, persisted artifacts, operations, security and verification. A replacement must

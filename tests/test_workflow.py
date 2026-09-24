@@ -2847,3 +2847,112 @@ def test_continue_amendment_result_schema_accepts_continuation_required(
     # Validator must accept it without raising and bump continuation_count.
     out = manager.continue_amendment(amendment_id, max_turns_exhausted=False)
     assert out["continuation_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Reviewer field semantics: residual_risks must not block PASS
+# ---------------------------------------------------------------------------
+# The review-result.schema.json has four top-level list fields. The controller's
+# mechanical PASS gate enforces that verdict=PASS requires empty must_not_violations,
+# empty unknowns, empty required_changes and all check statuses PASS. residual_risks
+# is intentionally NOT in that gate. These tests pin that contract so a future
+# reviewer that writes non-blocking scope notes into the right field will not be
+# rejected by finish-review.
+
+
+def _make_passing_review_handoff(
+    manager: WorkflowManager,
+    task_id: str,
+    attempt: Any,
+    *,
+    verdict: str = "PASS",
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Build a review-result.json that the controller will accept as PASS."""
+    return {
+        "task_id": task_id,
+        "base_commit": attempt.base_commit,
+        "candidate_commit": attempt.candidate_commit,
+        "verdict": verdict,
+        "checks": [
+            {"id": "acceptance", "status": "PASS", "evidence": ["value"], "finding": "ok"},
+        ],
+        "must_not_violations": [],
+        "unknowns": [],
+        "required_changes": [],
+        **overrides,
+    }
+
+
+def test_review_with_residual_risks_passes(tmp_path: Path) -> None:
+    """PASS verdict with non-empty residual_risks must not be rejected by the gate."""
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    prepared = manager.prepare_develop("T001")
+    development = Path(str(prepared["development_worktree"]))
+    (development / "src" / "value.txt").write_text("candidate\n", encoding="utf-8")
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "CANDIDATE_READY",
+            "summary": "candidate ready",
+            "commands": [],
+            "residual_risks": [],
+        },
+    )
+    manager.finish_develop("T001")
+    review = manager.prepare_review("T001")
+    review_worktree = Path(str(review["review_worktree"]))
+    attempt = manager.load_attempt("T001")
+    handoff = _make_passing_review_handoff(
+        manager,
+        "T001",
+        attempt,
+        residual_risks=[
+            "Default production loader wiring is a follow-up owner-approved contract change.",
+            "An auxiliary code path remains reachable but is excluded by the runtime cutover gate.",
+        ],
+    )
+    _write_json(review_worktree / ".workflow" / "review-result.json", handoff)
+    state, _ = manager.finish_review("T001")
+    assert state == "APPROVED"
+
+
+def test_review_pass_with_non_blocking_unknown_rejected(tmp_path: Path) -> None:
+    """Regression pin: PASS verdict with non-empty unknowns is rejected.
+
+    A reviewer that mis-files a non-blocking scope note into `unknowns` instead
+    of `residual_risks` will hit the mechanical gate. This test makes that
+    gate behaviour explicit and stable.
+    """
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    manager.prepare_develop("T001")
+    development = Path(str(manager.load_attempt("T001").development_worktree))
+    (development / "src" / "value.txt").write_text("candidate\n", encoding="utf-8")
+    _write_json(
+        development / ".workflow" / "developer-result.json",
+        {
+            "task_id": "T001",
+            "outcome": "CANDIDATE_READY",
+            "summary": "candidate ready",
+            "commands": [],
+            "residual_risks": [],
+        },
+    )
+    manager.finish_develop("T001")
+    review = manager.prepare_review("T001")
+    review_worktree = Path(str(review["review_worktree"]))
+    attempt = manager.load_attempt("T001")
+    handoff = _make_passing_review_handoff(
+        manager,
+        "T001",
+        attempt,
+        unknowns=[
+            "Default production loader wiring is a follow-up owner-approved contract change.",
+        ],
+    )
+    _write_json(review_worktree / ".workflow" / "review-result.json", handoff)
+    with pytest.raises(WorkflowError, match="PASS contradicts"):
+        manager.finish_review("T001")
