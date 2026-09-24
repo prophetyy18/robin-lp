@@ -2354,7 +2354,7 @@ class WorkflowManager:
         if not result_path.is_file():
             raise WorkflowError(f"amendment result is missing: {result_path}")
         result = _load_json(result_path)
-        outcome = self._validate_amendment_result(result, amendment_id)
+        outcome = self._validate_amendment_result(result, amendment_id, record=record)
         self._validate_impact_resolutions(
             record,
             cast(list[str], result["resolved_task_impacts"]),
@@ -2551,7 +2551,12 @@ class WorkflowManager:
                     + ", ".join(missing_resolutions)
                 )
 
-    def _validate_amendment_result(self, result: Mapping[str, Any], amendment_id: str) -> str:
+    def _validate_amendment_result(
+        self,
+        result: Mapping[str, Any],
+        amendment_id: str,
+        record: AmendmentRecord | None = None,
+    ) -> str:
         _validate_object_keys(
             result,
             required={
@@ -2626,8 +2631,15 @@ class WorkflowManager:
             affected_id = item["task_id"]
             if not isinstance(affected_id, str) or not TASK_PATTERN.fullmatch(affected_id):
                 raise WorkflowError(f"invalid affected task ID {affected_id!r}")
-            if affected_id not in self.load_config()["tasks"]:
+            config_root = Path(record.worktree) if record is not None else self.repo
+            if affected_id not in self.load_config(config_root)["tasks"]:
                 raise WorkflowError(f"affected task does not exist: {affected_id}")
+            if record is not None and affected_id in record.task_ids:
+                raise WorkflowError(
+                    f"affected task {affected_id} is also a target of this amendment; "
+                    f"raise the impact on a sibling task instead and record any open "
+                    f"impact this amendment repairs in resolved_task_impacts"
+                )
             impact_id = item["impact_id"]
             if (
                 not isinstance(impact_id, str)

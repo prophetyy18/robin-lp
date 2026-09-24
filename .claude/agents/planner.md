@@ -94,6 +94,20 @@ fail-closed. Write only `.workflow/amendment-result.json`, validated against
 task, change only its `superseded_by` field. Do not edit its contract, dependencies,
 recorded state, attempt, commits, evidence or review record. Verify the successor declares
 `replaces`, depends on the predecessor, is not itself retired, covers each open impact,
+
+### Self-impact guard for CONTRACT amendments
+
+When you write `affected_existing_tasks` for a CONTRACT or SPEC amendment, every
+entry's `task_id` MUST be a task that the amendment is **not** targeting. The
+target tasks are the ones in the controller-supplied `task_ids` argument; the
+`affected_existing_tasks` array is for downstream or sibling tasks whose contract
+or state this amendment leaves inconsistent with the new world. A target task
+that is also listed as affected creates a self-impact that, once the amendment is
+APPROVED, becomes an open impact no future amendment can close (it would need a
+new self-impact for the same task). Use `resolved_task_impacts` to close any
+existing open impact that this amendment repairs, and keep `affected_existing_tasks`
+empty (or limited to truly affected non-target tasks) when the change only targets
+the listed tasks.
 and that every other PLANNED direct consumer was already re-pointed. Resolve the exact
 impact IDs the retirement closes. If any condition is missing, return `BLOCKED`; do not
 repair other contracts inside the retirement amendment.

@@ -2956,3 +2956,131 @@ def test_review_pass_with_non_blocking_unknown_rejected(tmp_path: Path) -> None:
     _write_json(review_worktree / ".workflow" / "review-result.json", handoff)
     with pytest.raises(WorkflowError, match="PASS contradicts"):
         manager.finish_review("T001")
+
+
+# ---------------------------------------------------------------------------
+# Self-impact guard for CONTRACT amendments
+# ---------------------------------------------------------------------------
+# A CONTRACT amendment that lists a target task in affected_existing_tasks
+# creates an open impact no future amendment can close, because the amendment
+# that would close it is itself the source. The controller must refuse the
+# combination at finish-amendment so the planner does not silently create the
+# dead-end impact.
+
+
+def _driver_for_contract_self_impact(tmp_path: Path):
+    """Build a PLANNED task T001 and return the controller for an amendment."""
+    repo, _ = _make_repo(tmp_path)
+    manager = WorkflowManager(repo, worktree_root=tmp_path / "worktrees")
+    _make_future_task_planned(repo, manager)
+    return repo, manager
+
+
+def test_finish_amendment_rejects_self_target_impact(tmp_path: Path) -> None:
+    """affected_existing_tasks.task_id == amendment target must be refused."""
+    repo, manager = _driver_for_contract_self_impact(tmp_path)
+    prepared = manager.prepare_amendment(
+        task_ids=["T001"],
+        layer="CONTRACT",
+        summary="x",
+        owner_direction="x",
+    )
+    worktree = Path(str(prepared["worktree"]))
+    handoff = {
+        "amendment_id": "A0001",
+        "outcome": "AMENDMENT_READY",
+        "summary": "x",
+        "rationale": "x",
+        "unresolved_questions": [],
+        "impact_assessment": {
+            "intent": "no change",
+            "specification": "no change",
+            "contracts": "no change",
+            "dependencies": "no change",
+            "implementation": "no change",
+            "data": "no change",
+            "operations": "no change",
+            "security": "no change",
+            "verification": "no change",
+        },
+        "affected_existing_tasks": [
+            {
+                "impact_id": "A0001:T001:self-impact",
+                "task_id": "T001",  # ← same as the target task
+                "reason": "r",
+                "categories": ["CONTRACT"],
+                "required_disposition": "d",
+            }
+        ],
+        "resolved_task_impacts": [],
+    }
+    _write_json(worktree / ".workflow" / "amendment-result.json", handoff)
+    with pytest.raises(WorkflowError, match="also a target of this amendment"):
+        manager.finish_amendment("A0001")
+
+
+def test_finish_amendment_accepts_sibling_impact(tmp_path: Path) -> None:
+    """affected_existing_tasks on a non-target sibling task is fine."""
+    repo, manager = _driver_for_contract_self_impact(tmp_path)
+    prepared = manager.prepare_amendment(
+        task_ids=["T001"],
+        layer="CONTRACT",
+        summary="x",
+        owner_direction="x",
+    )
+    worktree = Path(str(prepared["worktree"]))
+    # Add a sibling PLANNED task T002 to the worktree branch so it is visible
+    # to the controller's affected-task existence check. The main checkout
+    # does not see T002 because the worktree has its own branch.
+    config = manager.load_config(worktree)
+    t002_path = worktree / "todo" / "phases" / "P00" / "T002.md"
+    t002_path.parent.mkdir(parents=True, exist_ok=True)
+    t002_path.write_text(
+        "# T002\n\n## Dependencies\n\nT000.\n\n## Outcome\n\nO.\n\n## Deliverables\n\nd.\n\n## Acceptance\n\na.\n\n## Must not\n\nm.\n\n## References\n\nr.\n",
+        encoding="utf-8",
+    )
+    config["tasks"]["T002"] = {
+        "phase": "P00",
+        "depends_on": ["T000"],
+        "task_file": "todo/phases/P00/T002.md",
+        "attempt": 0,
+        "base_commit": None,
+        "candidate_commit": None,
+        "approved_commit": None,
+        "latest_review": None,
+        **_decompose("PLANNED"),
+    }
+    _write_json(worktree / "todo" / "config.yaml", config)
+    _git(worktree, "add", "todo/config.yaml", "todo/phases/P00/T002.md")
+    _git(worktree, "commit", "-m", "test fixture: add sibling T002")
+    handoff = {
+        "amendment_id": "A0001",
+        "outcome": "AMENDMENT_READY",
+        "summary": "x",
+        "rationale": "x",
+        "unresolved_questions": [],
+        "impact_assessment": {
+            "intent": "no change",
+            "specification": "no change",
+            "contracts": "no change",
+            "dependencies": "no change",
+            "implementation": "no change",
+            "data": "no change",
+            "operations": "no change",
+            "security": "no change",
+            "verification": "no change",
+        },
+        "affected_existing_tasks": [
+            {
+                "impact_id": "A0001:T002:sibling-impact",
+                "task_id": "T002",
+                "reason": "r",
+                "categories": ["CONTRACT"],
+                "required_disposition": "d",
+            }
+        ],
+        "resolved_task_impacts": [],
+    }
+    _write_json(worktree / ".workflow" / "amendment-result.json", handoff)
+    state = manager.finish_amendment("A0001")
+    assert state.status == "AWAITING_REVIEW"
