@@ -943,7 +943,8 @@
         "T025",
         "T072",
         "T080",
-        "T109"
+        "T109",
+        "T112"
       ],
       "task_file": "todo/phases/P08-operations-and-web/T084.md",
       "attempt": 0,

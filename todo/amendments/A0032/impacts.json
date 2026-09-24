@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0032",
+  "layer": "CONTRACT",
+  "raised": [],
+  "resolves": [
+    "A0026:T084:repoint-web-provenance-to-t112-when-approved"
+  ]
+}
