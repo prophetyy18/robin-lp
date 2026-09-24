@@ -1,0 +1,10 @@
+{
+  "amendment_id": "A0041",
+  "task_ids": [
+    "T088"
+  ],
+  "layer": "CONTRACT",
+  "target_status": "PLANNED",
+  "summary": "rep T088 web backtest result evidence reference from T109 to T112",
+  "owner_direction": "T088 contract asserts current-evidence reference: T109 manifest/ReplayFrame/cursor/simulation evidence for displaying backtest result. T088 is an indirect consumer of T109 (via T084 web provenance and T110 replay). T112 replaces T109 as the current product-run evidence source per A0026 impact A0026:T088:repoint-web-backtest-result-to-t112-when-approved. Repair: edit ONLY todo/phases/P08-operations-and-web/T088.md to retarget current-evidence references from T109 to T112 manifest and paired simulation evidence; preserve T109 as historical read-only predecessor. Do NOT modify todo/config.yaml — T088.depends_on stays [T084, T110]; T112 is already reachable through T084 (A0032) and T110 (A0035). No Must-not / safety / execution / signer change. CRITICAL: in resolved_task_impacts list the EXACT A0026-prefixed impact ID 'A0026:T088:repoint-web-backtest-result-to-t112-when-approved'. Leave affected_existing_tasks EMPTY."
+}

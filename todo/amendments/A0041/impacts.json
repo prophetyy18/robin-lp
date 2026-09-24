@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0041",
+  "layer": "CONTRACT",
+  "raised": [],
+  "resolves": [
+    "A0026:T088:repoint-web-backtest-result-to-t112-when-approved"
+  ]
+}
