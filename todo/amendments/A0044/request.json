@@ -1,0 +1,10 @@
+{
+  "amendment_id": "A0044",
+  "task_ids": [
+    "T111"
+  ],
+  "layer": "CONTRACT",
+  "target_status": "PLANNED",
+  "summary": "rep T111 approved-consumer adapter evidence reference from T109 to T112",
+  "owner_direction": "T111 contract asserts current-evidence reference: T109 manifest + T100 partition references via validated adapter for T101/T102/T106 consumers. T111 is an indirect consumer of T109 (via T110, which already binds T112 through A0035). T112 replaces T109 as the current product-run evidence source per A0026 impact A0026:T111:repoint-to-t112-when-approved. Repair: edit ONLY todo/phases/P06-backtesting-and-strategy/T111.md to retarget current-evidence references from T109 to T112 manifest and paired simulation-evidence; preserve T109 as historical read-only predecessor pending the SUPERSEDE amendment (A0040). Do NOT modify todo/config.yaml — T111.depends_on stays [T101, T102, T106, T110]; T112 is reachable through T110 (A0035). No Must-not / safety / execution / signer change. CRITICAL: in resolved_task_impacts list the EXACT A0026-prefixed impact ID 'A0026:T111:repoint-to-t112-when-approved'. Leave affected_existing_tasks EMPTY."
+}

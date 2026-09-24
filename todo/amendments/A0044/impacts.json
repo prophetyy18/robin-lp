@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0044",
+  "layer": "CONTRACT",
+  "raised": [],
+  "resolves": [
+    "A0026:T111:repoint-to-t112-when-approved"
+  ]
+}
