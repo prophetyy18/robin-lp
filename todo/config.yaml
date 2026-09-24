@@ -864,7 +864,6 @@
         "T025",
         "T027",
         "T107",
-        "T109",
         "T112"
       ],
       "task_file": "todo/phases/P07-risk-and-paper/T073.md",
@@ -943,7 +942,6 @@
         "T025",
         "T072",
         "T080",
-        "T109",
         "T112"
       ],
       "task_file": "todo/phases/P08-operations-and-web/T084.md",
@@ -1277,7 +1275,6 @@
         "T066",
         "T068",
         "T106",
-        "T109",
         "T112"
       ],
       "replaces": [
@@ -1297,7 +1294,6 @@
       "depends_on": [
         "T067",
         "T068",
-        "T109",
         "T112"
       ],
       "replaces": [
@@ -1345,7 +1341,6 @@
         "T061",
         "T100",
         "T104",
-        "T109",
         "T112"
       ],
       "task_file": "todo/phases/P06-backtesting-and-strategy/T110.md",

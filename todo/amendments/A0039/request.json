@@ -1,0 +1,14 @@
+{
+  "amendment_id": "A0039",
+  "task_ids": [
+    "T073",
+    "T084",
+    "T107",
+    "T108",
+    "T110"
+  ],
+  "layer": "CONTRACT",
+  "target_status": "PLANNED",
+  "summary": "cleanup T109 from direct consumer depends_on lists",
+  "owner_direction": "T073, T084, T107, T108, T110 each carry T109 in their config.yaml depends_on because prior CONTRACT amendments (A0030, A0032-A0035) only added T112 without removing T109. Their contracts already demote T109 to historical read-only predecessor; config.yaml depends_on should match. For each: edit ONLY todo/config.yaml so the depends_on list drops T109 but keeps the other entries plus T112. Do NOT modify any contract file. Do NOT modify any other task record. Do NOT touch top-level state fields. The five A0026-prefixed impacts on these tasks are ALREADY CLOSED by A0030/A0032-A0035 — do NOT list them in resolved_task_impacts (controller would reject resolved of an impact that is not currently open). Leave resolved_task_impacts EMPTY. Leave affected_existing_tasks EMPTY."
+}

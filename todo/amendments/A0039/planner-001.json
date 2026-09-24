@@ -1,0 +1,20 @@
+{
+  "amendment_id": "A0039",
+  "outcome": "AMENDMENT_READY",
+  "summary": "Config-only bookkeeping: for each of the five named target tasks (T073, T084, T107, T108, T110), removed T109 from the depends_on list in todo/config.yaml while keeping every other existing entry plus T112. No contract file, no intent/spec, no top-level state, and no other task record was touched.",
+  "rationale": "Prior CONTRACT amendments A0030 and A0032-A0035 demoted T109 to a historical read-only predecessor inside each of these five contracts (T073, T084, T107, T108, T110) and added T112 as the current evidence anchor, but those amendments only added T112 and did not retract T109 from the config.yaml dependency graph. The remaining direct T109 edges were left behind in the machine-readable state, which contradicts the contracted reality (T109 carries lifecycle DELIVERED with approved_commit c79e4c8 and is the predecessor T112 replaces). A0039 closes that bookkeeping gap by deleting only the T109 edges those prior amendments already retired inside the contracts, keeping T112 in place, and leaving the rest of each depends_on list byte-identical. Because the five named contracts were already updated, this amendment does not need to re-author contract text - it only re-aligns the controller-visible dependency graph with the contracts. Per Owner direction and the controller's drift check, only todo/config.yaml may change in this amendment; no contract files are in scope.",
+  "unresolved_questions": [],
+  "impact_assessment": {
+    "intent": "No change. Project goals in docs/intent/PROJECT_GOALS.md are not modified; the targets remain the same five T109-consuming contracts.",
+    "specification": "No change. docs/spec/* documents are not modified; the running spec_revision (v1-2026-09-23-a0026-run-evidence-cutover) remains in force and intent_revision (v1-2026-2026-09-21-historical-and-run-replay) is unchanged.",
+    "contracts": "No contract file is edited. Each of the five target contracts already demoted T109 to a historical read-only predecessor and pointed current evidence at T112 under A0030/A0032-A0035; A0039 only aligns the controller state with that existing contract text, which is the explicit purpose of this amendment and matches Owner direction.",
+    "dependencies": "Exactly the five edges recorded in the controller request are removed: T073->T109, T084->T109, T107->T109, T108->T109, T110->T109. Every other depends_on entry is preserved verbatim, including T112. The transitive graph retains T112->T109 (T112 still depends on T109) and T109's own depends_on/replaces are untouched. No new edge is introduced. Edits are confined to todo/config.yaml; the rest of the dependency graph is byte-identical.",
+    "implementation": "No implementation or tests are added, removed, or changed. src/*, tests/*, and docs/implement/* are untouched.",
+    "data": "No persisted data or artifact is created, mutated, or deleted. No raw data, audit event, or backtest/paper artifact is affected.",
+    "operations": "No process, signer, RPC endpoint, scheduler, or runtime model changes. agent_runtime (provider, model, context_window_tokens, allow_model_fallback) is untouched.",
+    "security": "No security boundary changes. T109's approved_commit and review record remain authoritative historical evidence; security, signing, key handling, and permissions are unchanged.",
+    "verification": "No new check, gate, or acceptance criterion is added. Existing task-specific checks plus pytest/Ruff/mypy continue to bind the unchanged contracts. The controller's finish-amendment drift check will verify the recorded depends_on deltas against this amendment's requested edits."
+  },
+  "affected_existing_tasks": [],
+  "resolved_task_impacts": []
+}
