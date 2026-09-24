@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0034",
+  "layer": "CONTRACT",
+  "raised": [],
+  "resolves": [
+    "A0026:T108:authoring-guide-current-evidence"
+  ]
+}

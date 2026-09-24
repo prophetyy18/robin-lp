@@ -1,0 +1,10 @@
+{
+  "amendment_id": "A0034",
+  "task_ids": [
+    "T108"
+  ],
+  "layer": "CONTRACT",
+  "target_status": "PLANNED",
+  "summary": "rep T108 authoring guide evidence reference from T109 to T112",
+  "owner_direction": "T108 contract asserts current-evidence reference: T109 manifest at registry-bound publication boundary. T112 replaces T109 as the current product-run evidence source per A0026 impact A0026:T108:authoring-guide-current-evidence. Repair: add T112 to T108 dependencies, change current-evidence reference language from T109 to T112 manifest and paired simulation-evidence; preserve T109 as historical read-only predecessor pending the SUPERSEDE amendment. No Must-not / safety / execution / signer change. The depends_on list in todo/config.yaml must also be extended. CRITICAL: in resolved_task_impacts you MUST list the EXACT A0026-prefixed impact ID 'A0026:T108:authoring-guide-current-evidence', NOT a freshly minted A0034-prefixed ID. Leave affected_existing_tasks EMPTY."
+}
