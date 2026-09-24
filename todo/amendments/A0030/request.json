@@ -1,0 +1,10 @@
+{
+  "amendment_id": "A0030",
+  "task_ids": [
+    "T073"
+  ],
+  "layer": "CONTRACT",
+  "target_status": "PLANNED",
+  "summary": "rep T073 pre-paper evidence reference from T109 to T112",
+  "owner_direction": "T073 contract asserts current-evidence reference: T109 manifest/report/simulation-evidence checksums. T112 replaces T109 as the current product-run evidence source per A0026 impact A0026:T073:prepaper-current-evidence. Repair: add T112 to T073 dependencies, change current-evidence reference language from T109 to T112 manifest/evidence. Preserve historical T109 references as read-only. No Must-not, no safety, no execution, no signer change. CRITICAL: in resolved_task_impacts you MUST list the EXACT A0026-prefixed impact ID 'A0026:T073:prepaper-current-evidence', not a new A0030-prefixed ID. The amendment is repairing the existing A0026 impact."
+}
