@@ -1,0 +1,9 @@
+{
+  "amendment_id": "A0036",
+  "base_commit": "9c2c4c8dc8fba4a3584a4912138b9bc38ca08893",
+  "candidate_commit": "d4ae0f3def063cc47031b3933be0f4afc9116654",
+  "verdict": "PASS",
+  "summary": "A0036 is a CONTRACT-layer, PLANNED-target amendment that retargets T087's current-evidence references from T109 to T112 manifest and paired simulation-evidence, preserving T109 as a historical read-only predecessor. Verified: T087.depends_on in todo/config.yaml remains [T068, T084, T110] (byte-identical); the T087.md Dependencies section stays 'T068, T084, T110' (no T112 added); the Must-not block is byte-identical (no diff hunk touches it); affected_existing_tasks is empty; resolved_task_impacts is exactly ['A0026:T087:repoint-web-runs-page-to-t112-when-approved'] (A0026-prefixed, not freshly minted); the candidate diff is limited to the three A0036 lane files (request.json, impacts.json, planner-001.json) plus todo/phases/P08-operations-and-web/T087.md, with no todo/config.yaml, Intent, Spec, ADR, tools/workflow, .claude, todo/schemas, plan-structure, or other contract changes; the indirect T112 path through T084.depends_on (which already includes T112 per A0032) and T110.depends_on (which already includes T112 per A0035) is in place, so the A0026 cutover requirement for T087 is satisfied without altering depends_on. Deliverables/Acceptance/References now name T112 as the current registry-bound source reached indirectly through T084 and T110, label pre-T112 T109/T105/T063 manifests and pre-T112 successful runs as historical, retain T109 as a historical read-only predecessor, and add the closing sentence recording T112 as current and T109 as predecessor. No implementation, no workflow-state change, no weakening of Must-not/safety/execution/signer/risk/paper-promotion/credential clauses.",
+  "required_changes": [],
+  "unknowns": []
+}
