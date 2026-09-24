@@ -1,0 +1,8 @@
+{
+  "amendment_id": "A0043",
+  "layer": "CONTRACT",
+  "raised": [],
+  "resolves": [
+    "A0026:T096:final-matrix-current-evidence"
+  ]
+}

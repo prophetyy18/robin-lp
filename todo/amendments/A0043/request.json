@@ -1,0 +1,10 @@
+{
+  "amendment_id": "A0043",
+  "task_ids": [
+    "T096"
+  ],
+  "layer": "CONTRACT",
+  "target_status": "PLANNED",
+  "summary": "rep T096 final matrix evidence reference from T109 to T112",
+  "owner_direction": "T096 contract asserts current-evidence reference: T109 canonical-dataset manifest/report/evidence as V1 completion evidence. T096 is an indirect consumer of T109 (via T073, T087, T088, T108, T110, T111 — T073/T087/T088/T108 already repointed to T112 through A0030/A0036/A0041/A0034; T110/T111 will follow). T112 replaces T109 as the current product-run evidence source per A0026 impact A0026:T096:final-matrix-current-evidence. Repair: edit ONLY todo/phases/P09-signer-testnet-and-live/T096.md to retarget current-evidence references from T109 to T112 manifest and paired simulation-evidence; preserve T109 as historical read-only predecessor pending the SUPERSEDE amendment (already recorded by A0040). Do NOT modify todo/config.yaml — T096.depends_on stays unchanged; T112 is reachable through T073 (A0030), T087 (A0036), T088 (A0041), T108 (A0034). No Must-not / safety / execution / signer change. CRITICAL: in resolved_task_impacts list the EXACT A0026-prefixed impact ID 'A0026:T096:final-matrix-current-evidence'. Leave affected_existing_tasks EMPTY."
+}
