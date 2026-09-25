@@ -1,0 +1,20 @@
+{
+  "amendment_id": "A0047",
+  "outcome": "AMENDMENT_READY",
+  "summary": "Removed T109 from the Dependencies section body of T084, T107, T108 and T110 so each contract matches the post-A0039 todo/config.yaml depends_on lists. T109 remains present in each contract's Acceptance, Must-not and References text where it documents the historical read-only predecessor relationship to T112. No other contract fields, no other tasks, and no governance surfaces were touched.",
+  "rationale": "The amendment-request owner direction records that A0039 had already aligned todo/config.yaml so that T084, T107, T108 and T110 no longer list T109 in their machine-readable depends_on arrays, while T112 is the current registry-bound source. The four target contract documents still listed T109 in their human-readable ## Dependencies body. Since the Dependencies section enumerates current dependencies, leaving T109 there misled a reader into believing T109 was still a current dependency. The accepted repair is to drop T109 from that one body line in each contract and leave every other T109 mention (Acceptance, Must-not, References) untouched as legitimate historical references that describe the predecessor relationship and the historical-path-unreachable evidence.",
+  "unresolved_questions": [],
+  "impact_assessment": {
+    "intent": "Not applicable. docs/intent/PROJECT_GOALS.md is unchanged. The amendment only aligns contract dependencies body text with the post-A0039 config; the product intent regarding T109 as historical read-only predecessor remains intact.",
+    "specification": "Not applicable. No file under docs/spec/ was edited. The contracts continue to name T112 as the current registry-bound source of manifest, paired simulation-evidence, and dataset binding. No spec rule about T109 vs T112 changes.",
+    "contracts": "Applied. The ## Dependencies body line in T084.md, T107.md, T108.md and T110.md was edited to drop T109. Each body now matches the corresponding todo/config.yaml depends_on list. All other sections of each contract — Outcome, Deliverables, Replacement and migration, Acceptance, Must not, References — were left exactly as recorded; every T109 mention outside the Dependencies body remains as a legitimate historical reference.",
+    "dependencies": "Applied. For each target task, the dependencies enumerated in the contract body now equal the dependencies enumerated in todo/config.yaml. No cross-task dependency graph changes, no producer/consumer rerouting, no phase entry-condition changes. T109 is no longer listed as a current dependency for any of the four tasks.",
+    "implementation": "Not applicable. No implementation, code or test was created or modified. The amendment is contract-only and adds no new business logic, test or fixture.",
+    "data": "Not applicable. No data, artifact, manifest, evidence, ledger, snapshot or persisted file is created, migrated or rewritten. No historical artifact is reinterpreted.",
+    "operations": "Not applicable. No process, command, signer, scheduler, deployment or runbook change. No operational authority or phase transition is altered.",
+    "security": "Not applicable. The amendment removes a current-dependency declaration only. It does not touch signer, keystore, password, secret, signing authority, risk authority, paper/live permission, T094 or any security boundary.",
+    "verification": "Not applicable to the amendment itself; the contract acceptance clauses for each of the four tasks remain the verification gates for the future implementation tasks. No test was skipped, weakened, deleted or fabricated. No formatter, lint or type-checker run is performed as part of this amendment. Independent reviewer verification of the candidate commit against the four amended contracts remains the acceptance gate."
+  },
+  "affected_existing_tasks": [],
+  "resolved_task_impacts": []
+}

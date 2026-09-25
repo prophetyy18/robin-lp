@@ -1,0 +1,13 @@
+{
+  "amendment_id": "A0047",
+  "task_ids": [
+    "T084",
+    "T107",
+    "T108",
+    "T110"
+  ],
+  "layer": "CONTRACT",
+  "target_status": "PLANNED",
+  "summary": "remove T109 from T084/T107/T108/T110 Dependencies sections",
+  "owner_direction": "T084.md line 8 Dependencies reads 'T025, T072, T080, T109, T112'. T107.md line 8 Dependencies reads 'T065, T066, T068, T106, T109, T112'. T108.md line 8 Dependencies reads 'T067, T068, T109, T112'. T110.md line 8 Dependencies reads 'T040, T041, T052, T061, T100, T104, T109, T112'. All four carry T109 in their Dependencies section but their config.yaml depends_on lists (after A0039 cleanup) do not contain T109. The Dependencies section lists CURRENT dependencies; T109 is the historical read-only predecessor only and must not appear here. Repair: edit ONLY the four contracts, changing each Dependencies body to drop T109. T084: 'T025, T072, T080, T112'. T107: 'T065, T066, T068, T106, T112'. T108: 'T067, T068, T112'. T110: 'T040, T041, T052, T061, T100, T104, T112'. Preserve all other T109 mentions in each contract text (Acceptance / References sections — legitimate historical mentions). Do NOT modify todo/config.yaml (it is already correct after A0039). No Must-not / safety / execution / signer change. The A0026-prefixed impacts for these four tasks are already closed by A0032-A0035; do not list them in resolved_task_impacts. Leave affected_existing_tasks EMPTY."
+}
