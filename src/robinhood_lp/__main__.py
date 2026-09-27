@@ -33,6 +33,7 @@ if TYPE_CHECKING:
         DatasetResolver,
         EventSource,
         RunRequest,
+        RunStateStore,
         UnknownDatasetVersionError,
     )
 
@@ -742,22 +743,28 @@ def _validated_budget_source(value: str) -> RemainingBudgetSource:
 
 
 def _run_backtest(args: argparse.Namespace) -> int:
-    """Drive the T069 product-level backtest run lifecycle.
+    """Drive the T113 product backtest use-case through the CLI surface.
 
-    The subcommand supports four operations: ``start``, ``list``,
-    ``observe`` and ``cancel``. Every operation reads or writes
-    the durable ``RunStateStore`` under ``--runs-root``; no Web
-    process is required to start, observe or cancel a run.
+    The subcommand supports five operations: ``start``, ``resume``,
+    ``list``, ``observe`` and ``cancel``. ``start`` and ``resume``
+    route through the T113 application use case
+    (:class:`robinhood_lp.application.backtest.BacktestUseCase`),
+    which composes the approved T112 entry path with the durable
+    T069 ``RunStateStore``. The CLI never reaches the predecessor
+    T109 writer (``BacktestOrchestrator.submit``); every current
+    publication flows through the T113 boundary.
 
-    The subcommand is intentionally narrow: it composes the
-    :class:`BacktestOrchestrator` (T069) with a CLI-supplied
-    dataset resolver and event source. The CLI does not wire a
-    Web session; the lifecycle is owned by the on-disk store.
+    ``list`` / ``observe`` / ``cancel`` read or write the durable
+    store directly because they do not publish a current
+    artifact; the operator surfaces a SUCCEEDED / FAILED /
+    CANCELLED record through them.
     """
     try:
+        from robinhood_lp.application import BacktestUseCaseError as _AppError
+        from robinhood_lp.application.backtest import (
+            BacktestResult as _BacktestResult,
+        )
         from robinhood_lp.orchestrator import (
-            BacktestOrchestrator,
-            BacktestRunError,
             InvalidRunRequestError,
             RunRecord,
             RunState,
@@ -800,7 +807,7 @@ def _run_backtest(args: argparse.Namespace) -> int:
         # Build a terminal record and write it. The orchestrator's
         # full execution path is not exercised here because the
         # CLI cancel does not hold the cancel token the in-flight
-        # orchestrator is polling; the next ``resume`` invocation
+        # use case is polling; the next ``resume`` invocation
         # will observe the terminal record.
         # A cancelled run publishes no manifest, no report and no
         # simulation evidence, so those publication fields stay
@@ -828,30 +835,33 @@ def _run_backtest(args: argparse.Namespace) -> int:
         store.write(cancelled)
         sys.stdout.write(json.dumps(cancelled.to_dict(), sort_keys=True) + "\n")
         return 0
+    # T113 cutover: ``start`` and ``resume`` route through the
+    # application use case; the CLI does not call
+    # ``BacktestOrchestrator.submit`` (the T109 writer). The
+    # default composition builds the T112 dataset / partition /
+    # event-source stubs that fail closed when no real adapters
+    # are supplied, so an operator-driven ``start`` without a
+    # registered dataset / real replay source is recorded as
+    # ``FAILED`` with the named ``T113_*`` reason and publishes
+    # no manifest.
+    application = _build_cli_application(args, store=store)
     if args.backtest_command == "resume":
-        # The CLI ``resume`` is the restart-while-in-flight
-        # surface. The orchestrator's resume_in_flight re-executes
-        # every RUNNING record under the store; the CLI composes
-        # the same default event source + dataset resolver the
-        # ``start`` subcommand uses.
-        resolver, event_source = _build_cli_resolver_and_source(args)
-        orchestrator = BacktestOrchestrator(
-            store=store,
-            dataset_resolver=resolver,
-            event_source=event_source,
-        )
-        resumed = orchestrator.resume_in_flight()
+        try:
+            resumed = application.resume()
+        except _AppError as exc:
+            sys.stderr.write(f"backtest resume: {type(exc).__name__}: {exc}\n")
+            return 1
         payload = {
             "runs_root": str(runs_root),
-            "resumed": [record.run_id for record in resumed],
+            "resumed": [result.run_id for result in resumed],
         }
         sys.stdout.write(json.dumps(payload, sort_keys=True) + "\n")
         return 0
     if args.backtest_command != "start":
         sys.stderr.write(f"backtest: unknown sub-command {args.backtest_command!r}\n")
         return 2
-    # ``start``: load the request, build the resolver / event
-    # source, run the lifecycle, print the terminal record.
+    # ``start``: load the request, run the T113 lifecycle, print
+    # the typed ``BacktestResult`` the use case returns.
     request_path: Path = args.request
     if not request_path.exists():
         sys.stderr.write(f"backtest start: request file not found: {request_path}\n")
@@ -869,19 +879,13 @@ def _run_backtest(args: argparse.Namespace) -> int:
     except InvalidRunRequestError as exc:
         sys.stderr.write(f"backtest start: invalid request: {exc}\n")
         return 1
-    resolver, event_source = _build_cli_resolver_and_source(args)
-    orchestrator = BacktestOrchestrator(
-        store=store,
-        dataset_resolver=resolver,
-        event_source=event_source,
-    )
     try:
-        record = orchestrator.submit(request)
-    except BacktestRunError as exc:
+        result: _BacktestResult = application.start(request)
+    except _AppError as exc:
         sys.stderr.write(f"backtest start: {type(exc).__name__}: {exc}\n")
         return 1
-    sys.stdout.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
-    if record.state == RunState.SUCCEEDED:
+    sys.stdout.write(json.dumps(result.to_dict(), sort_keys=True) + "\n")
+    if result.state == RunState.SUCCEEDED:
         return 0
     return 1
 
@@ -1039,9 +1043,125 @@ def _build_cli_resolver_and_source(
             # published.
             return []
 
-    resolver = _CLIDatasetResolver(args.dataset_registry)
+    registry_path = getattr(args, "dataset_registry", None)
+    resolver = _CLIDatasetResolver(registry_path)
     event_source = _CLIEventSource()
     return resolver, event_source
+
+
+def _build_cli_application(args: argparse.Namespace, *, store: RunStateStore) -> Any:
+    """Build the wired :class:`BacktestUseCase` the CLI drives.
+
+    The function is the T113 CLI composition root. It reuses the
+    legacy dataset / event-source builders so an operator who
+    supplies ``--dataset-registry`` gets a coverage registry the
+    T112 entry path can resolve against; it then layers the
+    three T112-specific adapter stubs on top of those.
+
+    The default T112 adapter stubs (no real partitions
+    registered, no real T100 replay source) refuse every
+    submission with the dedicated T112 / T113 reason codes, so
+    a CLI invocation with no real adapters fails closed with
+    the named reason and publishes no successful current
+    artifact. Tests inject real T100 partitions through the
+    composition root, not through the CLI flags.
+    """
+    from robinhood_lp.application.backtest import build_default_application
+    from robinhood_lp.orchestrator.t112 import (
+        FixedEmptyEventSourceError,
+        T100PartitionResolutionError,
+    )
+
+    dataset_resolver, _ = _build_cli_resolver_and_source(args)
+
+    # T112-specific adapters. The CLI ships fail-closed stubs
+    # so the public boundary always refuses a CLI invocation
+    # that is not paired with real T100 partitions and a real
+    # T040-replay event source. The contract binds every failure
+    # to surface a named reason code; the stubs do not return a
+    # successful artifact under any input.
+    class _CLIFailingPartitionResolver:
+        """The T112 partition resolver stub the CLI ships by default.
+
+        The stub refuses every call with the dedicated
+        :class:`T100PartitionResolutionError` so a CLI
+        invocation without a real T100 partition registry fails
+        closed at the resolver boundary. Operators inject real
+        resolvers through the application composition root in
+        production deployments; the CLI surface does not expose a
+        registry path.
+        """
+
+        def resolve(self, *, request: Any, coverage: Any) -> Any:
+            raise T100PartitionResolutionError(
+                message=(
+                    f"dataset_version={coverage.dataset_version!r} chain_id="
+                    f"{coverage.chain_id} pool_key_id={coverage.pool_key_id!r} "
+                    f"has no registered T100 partitions; the CLI surface "
+                    f"ships fail-closed stubs and a production operator "
+                    f"must inject real adapters through the application "
+                    f"composition root"
+                )
+            )
+
+    class _CLIEmptyEventSource:
+        """The T112 event-source stub the CLI ships by default.
+
+        The stub returns the empty list and the
+        :class:`FixedEmptyEventSourceError` so a CLI invocation
+        without a real T100 replay source fails closed at the
+        event-source boundary. The T112 contract binds the
+        entry path to refuse the fixed empty event source.
+        """
+
+        def __init__(self) -> None:
+            self._empty = True
+
+        def load_events(
+            self,
+            *,
+            chain_id: int,
+            pool_key_id: str,
+            block_range_start: int,
+            block_range_end: int,
+            cancel_token: Any,
+        ) -> list[Any]:
+            raise FixedEmptyEventSourceError()
+
+    class _CLIFailingPartitionRefResolver:
+        """The T112 partition-ref resolver stub the CLI ships by default.
+
+        The stub refuses every call with a ``KeyError`` so the
+        T112 partition_ref_resolver gate fails closed for a CLI
+        invocation without a real T100 partition registry. The
+        T112 entry path treats ``KeyError`` / ``LookupError`` /
+        ``ValueError`` from the resolver as "not resolvable"
+        (see ``_RESOLVER_REJECT_EXCEPTIONS`` in
+        :mod:`robinhood_lp.reports.t112`) and surfaces the
+        dedicated ``T112_UNRESOLVABLE_PARTITION_REF`` reason.
+        """
+
+        def resolve(
+            self,
+            *,
+            chain_id: int,
+            pool_key_id: str,
+            partition_ref: str,
+        ) -> Any:
+            raise KeyError(
+                f"partition reference {partition_ref!r} is not registered "
+                f"for ({chain_id}, {pool_key_id!r}); the CLI surface ships "
+                f"fail-closed stubs and a production operator must inject "
+                f"real adapters through the application composition root"
+            )
+
+    return build_default_application(
+        runs_root=Path(args.runs_root),
+        dataset_resolver=dataset_resolver,
+        partition_resolver=_CLIFailingPartitionResolver(),
+        event_source=_CLIEmptyEventSource(),
+        partition_ref_resolver=_CLIFailingPartitionRefResolver(),
+    )
 
 
 if __name__ == "__main__":

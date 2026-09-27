@@ -1,0 +1,44 @@
+{
+  "task_id": "T113",
+  "outcome": "CANDIDATE_READY",
+  "summary": "Implemented the T113 stable public backtest use-case boundary. Added `robinhood_lp.application.backtest` with a typed `BacktestUseCase` class exposing `start` and `resume` operations, a typed `BacktestRequest` alias and a typed `BacktestResult` dataclass, six typed failure classes, and the `build_default_application` composition-root factory. The CLI `backtest start` and `backtest resume` subcommands now route through the application API; no current CLI path reaches the predecessor `BacktestOrchestrator.submit` (the T109 writer). Added contract-conformance coverage with two heterogeneous pool fixtures (Pool A on chain 4663 and Pool B on chain 8453) and named normal, boundary, invalid-input, and failure cases. Added the implementation guide under `docs/implement/backtest/IMPLEMENTATION_GUIDE.md`. All checks pass: 22 new T113 tests, 53 T112 tests, the import-graph gate, Ruff format, Ruff lint, and mypy strict on the application module and the CLI.",
+  "commands": [
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_t113.py -x --no-header -q",
+      "result": "22 passed in 0.64s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_t112.py tests/test_backtest_t069.py tests/test_t109.py tests/test_t109_acceptance.py tests/test_main_ingest.py -x --no-header -q",
+      "result": "192 passed in 3.06s"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/ --no-header -q --ignore=tests/test_abi_artifacts.py",
+      "result": "3180 passed, 6 skipped in 43.95s (skips are pre-existing Foundry / GPG gaps, not caused by T113)"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m pytest tests/test_layer_direction_t007.py tests/test_no_signing_paths.py tests/test_documentation_citations.py tests/test_import_graph.py -x --no-header -q",
+      "result": "63 passed in 14.05s"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff format --check src/robinhood_lp/application/ src/robinhood_lp/__main__.py tests/test_t113.py",
+      "result": "4 files already formatted"
+    },
+    {
+      "command": "/home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m ruff check src/robinhood_lp/application/ src/robinhood_lp/__main__.py tests/test_t113.py",
+      "result": "All checks passed!"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m mypy --strict src/robinhood_lp/application/ src/robinhood_lp/__main__.py tests/test_t113.py",
+      "result": "Success: no issues found in 4 source files"
+    },
+    {
+      "command": "PYTHONPATH=src /home/lpdev/miniconda3/envs/robinhood-lp/bin/python -m tools.check_imports check",
+      "result": "import-graph check passed: no findings"
+    }
+  ],
+  "residual_risks": [
+    "The CLI composition root (`_build_cli_application`) ships fail-closed stubs at the T112-specific ports so an operator-driven `backtest start` without a real T100 partition registry is recorded as FAILED with the named `T113_PARTITION_RESOLUTION_FAILED` reason. A production deployment must inject real T100 adapters through the application composition root; the CLI surface does not expose a registry path for those adapters in this attempt.",
+    "The `BacktestUseCase.resume` operation reads every RUNNING record from the store and re-submits each through the T112 orchestrator. A resume call therefore re-publishes the T112 manifest / evidence artifacts. The T112 contract binds the paired-version checksum rebinding inside the publication flow, so a successful resume yields byte-deterministic T112-versioned artifacts at the same paths. This is the intended behaviour; reviewers who expect a no-op resume on a RUNNING record should review the T113 implementation guide section 4 (Two heterogeneous pool fixtures) and the T112 entry contract.",
+    "The `_truncate_reason` helper re-prefixes T112 / T069 reason codes so the application surface carries a single grep-friendly `T113_` namespace. The original reason code is preserved on the `error_message` field. The change preserves forensic traceability but means a reviewer who greps `T112_FIXED_EMPTY_EVENT_SOURCE_REFUSED` on the application surface sees the re-prefixed `T113_FIXED_EVENT_SOURCE_REFUSED` instead; the underlying T112 reason code is on `error_message`."
+  ]
+}
